@@ -63,14 +63,11 @@ export function formatStep(step, detail = 'detailed') {
 }
 
 /**
- * Progress body while the turn runs: only the headline; tool calls live in the dropdown.
- * @param {{steps?: object[], elapsedMs?: number, thinkingMs?: number}} input
+ * Progress body while the turn runs: a status line only.
+ * Timings and counts live in the tool/token panels, which refresh less often.
  */
-export function buildProgressText({ steps = [], elapsedMs = 0, thinkingMs = 0 }) {
-  let line = `⏳ 正在处理… 总耗时 ${formatDuration(elapsedMs)}`;
-  if (thinkingMs > 0) line += ` · 思考耗时 ${formatDuration(thinkingMs)}`;
-  if (steps.length > 0) line += ` · ${steps.length} 个工具调用`;
-  return line;
+export function buildProgressText() {
+  return '⏳ 正在处理…';
 }
 
 /** Ordered list for the collapsible panel (newest 20 steps). */

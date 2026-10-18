@@ -263,12 +263,8 @@ export class TurnRunner {
     return text || '工具返回错误';
   }
 
-  #progressText(turn) {
-    return buildProgressText({
-      steps: turn.steps,
-      elapsedMs: Date.now() - turn.startedAt,
-      thinkingMs: turn.thinkingMs,
-    });
+  #progressText() {
+    return buildProgressText();
   }
 
   #toolPanel(turn, statusNote, force) {

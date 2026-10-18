@@ -42,7 +42,7 @@ const steps = Array.from({ length: STEP_OPTION_LIMIT + 3 }, (_, index) => ({
   error: index === STEP_OPTION_LIMIT + 1 ? 'boom' : undefined,
 }));
 const text = buildProgressText({ steps, elapsedMs: 12_000, thinkingMs: 3_000 });
-assert.equal(text, '⏳ 正在处理… 总耗时 12s · 思考耗时 3s · 23 个工具调用');
+assert.equal(text, '⏳ 正在处理…');
 
 // 5) 折叠面板列表只保留最近 20 条，包含失败原因
 const list = buildStepsMarkdown(steps, 'detailed');
