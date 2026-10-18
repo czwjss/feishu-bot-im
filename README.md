@@ -21,17 +21,30 @@
 
 ## 快速开始
 
-1. 把本仓库放到 DSH 可访问的目录，安装依赖：
+**方式 A：从 npm 安装（推荐）**
 
-   ```bash
-   pnpm install    # 或 npm install
-   ```
+在 DSH 的插件设置中安装 `@czwjss/feishu-bot-im`，或使用插件管理器：
 
-2. 在 DSH Web 的插件设置中启用 `@czwjss/feishu-bot-im`；
-3. 打开插件设置页，点「添加机器人」，用飞书扫码（或手动填写 App ID / Secret）；
+```
+@czwjss/feishu-bot-im@0.1.0
+```
+
+**方式 B：从源码启用**
+
+```bash
+git clone https://github.com/czwjss/feishu-bot-im.git
+cd feishu-bot-im
+pnpm install    # 或 npm install
+```
+
+然后在 DSH Web 的插件设置中启用本地目录。
+
+**接入飞书：**
+
+1. 打开插件设置页，点「添加机器人」；
+2. 用飞书扫码确认（或手动填写 App ID / Secret）；
+3. 扫码会自动申请所需权限（消息收发、资源上传、群信息读取等）；
 4. 在飞书私聊里发一条消息，或在群里 @机器人 开始。
-
-扫码会自动申请所需权限（消息收发、资源上传、群信息读取等）。
 
 ## 常用命令
 

@@ -1,7 +1,6 @@
 {
   "name": "@czwjss/feishu-bot-im",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "飞书机器人：DeepSeek Harness 的飞书接入插件（多机器人、扫码接入、卡片回复、上下文注入）",
   "exports": {
@@ -35,7 +34,8 @@
     "qrcode": "1.5.4"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22",
+    "dsh": ">=0.2.0"
   },
   "scripts": {
     "test": "node test/bridge.test.mjs && node test/rpc.test.mjs && node test/tool.test.mjs && node test/runtime.test.mjs && node test/context-enhancement.test.mjs && node test/injected-context.test.mjs && node test/feishu-e2e.test.mjs && node test/registration.test.mjs && node test/slash-commands.test.mjs && node test/progress.test.mjs"
@@ -44,5 +44,22 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/czwjss/feishu-bot-im.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "feishu",
+    "lark",
+    "im",
+    "bot",
+    "plugin"
+  ],
+  "homepage": "https://github.com/czwjss/feishu-bot-im#readme",
+  "bugs": {
+    "url": "https://github.com/czwjss/feishu-bot-im/issues"
   }
 }
