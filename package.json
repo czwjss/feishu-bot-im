@@ -1,0 +1,43 @@
+{
+  "name": "@czwjss/feishu-bot-im",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "飞书机器人：DeepSeek Harness 的飞书接入插件（多机器人、扫码接入、卡片回复、上下文注入）",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "src",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "1.73.0",
+    "qrcode": "1.5.4"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node test/bridge.test.mjs && node test/rpc.test.mjs && node test/tool.test.mjs && node test/runtime.test.mjs && node test/context-enhancement.test.mjs && node test/injected-context.test.mjs && node test/feishu-e2e.test.mjs && node test/registration.test.mjs && node test/slash-commands.test.mjs && node test/progress.test.mjs"
+  }
+}
