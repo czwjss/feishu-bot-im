@@ -2,6 +2,7 @@
 
 把 DeepSeek Harness 接入飞书：在聊天里派任务、看执行过程、收结果文件。
 
+[![npm](https://img.shields.io/npm/v/@czwjss/feishu-bot-im)](https://www.npmjs.com/package/@czwjss/feishu-bot-im)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](package.json)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-0.2.x-blue)](https://www.npmjs.com/package/@deepseek-ai/dsh)
