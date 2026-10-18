@@ -9,10 +9,8 @@ import { splitText } from './feishu.js';
 import { turnCard } from './cards.js';
 import { buildProgressText, buildPanelTitle, buildStepsMarkdown, buildUsageRows, buildUsageTitle, summarizeArguments } from './progress.js';
 
-/** Minimum gap between two card updates; shorter ones are coalesced. */
-const CARD_THROTTLE_MS = 1500;
-/** Tool/token panel snapshots refresh at most this often; the answer text streams faster. */
-const PANEL_REFRESH_MS = 10_000;
+/** Card body and both panels refresh together at this cadence. */
+const REFRESH_MS = 10_000;
 
 export class TurnRunner {
   #bot;
@@ -269,7 +267,7 @@ export class TurnRunner {
 
   #toolPanel(turn, statusNote, force) {
     const now = Date.now();
-    if (!force && turn.toolPanel && now - turn.toolPanelAt < PANEL_REFRESH_MS) {
+    if (!force && turn.toolPanel && now - turn.toolPanelAt < REFRESH_MS) {
       return turn.toolPanel;
     }
     const stepsMarkdown = buildStepsMarkdown(turn.steps, this.#processDetail());
@@ -301,7 +299,7 @@ export class TurnRunner {
   /** Token panel shares the 10s refresh cadence with the tool panel. */
   #usagePanel(turn, force) {
     const now = Date.now();
-    if (!force && turn.usagePanelAt && now - turn.usagePanelAt < PANEL_REFRESH_MS) {
+    if (!force && turn.usagePanelAt && now - turn.usagePanelAt < REFRESH_MS) {
       return turn.usagePanel ?? null;
     }
     const cumulative = this.#state.usageFor?.(`usage:${turn.sessionId}`) ?? null;
@@ -343,7 +341,7 @@ export class TurnRunner {
       }
     }
     if (turn.cardMessageId) {
-      if (Date.now() - (turn.cardAt ?? 0) < CARD_THROTTLE_MS) return;
+      if (Date.now() - (turn.cardAt ?? 0) < REFRESH_MS) return;
       try {
         await this.#bot.patchCard(turn.cardMessageId, this.#card(turn, body));
         this.#logEvent('card-patch', `session=${turn.sessionId} turn=${turn.turn} id=${turn.cardMessageId}`);

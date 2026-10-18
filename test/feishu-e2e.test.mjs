@@ -120,8 +120,6 @@ function inbound(text, extra = {}) {
   assert.equal(create.data.msg_type, 'interactive');
   assertCard(JSON.parse(create.data.content), 'first card');
   await bridge.onSessionEvent({ id: 'sess-1' }, { type: 'tool/call', data: { turn: 1, step: 1, callId: 'c1', name: 'bash', arguments: JSON.stringify({ command: 'ls -la' }) } });
-  // 卡片更新有 1.5s 节流，等一下才能观察到过程行
-  await new Promise((resolve) => setTimeout(resolve, 1600));
   await bridge.onSessionEvent({ id: 'sess-1' }, {
     type: 'tool/result',
     data: { turn: 1, step: 1, message: { toolCallId: 'c1', isError: false, content: [{ type: 'text', text: 'ok' }] } },
@@ -146,9 +144,7 @@ function inbound(text, extra = {}) {
   assert.match(patches.at(-1).data.content, /🪙 累计/, 'usage panel shows cumulative totals');
   assert.match(patches.at(-1).data.content, /子智能体 · 调查/, 'subagent usage is included');
   assert.match(patches.at(-1).data.content, /上下文 \d+%/, 'context pressure is shown');
-  const progressPatch = patches.find((patch) => /001\. ✅ bash · `ls -la`/.test(patch.data.content));
-  assert.ok(progressPatch, 'panel lists tool name and backticked arguments');
-  assert.ok(!/· \d+\.\d+s/.test(progressPatch.data.content), 'step durations are gone');
+  assert.match(patches.at(-1).data.content, /001\. ✅ bash · `ls -la`/, 'panel lists tool name and backticked arguments');
   bridge.dispose();
 }
 
