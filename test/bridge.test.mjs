@@ -576,6 +576,21 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
+// 13o) Web 轮次等待提问时，飞书 /stop 会说明刚才在等什么
+{
+  const { bot, bridge } = makeBridge();
+  await state.bindSession('chat:oc_ask', 'sess-ask');
+  await bridge.onSessionEvent({ id: 'sess-ask' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.handleQuestion({
+    agent: { session: { id: 'sess-ask' } },
+    questions: [{ id: 'q-ask', question: '要部署到生产吗？', options: [{ label: '是' }, { label: '否' }] }],
+  }, () => Promise.resolve('next'));
+  await bridge.handleMessage(message({ chat_id: 'oc_ask', message_id: 'om_stop', content: JSON.stringify({ text: '/stop' }) }));
+  assert.match(bot.text.at(-1).text, /已请求停止当前任务/);
+  assert.match(bot.text.at(-1).text, /刚才在等你回答：要部署到生产吗/);
+  bridge.dispose();
+}
+
 // 14) 群聊：回复机器人消息即视为被叫到
 {
   const { harness, bridge } = makeBridge();
@@ -669,4 +684,4 @@ function message(overrides = {}) {
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 34 scenarios passed');
+console.log('bridge: 35 scenarios passed');

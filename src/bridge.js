@@ -38,6 +38,7 @@ export class FeishuBridge {
   #reactionQueue = new Map();
   #feishuTurns = new Map();
   #turnOrigin = new Map();
+  #externalAsk = new Map();
   #reactionActive = new Map();
   #userNames = new Map();
   #onContext;
@@ -205,11 +206,18 @@ export class FeishuBridge {
     });
   }
 
+  /** Keep the last Web-side question/approval so /stop can tell the user what was pending. */
+  #rememberExternalAsk(sessionId, kind, text) {
+    this.#externalAsk.set(sessionId, { kind, text: String(text).slice(0, 200), at: Date.now() });
+    if (this.#externalAsk.size > 100) this.#externalAsk.delete(this.#externalAsk.keys().next().value);
+  }
+
   /** Forget a Session's pending render marks when the chat stops using it. */
   #forgetSessionOrigin(sessionId) {
     if (!sessionId) return;
     this.#feishuTurns.delete(sessionId);
     this.#turnOrigin.delete(sessionId);
+    this.#externalAsk.delete(sessionId);
   }
 
   /**
@@ -506,6 +514,7 @@ export class FeishuBridge {
       },
       saveWorkspace: (value) => this.#saveWorkspace(value),
       forgetSession: (sessionId) => this.#forgetSessionOrigin(sessionId),
+      externalAsk: (sessionId) => this.#externalAsk.get(sessionId) ?? null,
       listPresets: () => this.#listPresets(),
       modelFor: (sessionId) => this.#sessionModels.get(sessionId) ?? null,
       rememberModel: (sessionId, selection) => {
@@ -589,6 +598,7 @@ export class FeishuBridge {
     const result = await this.#turns.onSessionEvent(session, event);
     if (chatKey && event?.type === 'turn/end') {
       this.#turnOrigin.delete(session?.id);
+      this.#externalAsk.delete(session?.id);
       await this.#settleTurnReactions(chatKey, event?.data?.reason).catch(() => undefined);
     }
     return result;
@@ -661,8 +671,11 @@ export class FeishuBridge {
     const sessionId = request?.agent?.session?.id;
     const chatId = sessionId ? this.#chatFor(sessionId) : null;
     if (!chatId) return next();
-    // 绑定会话里 Web 发起的轮次：审批留在 Web，不打扰飞书。
-    if (sessionId && this.#turnOrigin.get(sessionId) === 'external') return next();
+    // 绑定会话里 Web 发起的轮次：审批留在 Web，不打扰飞书；只记下摘要供 /stop 说明。
+    if (sessionId && this.#turnOrigin.get(sessionId) === 'external') {
+      this.#rememberExternalAsk(sessionId, '审批', request.toolName ?? '工具');
+      return next();
+    }
     if (request.signal?.aborted) return 'cancelled';
     const approvalId = this.#findApprovalId(request);
     if (!approvalId) return next();
@@ -726,8 +739,11 @@ export class FeishuBridge {
     const chatId = sessionId ? this.#chatFor(sessionId) : null;
     const question = Array.isArray(request?.questions) ? request.questions[0] : null;
     if (!chatId || !question) return next();
-    // 绑定会话里 Web 发起的轮次：提问留在 Web，不打扰飞书。
-    if (sessionId && this.#turnOrigin.get(sessionId) === 'external') return next();
+    // 绑定会话里 Web 发起的轮次：提问留在 Web，不打扰飞书；只记下摘要供 /stop 说明。
+    if (sessionId && this.#turnOrigin.get(sessionId) === 'external') {
+      this.#rememberExternalAsk(sessionId, '回答', question?.question ?? question?.header ?? '一个问题');
+      return next();
+    }
     if (question.multiSelect === true) return next();
 
     const questionId = question.id ?? 'q';

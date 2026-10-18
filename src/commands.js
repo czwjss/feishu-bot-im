@@ -72,8 +72,10 @@ export async function runCommand(services, name, argument, context) {
           await bot.sendText(chatId, '当前没有可停止的会话。');
           return true;
         }
+        const ask = services.externalAsk?.(sessionId) ?? null;
         await harness.cancel(sessionId).catch((error) => log('warn', 'cancel failed', error));
-        await bot.sendText(chatId, '已请求停止当前任务。');
+        const note = ask ? `\n（刚才在等你${ask.kind}：${ask.text}）` : '';
+        await bot.sendText(chatId, `已请求停止当前任务。${note}`);
         return true;
       }
 

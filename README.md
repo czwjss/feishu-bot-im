@@ -38,7 +38,7 @@ DeepSeek Harness 的飞书 IM 插件：一个飞书聊天绑定一个 DSH 会话
 |---|---|
 | `/menu` | 卡片菜单：会话 / 工作区 / 模型 / 思考强度，改动只作用于本聊天 |
 | `/new` | 解除当前会话绑定，下一条消息新建会话 |
-| `/stop` | 停止当前轮 |
+| `/stop` | 停止当前轮；若当前等待的是 Web 端提问/审批，回复里会附上刚才在等什么 |
 | `/topic 标题` + 换行正文 | 以你的消息为根创建独立话题会话；不带参数时列出话题 |
 | `/topic-sync` | 话题内使用：生成结论并同步回主会话 |
 
@@ -115,10 +115,10 @@ DeepSeek Harness 的飞书 IM 插件：一个飞书聊天绑定一个 DSH 会话
 ## 开发与测试
 
 ```bash
-npm test   # 离线，107 条场景/断言，无需任何飞书凭据
+npm test   # 离线，108 条场景/断言，无需任何飞书凭据
 ```
 
-测试分布：bridge 34 · rpc 13 · tool 9 · runtime 10 · context 5 · injected-context 6 · feishu-e2e 7 · registration 12 · slash 4 · progress 7。
+测试分布：bridge 35 · rpc 13 · tool 9 · runtime 10 · context 5 · injected-context 6 · feishu-e2e 7 · registration 12 · slash 4 · progress 7。
 
 测试使用合成的飞书客户端与 Host 接口，不会访问真实飞书 API。
 
