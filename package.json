@@ -39,5 +39,10 @@
   },
   "scripts": {
     "test": "node test/bridge.test.mjs && node test/rpc.test.mjs && node test/tool.test.mjs && node test/runtime.test.mjs && node test/context-enhancement.test.mjs && node test/injected-context.test.mjs && node test/feishu-e2e.test.mjs && node test/registration.test.mjs && node test/slash-commands.test.mjs && node test/progress.test.mjs"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/czwjss/feishu-bot-im.git"
   }
 }
