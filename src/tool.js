@@ -1,5 +1,5 @@
 /**
- * `im_feishu_return_file` — the Feishu counterpart of `dsh-im:return-file`.
+ * `im_feishu_return_file` — send one file or image to the calling Feishu chat.
  *
  * The tool sends the file immediately through the chat bound to the calling
  * Session, so the model can describe it as sent once the call succeeds.

@@ -3,9 +3,9 @@ import { randomUUID } from 'node:crypto';
 /**
  * DSH Harness adapter for the Feishu channel.
  *
- * Every gateway call carries the in-process Peer: DSH 0.2.1 rejects an invoke or
- * stream without one (INTERNAL_UNKNOWN), which is exactly the failure the
- * upstream dsh-im 4.39.0 needed a binary patch for.
+ * Every gateway call carries an in-process Peer: DSH rejects invoke/stream
+ * calls without one (INTERNAL_UNKNOWN), so calls reuse a peer with the owner
+ * principal and no interactive features.
  */
 
 function failure(error) {

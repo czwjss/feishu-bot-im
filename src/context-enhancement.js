@@ -1,9 +1,9 @@
 /**
- * Context enhancement: a per-scope prompt preamble, modelled on dsh-im.
+ * Context enhancement: a per-scope prompt preamble for Feishu messages.
  *
  * Two independent scopes (private chat / group chat), each selects which source
- * fields to publish and an optional operator guidance. The prefix uses the same
- * tag grammar as dsh-im so a reader can parse it identically:
+ * fields to publish plus an optional operator guidance. The prefix uses a fixed
+ * tag grammar:
  *
  *   <feishu_bot_source>{"channel":"feishu",...}</feishu_bot_source>
  *
