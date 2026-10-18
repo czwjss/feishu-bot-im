@@ -43,7 +43,7 @@ DeepSeek Harness 的飞书 IM 插件：一个飞书聊天绑定一个 DSH 会话
 | `/topic-sync` | 话题内使用：生成结论并同步回主会话 |
 
 - 群内管理白名单 `access.managers`：`/new`、`/stop`、菜单调整、新会话仅名单内成员可执行，**留空 = 无人可执行**；私聊不受限制；
-- 绑定已有会话时：**Web 侧触发的轮次不会推送到飞书**；当前轮不是飞书发起时，飞书消息强制排队，不插入 Web 轮次；
+- 绑定已有会话时：**Web 侧触发的轮次不会推送到飞书**（答案卡片、审批与提问都留在 Web）；当前轮不是飞书发起时，飞书消息强制排队，不插入 Web 轮次；
 - 忙碌策略私聊/群聊各自可设：排队，或插入为补充指令。
 
 ### 上下文注入
@@ -115,10 +115,10 @@ DeepSeek Harness 的飞书 IM 插件：一个飞书聊天绑定一个 DSH 会话
 ## 开发与测试
 
 ```bash
-npm test   # 离线，106 条场景/断言，无需任何飞书凭据
+npm test   # 离线，107 条场景/断言，无需任何飞书凭据
 ```
 
-测试分布：bridge 33 · rpc 13 · tool 9 · runtime 10 · context 5 · injected-context 6 · feishu-e2e 7 · registration 12 · slash 4 · progress 7。
+测试分布：bridge 34 · rpc 13 · tool 9 · runtime 10 · context 5 · injected-context 6 · feishu-e2e 7 · registration 12 · slash 4 · progress 7。
 
 测试使用合成的飞书客户端与 Host 接口，不会访问真实飞书 API。
 

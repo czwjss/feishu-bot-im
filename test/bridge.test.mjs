@@ -555,6 +555,27 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
+// 13n) Web 轮次里的审批/提问留在 Web，不推送到绑定的飞书聊天
+{
+  const { bot, bridge } = makeBridge();
+  await state.bindSession('chat:oc_webturn', 'sess-web-turn');
+  await bridge.onSessionEvent({ id: 'sess-web-turn' }, { type: 'turn/start', data: { turn: 1 } });
+  let approvalsNext = 0;
+  await bridge.handleApproval({
+    callId: 'call-w', toolName: 'bash', signal: new AbortController().signal,
+    agent: { session: { id: 'sess-web-turn', snapshotEvents: () => [{ type: 'approval/asked', data: { id: 'ap-w', callId: 'call-w' } }] } },
+  }, () => { approvalsNext += 1; return Promise.resolve('next'); });
+  let questionsNext = 0;
+  await bridge.handleQuestion({
+    agent: { session: { id: 'sess-web-turn' } },
+    questions: [{ id: 'q-w', title: '测试问题', options: [{ label: 'A' }] }],
+  }, () => { questionsNext += 1; return Promise.resolve('next'); });
+  assert.equal(approvalsNext, 1, 'web approval falls through');
+  assert.equal(questionsNext, 1, 'web question falls through');
+  assert.equal(bot.cards.length, 0, 'nothing is pushed to Feishu');
+  bridge.dispose();
+}
+
 // 14) 群聊：回复机器人消息即视为被叫到
 {
   const { harness, bridge } = makeBridge();
@@ -648,4 +669,4 @@ function message(overrides = {}) {
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 33 scenarios passed');
+console.log('bridge: 34 scenarios passed');

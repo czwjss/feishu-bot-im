@@ -661,6 +661,8 @@ export class FeishuBridge {
     const sessionId = request?.agent?.session?.id;
     const chatId = sessionId ? this.#chatFor(sessionId) : null;
     if (!chatId) return next();
+    // 绑定会话里 Web 发起的轮次：审批留在 Web，不打扰飞书。
+    if (sessionId && this.#turnOrigin.get(sessionId) === 'external') return next();
     if (request.signal?.aborted) return 'cancelled';
     const approvalId = this.#findApprovalId(request);
     if (!approvalId) return next();
@@ -724,6 +726,8 @@ export class FeishuBridge {
     const chatId = sessionId ? this.#chatFor(sessionId) : null;
     const question = Array.isArray(request?.questions) ? request.questions[0] : null;
     if (!chatId || !question) return next();
+    // 绑定会话里 Web 发起的轮次：提问留在 Web，不打扰飞书。
+    if (sessionId && this.#turnOrigin.get(sessionId) === 'external') return next();
     if (question.multiSelect === true) return next();
 
     const questionId = question.id ?? 'q';
