@@ -74,13 +74,14 @@ export class TurnRunner {
     const chatId = chatKey.startsWith('topic:') ? chatKey.split(':')[1] : chatKey.replace(/^chat:/, '');
 
     if (event.type === 'turn/start') {
-      // 绑定到已有会话时，Web 侧触发的轮次不应往飞书推卡片。
-      if (!this.#shouldRenderTurn(sessionId)) return;
+      // 绑定到已有会话时，Web 侧触发的轮次不推卡片，但用量仍计入该 Session。
+      const render = this.#shouldRenderTurn(sessionId);
       const key = `${sessionId}:${event.data?.turn}`;
       if (this.#turns.has(key)) return;
       const turn = {
         sessionId,
         chatId,
+        silent: !render,
         topic: topic ?? null,
         turn: event.data?.turn,
         answer: '',
@@ -104,7 +105,7 @@ export class TurnRunner {
         startedAt: Date.now(),
       };
       this.#turns.set(key, turn);
-      await this.#flushTurn(turn, '⏳ 已收到，正在处理…');
+      if (!turn.silent) await this.#flushTurn(turn, '⏳ 已收到，正在处理…');
       return;
     }
 
@@ -125,6 +126,9 @@ export class TurnRunner {
     const turn = this.#turnFor(sessionId, event.data?.turn);
     if (!turn) return;
 
+    if (turn.silent && event.type !== 'assistant/message' && event.type !== 'subagent/catalog' && event.type !== 'turn/end') {
+      return;
+    }
     if (event.type === 'step/start') {
       turn.stepStarts.set(event.data?.step, Date.now());
       return;
@@ -196,6 +200,7 @@ export class TurnRunner {
         if (total > 0) turn.contextTokens = total;
       }
       if (!turn.firstTokenAt && text) turn.firstTokenAt = Date.now();
+      if (turn.silent) return;
       if (text) turn.answer = text;
       if (text) await this.#flushTurn(turn, text);
       return;
@@ -303,7 +308,7 @@ export class TurnRunner {
     if (!force && turn.usagePanelAt && now - turn.usagePanelAt < PANEL_REFRESH_MS) {
       return turn.usagePanel ?? null;
     }
-    const cumulative = this.#state.usageFor?.(`usage:${turn.chatId}`) ?? null;
+    const cumulative = this.#state.usageFor?.(`usage:${turn.sessionId}`) ?? null;
     const snapshot = this.#usageSnapshot(turn);
     const usageTitle = buildUsageTitle({
       cumulative,
@@ -391,6 +396,13 @@ export class TurnRunner {
 
     const snapshot = this.#usageSnapshot(turn);
 
+    if (turn.silent) {
+      if (snapshot.total.calls > 0) {
+        await this.#state.addUsage?.(`usage:${turn.sessionId}`, snapshot.total).catch(() => undefined);
+      }
+      return;
+    }
+
     if (turn.topic) {
       const current = this.#state.topicFor?.(turn.topic.chatId, turn.topic.topicId) ?? turn.topic;
       await this.#state.updateTopic?.(turn.topic.chatId, turn.topic.topicId, {
@@ -426,7 +438,7 @@ export class TurnRunner {
       await this.#bot.sendText(turn.chatId, `回复发送失败：${error.message}`).catch(() => undefined);
     }
     if (snapshot.total.calls > 0) {
-      await this.#state.addUsage?.(`usage:${turn.chatId}`, snapshot.total).catch(() => undefined);
+      await this.#state.addUsage?.(`usage:${turn.sessionId}`, snapshot.total).catch(() => undefined);
     }
   }
 }

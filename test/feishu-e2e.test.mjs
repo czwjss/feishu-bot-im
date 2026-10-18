@@ -297,9 +297,13 @@ function inbound(text, extra = {}) {
   const bridge = new FeishuBridge({ bot, harness, config, state, version: 't', inboxDir: join(dir, 'inbox') });
   await state.bindSession('chat:oc_web', 'sess-web');
   await bridge.onSessionEvent({ id: 'sess-web' }, { type: 'turn/start', data: { turn: 1 } });
-  await bridge.onSessionEvent({ id: 'sess-web' }, { type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'text', text: 'Web 的回答' }] } } });
+  await bridge.onSessionEvent({ id: 'sess-web' }, {
+    type: 'assistant/message',
+    data: { turn: 1, usage: { inputTokens: 300, outputTokens: 50, cacheReadTokens: 700, totalTokens: 1050 }, message: { content: [{ type: 'text', text: 'Web 的回答' }] } },
+  });
   await bridge.onSessionEvent({ id: 'sess-web' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
   assert.equal(client.calls.filter((call) => call.api === 'message.create' || call.api === 'message.reply').length, 0, 'web-origin turn stays out of Feishu');
+  assert.equal(state.usageFor?.('usage:sess-web')?.input, 1000, 'web turn usage still counts toward the session');
   bridge.dispose();
 }
 
