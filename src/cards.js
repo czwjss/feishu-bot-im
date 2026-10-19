@@ -175,11 +175,17 @@ function statPairRow(first, second = null) {
   return { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '16px', columns };
 }
 
-/** Full-width proportional bar: 24 emoji segments stay visible on every client. */
-function contextBar(percent) {
-  const segments = 24;
-  const filled = Math.max(0, Math.min(segments, Math.round((percent / 100) * segments)));
-  return { tag: 'markdown', content: `${'🟦'.repeat(filled)}${'⬜'.repeat(segments - filled)}` };
+/** Section header: fixed icon slot keeps titles aligned across sections. */
+function statHeader(icon, label, value) {
+  return {
+    tag: 'column_set',
+    flex_mode: 'none',
+    columns: [
+      { tag: 'column', width: '24px', vertical_align: 'center', elements: [{ tag: 'markdown', content: icon }] },
+      { tag: 'column', width: 'auto', vertical_align: 'center', elements: [{ tag: 'markdown', content: `**${label}**` }] },
+      { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', horizontal_align: 'right', elements: [{ tag: 'markdown', content: `**${value}**` }] },
+    ],
+  };
 }
 
 /** Menu card: session and workspace dropdowns plus usage stats and actions. */
@@ -249,14 +255,6 @@ export function menuCard({
     control.disabled = true;
     elements.push(row('预设', control));
   }
-  const section = (title, rows) => ({
-    tag: 'collapsible_panel',
-    expanded: true,
-    border: { color: 'grey', corner_radius: '8px' },
-    header: { title: { tag: 'markdown', content: title } },
-    elements: rows,
-  });
-
   const usage = stats?.tokenUsage ?? null;
   if (usage) {
     const total = (usage.uncachedInputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0) + (usage.outputTokens ?? 0);
@@ -268,7 +266,9 @@ export function menuCard({
       statPairRow({ label: '输出', value: formatTokens(usage.outputTokens) },
         hit !== null ? { label: '缓存命中', value: `${hit}%` } : null),
     ];
-    elements.push(section(`**🪙 Token 用量**　　${formatTokens(total)}`, rows));
+    elements.push({ tag: 'hr' });
+    elements.push(statHeader('🪙', 'Token 用量', formatTokens(total)));
+    elements.push(...rows);
   }
   const pressure = stats?.contextPressure ?? null;
   const breakdown = stats?.contextBreakdown ?? null;
@@ -276,13 +276,13 @@ export function menuCard({
   const used = Number(pressure?.projectedTokens ?? pressure?.pressureTokens ?? 0);
   if (windowSize > 0 && used > 0) {
     const percent = Math.min(100, Math.round((used / windowSize) * 100));
-    const rows = [contextBar(percent)];
+    elements.push({ tag: 'hr' });
+    elements.push(statHeader('📊', '会话上下文', `已用 ${percent}%　${formatCompact(used)} / ${formatCompact(windowSize)}`));
     if (breakdown) {
-      rows.push(statPairRow({ label: '系统提示词', value: `~${formatCompact(breakdown.systemTokens)}` },
+      elements.push(statPairRow({ label: '系统提示词', value: `~${formatCompact(breakdown.systemTokens)}` },
         { label: '工具定义', value: `~${formatCompact(breakdown.toolsTokens)}` }));
-      rows.push(statPairRow({ label: '对话消息', value: `~${formatCompact(breakdown.messageTokens)}` }));
+      elements.push(statPairRow({ label: '对话消息', value: `~${formatCompact(breakdown.messageTokens)}` }));
     }
-    elements.push(section(`**📊 会话上下文**　已用 ${percent}%　${formatCompact(used)} / ${formatCompact(windowSize)}`, rows));
   }
 
   // 三等分栅格，每格内放一个固定宽度的按钮（约五个汉字）
