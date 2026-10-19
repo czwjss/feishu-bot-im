@@ -259,13 +259,12 @@ export function menuCard({
     const prompt = (usage.uncachedInputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
     const hit = prompt > 0 ? Math.round(((usage.cacheReadTokens ?? 0) / prompt) * 100) : null;
     const rows = [
-      statRow('总计', formatTokens(total), true),
       statPairRow({ label: '未缓存输入', value: formatTokens(usage.uncachedInputTokens) },
         { label: '缓存读取', value: formatTokens(usage.cacheReadTokens) }),
       statPairRow({ label: '输出', value: formatTokens(usage.outputTokens) },
         hit !== null ? { label: '缓存命中', value: `${hit}%` } : null),
     ];
-    elements.push(section('🪙 Token 用量', rows));
+    elements.push(section(`🪙 Token 用量　总计 ${formatTokens(total)}`, rows));
   }
   const pressure = stats?.contextPressure ?? null;
   const breakdown = stats?.contextBreakdown ?? null;
@@ -273,15 +272,14 @@ export function menuCard({
   const used = Number(pressure?.projectedTokens ?? pressure?.pressureTokens ?? 0);
   if (windowSize > 0 && used > 0) {
     const percent = Math.min(100, Math.round((used / windowSize) * 100));
-    const rows = [
-      statRow('已用', `${percent}%　${formatCompact(used)} / ${formatCompact(windowSize)}`, true),
-    ];
+    const rows = [];
     if (breakdown) {
       rows.push(statPairRow({ label: '系统提示词', value: `~${formatCompact(breakdown.systemTokens)}` },
         { label: '工具定义', value: `~${formatCompact(breakdown.toolsTokens)}` }));
       rows.push(statPairRow({ label: '对话消息', value: `~${formatCompact(breakdown.messageTokens)}` }));
     }
-    elements.push(section('📊 会话上下文', rows));
+    if (rows.length === 0) rows.push({ tag: 'markdown', content: '暂无明细' });
+    elements.push(section(`📊 会话上下文　已用 ${percent}% · ${formatCompact(used)} / ${formatCompact(windowSize)}`, rows));
   }
 
   // 三等分栅格，每格内放一个固定宽度的按钮（约五个汉字）
