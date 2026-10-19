@@ -11,7 +11,7 @@ export async function runCommand(services, name, argument, context) {
   const { bot, state, harness, version, saveWorkspace, listPresets, savePreset, modelFor, log } = services;
   let config = services.config();
     const { chatId, chatKey, messageId } = context;
-    const notice = (text) => bot.sendCard(chatId, noticeCard(text)).catch(() => bot.sendText(chatId, text));
+    const notice = (text, title = null) => bot.sendCard(chatId, noticeCard(text, title)).catch(() => bot.sendText(chatId, text));
     switch (name) {
       case 'menu': {
         try {
@@ -32,13 +32,13 @@ export async function runCommand(services, name, argument, context) {
         const previous = state.sessionFor(chatKey);
         await state.unbindSession(chatKey);
         services.forgetSession?.(previous);
-        await notice('已解除当前会话绑定，下一条消息会开启全新会话。');
+        await notice('已解除当前会话绑定，下一条消息会开启全新会话。', '新会话');
         return true;
       }
       case 'topic-sync': {
         const inTopic = typeof chatKey === 'string' && chatKey.startsWith('topic:');
         if (!inTopic) {
-          await notice('请在话题内使用 `/topic-sync`。');
+          await notice('请在话题内使用 `/topic-sync`。', '话题同步');
           return true;
         }
         const topicId = Number(chatKey.split(':')[2]);
@@ -50,7 +50,7 @@ export async function runCommand(services, name, argument, context) {
         const arg = String(argument ?? '').trim();
         const inTopic = typeof chatKey === 'string' && chatKey.startsWith('topic:');
         if (inTopic) {
-          await notice('话题内可直接对话；需要把结论同步回主会话时用 `/topic-sync`。');
+          await notice('话题内可直接对话；需要把结论同步回主会话时用 `/topic-sync`。', '话题');
           return true;
         }
         if (!arg || arg.toLowerCase() === 'list') {
@@ -70,13 +70,13 @@ export async function runCommand(services, name, argument, context) {
       case 'stop': {
         const sessionId = state.sessionFor(chatKey);
         if (!sessionId) {
-          await notice('当前没有可停止的会话。');
+          await notice('当前没有可停止的会话。', '无法停止');
           return true;
         }
         const ask = services.externalAsk?.(sessionId) ?? null;
         await harness.cancel(sessionId).catch((error) => log('warn', 'cancel failed', error));
         const note = ask ? `\n（刚才在等你${ask.kind}：${ask.text}）` : '';
-        await notice(`已请求停止当前任务。${note}`);
+        await notice(`已请求停止当前任务。${note}`, '已停止');
         return true;
       }
 

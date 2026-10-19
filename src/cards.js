@@ -71,11 +71,13 @@ export function questionCard({ question, options, questionId, resolvedText }) {
 }
 
 /** Plain notice card used for command results and status messages. */
-export function noticeCard(text) {
-  return {
+export function noticeCard(text, title = null) {
+  const card = {
     schema: '2.0',
     body: { elements: [{ tag: 'markdown', content: typeof text === 'string' && text ? text : ' ' }] },
   };
+  if (title) card.header = { title: plain(title), template: 'grey' };
+  return card;
 }
 
 /** Answer/progress card with a collapsible panel holding the tool calls. */

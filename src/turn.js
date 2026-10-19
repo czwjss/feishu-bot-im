@@ -286,9 +286,9 @@ export class TurnRunner {
     return panel;
   }
 
-  async #notice(chatId, text) {
+  async #notice(chatId, text, title = null) {
     try {
-      await this.#bot.sendCard(chatId, noticeCard(text));
+      await this.#bot.sendCard(chatId, noticeCard(text, title));
     } catch {
       await this.#bot.sendText(chatId, text).catch(() => undefined);
     }
@@ -418,7 +418,7 @@ export class TurnRunner {
           summary: String(final).slice(0, 1200),
           at: new Date().toISOString(),
         }).catch(() => undefined);
-        await this.#notice(turn.chatId, `话题 #${turn.topic.topicId}「${turn.topic.title}」已同步到主会话。`);
+        await this.#notice(turn.chatId, `话题 #${turn.topic.topicId}「${turn.topic.title}」已同步到主会话。`, '话题已同步');
       }
     }
     try {
@@ -436,7 +436,7 @@ export class TurnRunner {
       }
     } catch (error) {
       this.#log('error', 'final answer failed', error);
-      await this.#notice(turn.chatId, `回复发送失败：${error.message}`);
+      await this.#notice(turn.chatId, `回复发送失败：${error.message}`, '发送失败');
     }
     if (snapshot.total.calls > 0) {
       await this.#state.addUsage?.(`usage:${turn.sessionId}`, snapshot.total).catch(() => undefined);
