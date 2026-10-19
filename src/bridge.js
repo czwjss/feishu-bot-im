@@ -107,9 +107,9 @@ export class FeishuBridge {
   }
 
   /** Send a status notice as a card; fall back to text only if cards fail. */
-  async #notice(chatId, text, title = null) {
+  async #notice(chatId, text, title = null, tone = null) {
     try {
-      await this.#bot.sendCard(chatId, noticeCard(text, title));
+      await this.#bot.sendCard(chatId, noticeCard(text, title, tone));
     } catch {
       await this.#bot.sendText(chatId, text).catch(() => undefined);
     }
@@ -864,7 +864,7 @@ export class FeishuBridge {
           resolvedText: resolvedApprovalText(approve ? 'allowed-once' : 'rejected'),
         })).catch(() => undefined);
       }
-      void this.#notice(chatId, approve ? '✅ 已批准一次。' : '🚫 已拒绝。', '审批结果');
+      void this.#notice(chatId, approve ? '✅ 已批准一次。' : '🚫 已拒绝。', '审批结果', approve ? 'green' : 'red');
       return true;
     }
     return false;

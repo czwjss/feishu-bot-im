@@ -71,12 +71,37 @@ export function questionCard({ question, options, questionId, resolvedText }) {
 }
 
 /** Plain notice card used for command results and status messages. */
-export function noticeCard(text, title = null) {
+const NOTICE_TONES = Object.freeze({
+  新会话: 'green',
+  新会话已就绪: 'green',
+  会话已绑定: 'green',
+  工作区已切换: 'green',
+  模型已切换: 'green',
+  思考强度已切换: 'green',
+  话题已同步: 'green',
+  上下文压缩: 'green',
+  已停止: 'orange',
+  无权限: 'orange',
+  需要管理员: 'orange',
+  暂不支持: 'orange',
+  无法处理: 'orange',
+  无法停止: 'orange',
+  话题已关闭: 'orange',
+  话题: 'blue',
+  话题列表: 'blue',
+  话题同步: 'blue',
+  发送失败: 'red',
+  创建失败: 'red',
+  提交失败: 'red',
+  审批结果: 'green',
+});
+
+export function noticeCard(text, title = null, tone = null) {
   const card = {
     schema: '2.0',
     body: { elements: [{ tag: 'markdown', content: typeof text === 'string' && text ? text : ' ' }] },
   };
-  if (title) card.header = { title: plain(title), template: 'grey' };
+  if (title) card.header = { title: plain(title), template: tone ?? NOTICE_TONES[title] ?? 'grey' };
   return card;
 }
 

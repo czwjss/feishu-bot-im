@@ -286,9 +286,9 @@ export class TurnRunner {
     return panel;
   }
 
-  async #notice(chatId, text, title = null) {
+  async #notice(chatId, text, title = null, tone = null) {
     try {
-      await this.#bot.sendCard(chatId, noticeCard(text, title));
+      await this.#bot.sendCard(chatId, noticeCard(text, title, tone));
     } catch {
       await this.#bot.sendText(chatId, text).catch(() => undefined);
     }

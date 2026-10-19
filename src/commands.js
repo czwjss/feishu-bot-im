@@ -11,7 +11,7 @@ export async function runCommand(services, name, argument, context) {
   const { bot, state, harness, version, saveWorkspace, listPresets, savePreset, modelFor, log } = services;
   let config = services.config();
     const { chatId, chatKey, messageId } = context;
-    const notice = (text, title = null) => bot.sendCard(chatId, noticeCard(text, title)).catch(() => bot.sendText(chatId, text));
+    const notice = (text, title = null, tone = null) => bot.sendCard(chatId, noticeCard(text, title, tone)).catch(() => bot.sendText(chatId, text));
     switch (name) {
       case 'menu': {
         try {
