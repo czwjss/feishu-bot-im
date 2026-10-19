@@ -232,17 +232,25 @@ export function menuCard({
     control.disabled = true;
     elements.push(row('预设', control));
   }
+  const section = (title, rows) => ({
+    tag: 'collapsible_panel',
+    expanded: true,
+    border: { color: 'grey', corner_radius: '8px' },
+    header: { title: { tag: 'markdown', content: title } },
+    elements: rows,
+  });
+
   const usage = stats?.tokenUsage ?? null;
   if (usage) {
     const total = (usage.uncachedInputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0) + (usage.outputTokens ?? 0);
     const prompt = (usage.uncachedInputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
     const hit = prompt > 0 ? Math.round(((usage.cacheReadTokens ?? 0) / prompt) * 100) : null;
-    elements.push({ tag: 'hr' });
-    elements.push(statRow('🪙 Token 用量', `${formatCount(total)} tok`, true));
-    if (hit !== null) elements.push(statRow('缓存命中', `${hit}%`));
-    elements.push(statRow('未缓存输入', `${formatCount(usage.uncachedInputTokens)} tok`));
-    elements.push(statRow('缓存读取', `${formatCount(usage.cacheReadTokens)} tok`));
-    elements.push(statRow('输出', `${formatCount(usage.outputTokens)} tok`));
+    const rows = [];
+    if (hit !== null) rows.push(statRow('缓存命中', `${hit}%`));
+    rows.push(statRow('未缓存输入', `${formatCount(usage.uncachedInputTokens)} tok`));
+    rows.push(statRow('缓存读取', `${formatCount(usage.cacheReadTokens)} tok`));
+    rows.push(statRow('输出', `${formatCount(usage.outputTokens)} tok`));
+    elements.push(section(`**🪙 Token 用量**　　${formatCount(total)} tok`, rows));
   }
   const pressure = stats?.contextPressure ?? null;
   const breakdown = stats?.contextBreakdown ?? null;
@@ -251,14 +259,15 @@ export function menuCard({
   if (windowSize > 0 && used > 0) {
     const percent = Math.min(100, Math.round((used / windowSize) * 100));
     const filled = Math.round(percent / 10);
-    elements.push({ tag: 'hr' });
-    elements.push(statRow('📊 会话上下文', `已用 ${percent}%　${formatCompact(used)} / ${formatCompact(windowSize)}`, true));
-    elements.push({ tag: 'markdown', content: `${'█'.repeat(filled)}${'░'.repeat(10 - filled)}` });
+    const rows = [
+      { tag: 'markdown', content: `${'🟦'.repeat(filled)}${'⬜'.repeat(10 - filled)}` },
+    ];
     if (breakdown) {
-      elements.push(statRow('系统提示词', `~${formatCompact(breakdown.systemTokens)}`));
-      elements.push(statRow('工具定义', `~${formatCompact(breakdown.toolsTokens)}`));
-      elements.push(statRow('对话消息', `~${formatCompact(breakdown.messageTokens)}`));
+      rows.push(statRow('系统提示词', `~${formatCompact(breakdown.systemTokens)}`));
+      rows.push(statRow('工具定义', `~${formatCompact(breakdown.toolsTokens)}`));
+      rows.push(statRow('对话消息', `~${formatCompact(breakdown.messageTokens)}`));
     }
+    elements.push(section(`**📊 会话上下文**　已用 ${percent}%　${formatCompact(used)} / ${formatCompact(windowSize)}`, rows));
   }
 
   // 三等分栅格，每格内放一个固定宽度的按钮（约五个汉字）
