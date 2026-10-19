@@ -317,8 +317,8 @@ function message(overrides = {}) {
     context: { open_message_id: menu.id, open_chat_id: 'oc_menu' },
   });
   assert.equal(open.toast.type, 'info', 'new_session opens a settings card');
-  const shown = JSON.stringify(bot.cards.at(-1)?.card ?? {});
-  assert.match(shown, /ns_model/, 'new-session card carries its own pickers');
+  const newSessionCard = bot.cards.at(-1);
+  assert.match(JSON.stringify(newSessionCard?.card ?? {}), /ns_model/, 'new-session card carries its own pickers');
   await bridge.onCardAction({
     operator: { open_id: 'ou_user' },
     action: { value: { action: 'new_session_cancel' } },
@@ -328,9 +328,12 @@ function message(overrides = {}) {
   await bridge.onCardAction({
     operator: { open_id: 'ou_user' },
     action: { value: { action: 'new_session_create' } },
-    context: { open_message_id: menu.id, open_chat_id: 'oc_menu' },
+    context: { open_message_id: newSessionCard.id, open_chat_id: 'oc_menu' },
   });
   assert.equal(state.sessionFor('chat:oc_menu'), null, 'creating a session unbinds the chat');
+  assert.equal(bot.patches.at(-1)?.id, newSessionCard.id, 'ready state patches the original card');
+  assert.match(JSON.stringify(bot.patches.at(-1)?.card), /新会话已就绪/);
+  assert.ok(!JSON.stringify(bot.cards).includes('新会话已就绪'), 'no extra ready card is sent');
   bridge.dispose();
 }
 
