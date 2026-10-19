@@ -142,20 +142,13 @@ export function resolvedApprovalText(outcome) {
   return '⚠️ 审批已失效。';
 }
 
-/** Two stats on one line, each half laid out label-left / value-right. */
+/** One row of `属性 | 值 | 属性 | 值`, so both halves line up across rows. */
 function statPairRow(first, second = null) {
-  const pair = (item) => ({
-    tag: 'column_set',
-    flex_mode: 'none',
-    horizontal_spacing: '6px',
-    columns: [
-      { tag: 'column', width: 'auto', vertical_align: 'center', elements: [{ tag: 'markdown', content: item.label }] },
-      { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', horizontal_align: 'right', elements: [{ tag: 'markdown', content: item.value }] },
-    ],
-  });
-  const columns = [{ tag: 'column', width: 'weighted', weight: 1, elements: [pair(first)] }];
-  if (second) columns.push({ tag: 'column', width: 'weighted', weight: 1, elements: [pair(second)] });
-  return { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '16px', columns };
+  const attr = (item) => ({ tag: 'column', width: '100px', vertical_align: 'center', elements: [{ tag: 'markdown', content: item.label }] });
+  const value = (item) => ({ tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', horizontal_align: 'right', elements: [{ tag: 'markdown', content: item.value }] });
+  const columns = [attr(first), value(first)];
+  if (second) columns.push(attr(second), value(second));
+  return { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '12px', columns };
 }
 
 /** Bordered subsection; the header holds only the title so both sections align. */
