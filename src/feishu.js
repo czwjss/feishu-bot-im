@@ -331,7 +331,7 @@ export class FeishuBot {
     const response = assertApiSuccess('Feishu file upload', await this.#client.im.v1.file.create({
       data: { file_type: 'stream', file_name: name, file: Buffer.from(bytes) },
     }));
-    const key = response?.data?.file_key;
+    const key = response?.file_key ?? response?.data?.file_key;
     if (!key) throw new Error('Feishu file upload returned no file_key');
     return key;
   }
@@ -341,7 +341,7 @@ export class FeishuBot {
     const response = assertApiSuccess('Feishu image upload', await this.#client.im.v1.image.create({
       data: { image_type: 'message', image: Buffer.from(bytes) },
     }));
-    const key = response?.data?.image_key;
+    const key = response?.image_key ?? response?.data?.image_key;
     if (!key) throw new Error('Feishu image upload returned no image_key');
     return key;
   }
