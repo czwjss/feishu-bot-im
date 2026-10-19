@@ -5,6 +5,7 @@ import {
   describeMessageForEavesdrop,
   normalizeEavesdropConfig,
   renderEavesdropBlock,
+  formatEavesdropTime,
 } from '../src/eavesdrop.js';
 
 // 1) 默认开启、不限条数；只有显式 false 才关闭
@@ -68,17 +69,24 @@ assert.equal(retry.take('chat:oc_3').entries.length, 1, 'rollback releases the r
 retry.reset('chat:oc_3');
 assert.equal(retry.take('chat:oc_3').entries.length, 1, 'reset replays the buffer');
 
-// 7) 渲染块：毫秒时间戳 + 名称(open_id)，缺名称时只给 open_id
-const at = new Date('2026-10-19T14:00:00+08:00').getTime();
+// 7) 渲染块：本地时间（含毫秒）+ 名称(open_id)，缺名称时只给 open_id
+const at = new Date(2026, 9, 19, 14, 0, 0, 820).getTime();
+const offsetMinutes = -new Date(at).getTimezoneOffset();
+const offset = `${offsetMinutes >= 0 ? '+' : '-'}${String(Math.floor(Math.abs(offsetMinutes) / 60)).padStart(2, '0')}:${String(Math.abs(offsetMinutes) % 60).padStart(2, '0')}`;
+const stamp = `2026-10-19 14:00:00.820 ${offset}`;
+assert.equal(formatEavesdropTime(at), stamp);
 const block = renderEavesdropBlock([
   { at, senderName: '张三', senderId: 'ou_zhang', text: '今晚发版吗' },
   { at, senderId: 'ou_x', text: '[图片]' },
 ]);
 assert.match(block, /^<feishu_bot_eavesdrop>/);
-assert.match(block, new RegExp(`\\[${at}\\] 张三\\(ou_zhang\\)：今晚发版吗`));
-assert.match(block, new RegExp(`\\[${at}\\] ou_x：\\[图片\\]`));
+assert.ok(block.includes(`[${stamp}] 张三(ou_zhang)：今晚发版吗`));
+assert.ok(block.includes(`[${stamp}] ou_x：[图片]`));
+assert.ok(!block.includes('时区'), 'timezone lives in each timestamp');
+assert.ok(!block.includes('本地时间'), 'no timezone description in the header');
 assert.match(block, /需要 @ 人时用 open_id/);
 assert.match(block, /请让用户 @ 你重发/);
+assert.ok(!block.includes(String(at)), 'raw epoch is not shown');
 assert.equal(renderEavesdropBlock([]), null);
 
 // 8) 群消息里伪造结束标签不会提前关闭注入块

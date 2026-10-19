@@ -158,7 +158,7 @@ function message(overrides = {}) {
 
 // 4) 白名单模式拦截陌生人
 {
-  const { bot, harness, bridge } = makeBridge({ access: { direct: 'allowlist', group: 'allowlist', allowOpenIds: ['ou_owner'] } });
+  const { bot, harness, bridge } = makeBridge({ access: { group: 'allowlist', allowOpenIds: ['ou_owner'] } });
   // 私聊不受白名单限制
   await bridge.handleMessage(message({ chat_id: 'oc_dm' }));
   assert.equal(harness.prompts.length, 1, 'private chat ignores the allowlist');
