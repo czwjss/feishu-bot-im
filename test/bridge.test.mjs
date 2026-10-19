@@ -50,6 +50,13 @@ class FakeHarness {
     return { commandId: 'cmd-1', result: { kind: 'success', text: 'Compacted 3 history items' } };
   }
   async listSessions() { return this.models; }
+  async sessionProjections() {
+    return {
+      tokenUsage: { uncachedInputTokens: 7035658, outputTokens: 1329752, cacheReadTokens: 927102592, cacheWriteTokens: 0 },
+      contextPressure: { pressureTokens: 548000, contextWindow: 1048576 },
+      contextBreakdown: { systemTokens: 1400, toolsTokens: 9000, messageTokens: 431000 },
+    };
+  }
   async modelCatalog() { return { groups: [{ id: 'prov', name: 'Prov', models: [{ id: 'model-a', name: 'A' }] }] }; }
   async selectModel(id, selection) { this.lastModel = { id, selection }; return {}; }
   async workspaceBaseline() { return { workspaces: [{ path: '/tmp/one' }] }; }

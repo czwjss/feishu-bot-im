@@ -141,10 +141,34 @@ export function resolvedApprovalText(outcome) {
   return '⚠️ 审批已失效。';
 }
 
-/** Menu card: session and workspace dropdowns plus the common actions. */
+function formatCount(value) {
+  return Number(value || 0).toLocaleString('en-US');
+}
+
+function formatCompact(value) {
+  const n = Number(value || 0);
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return `${Math.round(n)}`;
+}
+
+/** Two-column stat: label left, value right-aligned. */
+function statRow(label, value, bold = false) {
+  const text = (content) => ({ tag: 'markdown', content });
+  return {
+    tag: 'column_set',
+    flex_mode: 'none',
+    columns: [
+      { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', elements: [text(bold ? `**${label}**` : label)] },
+      { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', horizontal_align: 'right', elements: [text(bold ? `**${value}**` : value)] },
+    ],
+  };
+}
+
+/** Menu card: session and workspace dropdowns plus usage stats and actions. */
 export function menuCard({
   sessionId, sessions = [], currentWorkspace = null, workspaces = [],
-  running = false, model = null, models = [], efforts = [], presets = [], sessionWorkspace = null,
+  running = false, model = null, models = [], efforts = [], presets = [], sessionWorkspace = null, stats = null,
 }) {
   const select = (name, action, items, placeholder) => ({
     tag: 'select_static',
@@ -208,6 +232,35 @@ export function menuCard({
     control.disabled = true;
     elements.push(row('预设', control));
   }
+  const usage = stats?.tokenUsage ?? null;
+  if (usage) {
+    const total = (usage.uncachedInputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0) + (usage.outputTokens ?? 0);
+    const prompt = (usage.uncachedInputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
+    const hit = prompt > 0 ? Math.round(((usage.cacheReadTokens ?? 0) / prompt) * 100) : null;
+    elements.push({ tag: 'hr' });
+    elements.push(statRow('🪙 Token 用量', `${formatCount(total)} tok`, true));
+    if (hit !== null) elements.push(statRow('缓存命中', `${hit}%`));
+    elements.push(statRow('未缓存输入', `${formatCount(usage.uncachedInputTokens)} tok`));
+    elements.push(statRow('缓存读取', `${formatCount(usage.cacheReadTokens)} tok`));
+    elements.push(statRow('输出', `${formatCount(usage.outputTokens)} tok`));
+  }
+  const pressure = stats?.contextPressure ?? null;
+  const breakdown = stats?.contextBreakdown ?? null;
+  const windowSize = Number(pressure?.contextWindow ?? 0);
+  const used = Number(pressure?.projectedTokens ?? pressure?.pressureTokens ?? 0);
+  if (windowSize > 0 && used > 0) {
+    const percent = Math.min(100, Math.round((used / windowSize) * 100));
+    const filled = Math.round(percent / 10);
+    elements.push({ tag: 'hr' });
+    elements.push(statRow('📊 会话上下文', `已用 ${percent}%　${formatCompact(used)} / ${formatCompact(windowSize)}`, true));
+    elements.push({ tag: 'markdown', content: `${'█'.repeat(filled)}${'░'.repeat(10 - filled)}` });
+    if (breakdown) {
+      elements.push(statRow('系统提示词', `~${formatCompact(breakdown.systemTokens)}`));
+      elements.push(statRow('工具定义', `~${formatCompact(breakdown.toolsTokens)}`));
+      elements.push(statRow('对话消息', `~${formatCompact(breakdown.messageTokens)}`));
+    }
+  }
+
   // 三等分栅格，每格内放一个固定宽度的按钮（约五个汉字）
   const fixedButton = (label, action, type) => ({
     tag: 'column',

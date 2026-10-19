@@ -137,6 +137,7 @@ export async function collectMenuData(services, chatKey) {
   }
   const presets = (await listPresets().catch(() => []))
     .map((item) => ({ value: item.id, label: item.name ?? item.id, current: item.id === (override.preset ?? config.agentPreset ?? null) }));
+  const projections = sessionId ? await harness.sessionProjections?.(sessionId).catch(() => null) : null;
   return {
     sessionId,
     presets,
@@ -147,6 +148,7 @@ export async function collectMenuData(services, chatKey) {
     model: selected,
     models,
     efforts,
+    stats: projections,
   };
 }
 

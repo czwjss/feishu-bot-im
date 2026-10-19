@@ -110,6 +110,12 @@ export class HarnessAdapter {
     return this.invoke('session', 'prompt', { request }, signal);
   }
 
+  /** Current projection values (token usage / context pressure / breakdown). */
+  async sessionProjections(sessionId) {
+    const value = await this.invoke('session', 'projections', { request: { sessionId } });
+    return value?.values ?? null;
+  }
+
   async cancel(sessionId) {
     return this.invoke('session', 'cancel', { request: { sessionId } });
   }
