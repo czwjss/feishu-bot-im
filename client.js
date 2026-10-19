@@ -486,9 +486,7 @@ window.__ModuleLoader__.load({
                 })))),
             error ? h('div', { style: S.error }, error) : null),
           h('div', { style: { ...S.row, justifyContent: 'flex-end', marginTop: '14px' } },
-            mode === 'manual'
-              ? h('button', { type: 'button', style: S.btn(), onClick: onClose, disabled: busy }, t('取消', 'Cancel'))
-              : null,
+            h('button', { type: 'button', style: S.btn(), onClick: onClose, disabled: busy }, t('取消', 'Cancel')),
             h('button', { type: 'button', style: S.btn('primary'), onClick: save, disabled: busy }, busy ? t('保存中…', 'Saving…') : t('保存', 'Save')))));
     }
 
