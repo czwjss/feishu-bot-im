@@ -159,29 +159,27 @@ function statRow(label, value, bold = false) {
   };
 }
 
-/** Two stats on one line; `second` may be omitted. */
+/** Two stats on one line, each half laid out label-left / value-right. */
 function statPairRow(first, second = null) {
-  const cell = (label, value) => ([
-    { tag: 'column', width: 'auto', vertical_align: 'center', elements: [{ tag: 'markdown', content: label }] },
-    { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', horizontal_align: 'right', elements: [{ tag: 'markdown', content: value }] },
-  ]);
-  const columns = cell(first.label, first.value);
-  if (second) columns.push(...cell(second.label, second.value));
-  return { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '8px', columns };
+  const pair = (item) => ({
+    tag: 'column_set',
+    flex_mode: 'none',
+    horizontal_spacing: '6px',
+    columns: [
+      { tag: 'column', width: 'auto', vertical_align: 'center', elements: [{ tag: 'markdown', content: item.label }] },
+      { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', horizontal_align: 'right', elements: [{ tag: 'markdown', content: item.value }] },
+    ],
+  });
+  const columns = [{ tag: 'column', width: 'weighted', weight: 1, elements: [pair(first)] }];
+  if (second) columns.push({ tag: 'column', width: 'weighted', weight: 1, elements: [pair(second)] });
+  return { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '16px', columns };
 }
 
-/** Full-width 20-segment bar (column backgrounds need no text). */
+/** Full-width proportional bar: 24 emoji segments stay visible on every client. */
 function contextBar(percent) {
-  const segments = 20;
+  const segments = 24;
   const filled = Math.max(0, Math.min(segments, Math.round((percent / 100) * segments)));
-  const columns = Array.from({ length: segments }, (_, index) => ({
-    tag: 'column',
-    width: 'weighted',
-    weight: 1,
-    background_style: index < filled ? 'blue' : 'grey',
-    elements: [{ tag: 'markdown', content: ' ' }],
-  }));
-  return { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '0px', columns };
+  return { tag: 'markdown', content: `${'🟦'.repeat(filled)}${'⬜'.repeat(segments - filled)}` };
 }
 
 /** Menu card: session and workspace dropdowns plus usage stats and actions. */
