@@ -757,12 +757,30 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
-// 18) 只 @ 机器人、没有正文的消息不触发轮次
+// 18) 群聊空 @：无会话回提示；已有会话交给模型
 {
-  const { harness, bridge } = makeBridge();
-  await bridge.handleMessage(message({ chat_id: 'oc_empty', content: JSON.stringify({ text: '' }) }));
+  const { bot, harness, bridge } = makeBridge();
+  await bridge.handleMessage(message({
+    chat_id: 'oc_empty', chat_type: 'group',
+    mentions: [{ id: { open_id: 'ou_bot' } }],
+    content: JSON.stringify({ text: '' }),
+  }));
   assert.equal(harness.created, 0, 'no session is created for an empty mention');
-  assert.equal(harness.prompts.length, 0, 'no prompt is submitted');
+  assert.equal(harness.prompts.length, 0, 'no prompt is submitted without a session');
+  assert.match(cardText(bot), /在的/);
+  assert.match(cardText(bot), /\/menu/);
+  const cardsAfterHint = bot.cards.length;
+
+  await state.bindSession('chat:oc_empty', 'sess-empty');
+  await bridge.handleMessage(message({
+    chat_id: 'oc_empty', chat_type: 'group',
+    mentions: [{ id: { open_id: 'ou_bot' } }],
+    content: JSON.stringify({ text: '' }),
+  }));
+  assert.equal(harness.created, 0, 'the existing session is reused');
+  assert.equal(harness.prompts.length, 1, 'the bare mention is handed to the model');
+  assert.ok(harness.prompts.at(-1).content.some((part) => part.type === 'text' && part.text === '有事找你'));
+  assert.equal(bot.cards.length, cardsAfterHint, 'no extra hint card when a session exists');
   bridge.dispose();
 }
 

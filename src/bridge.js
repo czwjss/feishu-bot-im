@@ -20,6 +20,10 @@ import { dirname } from 'node:path';
 
 const COMMAND = /^\/([a-z][a-z0-9-]*)(?:\s+([\s\S]*))?$/i;
 
+/** A bare group mention carries no text; the model still needs a user turn. */
+const BARE_MENTION_PROMPT = '有事找你';
+const BARE_MENTION_HINT = '在的，请直接说需求；发送 /menu 可以查看和调整当前配置。';
+
 /** Reaction emoji used as a coarse message status. */
 const REACTION = Object.freeze({ processing: 'OnIt', done: 'DONE', stopped: 'DIZZY' });
 
@@ -226,22 +230,47 @@ export class FeishuBridge {
       }
     }
 
-    // A bare mention (or an empty text body) carries no instruction: do not
-    // spend a turn on it.
-    if (parts.length === 0) return;
-
-    await this.#react(message.message_id, REACTION.processing);
-    await this.#submitPrompt({
+    const submitPrompt = (promptParts, promptText) => this.#submitPrompt({
       chatKey,
       chatId: message.chat_id,
       chatType: message.chat_type,
       createTime: message.create_time,
       messageId: message.message_id,
-      parts,
-      text,
+      parts: promptParts,
+      text: promptText,
       openId,
       people: [...mentioned.entries()].map(([id, name]) => ({ id, name })),
     });
+
+    // A bare mention (or an empty text body) carries no instruction. If the
+    // chat already has a Session, send a minimal user turn so the model can
+    // answer; a chat without one gets the hint and no Session is created.
+    if (parts.length === 0) {
+      if (message.chat_type !== 'group') return;
+      if (this.#state.sessionFor(chatKey)) {
+        await this.#react(message.message_id, REACTION.processing);
+        await submitPrompt([{ type: 'text', text: BARE_MENTION_PROMPT }], BARE_MENTION_PROMPT);
+        return;
+      }
+      await this.#sendBareMentionHint(message.chat_id, topic);
+      return;
+    }
+
+    await this.#react(message.message_id, REACTION.processing);
+    await submitPrompt(parts, text);
+  }
+
+  /** Hint card for a bare group mention when the chat has no Session yet. */
+  async #sendBareMentionHint(chatId, topic) {
+    if (topic?.rootMessageId && typeof this.#bot.replyCardInThread === 'function') {
+      try {
+        await this.#bot.replyCardInThread(topic.rootMessageId, noticeCard(BARE_MENTION_HINT, '在的', 'blue'));
+        return;
+      } catch {
+        // Fall through to a normal chat card.
+      }
+    }
+    await sendNotice(this.#bot, chatId, BARE_MENTION_HINT, '在的', 'blue');
   }
 
   /** Keep the last Web-side question/approval so /stop can tell the user what was pending. */
