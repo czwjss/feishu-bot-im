@@ -175,16 +175,14 @@ function statPairRow(first, second = null) {
   return { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '16px', columns };
 }
 
-/** Section header: fixed icon slot keeps titles aligned across sections. */
-function statHeader(icon, label, value) {
+/** Bordered subsection; the header holds only the title so both sections align. */
+function section(title, rows) {
   return {
-    tag: 'column_set',
-    flex_mode: 'none',
-    columns: [
-      { tag: 'column', width: '24px', vertical_align: 'center', elements: [{ tag: 'markdown', content: icon }] },
-      { tag: 'column', width: 'auto', vertical_align: 'center', elements: [{ tag: 'markdown', content: `**${label}**` }] },
-      { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', horizontal_align: 'right', elements: [{ tag: 'markdown', content: `**${value}**` }] },
-    ],
+    tag: 'collapsible_panel',
+    expanded: true,
+    border: { color: 'grey', corner_radius: '8px' },
+    header: { title: { tag: 'markdown', content: `**${title}**` } },
+    elements: rows,
   };
 }
 
@@ -261,14 +259,13 @@ export function menuCard({
     const prompt = (usage.uncachedInputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
     const hit = prompt > 0 ? Math.round(((usage.cacheReadTokens ?? 0) / prompt) * 100) : null;
     const rows = [
+      statRow('总计', formatTokens(total), true),
       statPairRow({ label: '未缓存输入', value: formatTokens(usage.uncachedInputTokens) },
         { label: '缓存读取', value: formatTokens(usage.cacheReadTokens) }),
       statPairRow({ label: '输出', value: formatTokens(usage.outputTokens) },
         hit !== null ? { label: '缓存命中', value: `${hit}%` } : null),
     ];
-    elements.push({ tag: 'hr' });
-    elements.push(statHeader('🪙', 'Token 用量', formatTokens(total)));
-    elements.push(...rows);
+    elements.push(section('🪙 Token 用量', rows));
   }
   const pressure = stats?.contextPressure ?? null;
   const breakdown = stats?.contextBreakdown ?? null;
@@ -276,13 +273,15 @@ export function menuCard({
   const used = Number(pressure?.projectedTokens ?? pressure?.pressureTokens ?? 0);
   if (windowSize > 0 && used > 0) {
     const percent = Math.min(100, Math.round((used / windowSize) * 100));
-    elements.push({ tag: 'hr' });
-    elements.push(statHeader('📊', '会话上下文', `已用 ${percent}%　${formatCompact(used)} / ${formatCompact(windowSize)}`));
+    const rows = [
+      statRow('已用', `${percent}%　${formatCompact(used)} / ${formatCompact(windowSize)}`, true),
+    ];
     if (breakdown) {
-      elements.push(statPairRow({ label: '系统提示词', value: `~${formatCompact(breakdown.systemTokens)}` },
+      rows.push(statPairRow({ label: '系统提示词', value: `~${formatCompact(breakdown.systemTokens)}` },
         { label: '工具定义', value: `~${formatCompact(breakdown.toolsTokens)}` }));
-      elements.push(statPairRow({ label: '对话消息', value: `~${formatCompact(breakdown.messageTokens)}` }));
+      rows.push(statPairRow({ label: '对话消息', value: `~${formatCompact(breakdown.messageTokens)}` }));
     }
+    elements.push(section('📊 会话上下文', rows));
   }
 
   // 三等分栅格，每格内放一个固定宽度的按钮（约五个汉字）
