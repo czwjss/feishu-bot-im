@@ -1,3 +1,4 @@
+import { formatTokens } from './progress.js';
 /**
  * Card 2.0 builders. Buttons carry `{ action: "..." }` values that come back
  * through `card.action.trigger`; the bridge resolves them by pending id.
@@ -141,15 +142,8 @@ export function resolvedApprovalText(outcome) {
   return '⚠️ 审批已失效。';
 }
 
-function formatCount(value) {
-  return Number(value || 0).toLocaleString('en-US');
-}
-
 function formatCompact(value) {
-  const n = Number(value || 0);
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return `${Math.round(n)}`;
+  return formatTokens(value).replace(' tok', '');
 }
 
 /** Two-column stat: label left, value right-aligned. */
@@ -247,10 +241,10 @@ export function menuCard({
     const hit = prompt > 0 ? Math.round(((usage.cacheReadTokens ?? 0) / prompt) * 100) : null;
     const rows = [];
     if (hit !== null) rows.push(statRow('缓存命中', `${hit}%`));
-    rows.push(statRow('未缓存输入', `${formatCount(usage.uncachedInputTokens)} tok`));
-    rows.push(statRow('缓存读取', `${formatCount(usage.cacheReadTokens)} tok`));
-    rows.push(statRow('输出', `${formatCount(usage.outputTokens)} tok`));
-    elements.push(section(`**🪙 Token 用量**　　${formatCount(total)} tok`, rows));
+    rows.push(statRow('未缓存输入', formatTokens(usage.uncachedInputTokens)));
+    rows.push(statRow('缓存读取', formatTokens(usage.cacheReadTokens)));
+    rows.push(statRow('输出', formatTokens(usage.outputTokens)));
+    elements.push(section(`**🪙 Token 用量**　　${formatTokens(total)}`, rows));
   }
   const pressure = stats?.contextPressure ?? null;
   const breakdown = stats?.contextBreakdown ?? null;
