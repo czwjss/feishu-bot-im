@@ -54,6 +54,11 @@ export async function runCommand(services, name, argument, context) {
           await notice('话题内可直接对话；需要把结论同步回主会话时用 `/topic-sync`。', '话题');
           return true;
         }
+        // Private chats have no thread semantics, so a topic could never be continued.
+        if (context?.chatType === 'p2p') {
+          await notice('私聊不支持话题；需要并行任务时，请在群里 @我 并使用 `/topic 标题`。', '话题');
+          return true;
+        }
         if (!arg || arg.toLowerCase() === 'list') {
           await services.showTopics?.(chatId);
           return true;
@@ -150,10 +155,10 @@ export async function collectMenuData(services, chatKey) {
   };
 }
 
-export async function buildMenuCard(services, { chatKey, pending = null }) {
+export async function buildMenuCard(services, { chatKey }) {
   const data = await collectMenuData(services, chatKey);
   const stats = data.sessionId ? await services.harness.sessionProjections?.(data.sessionId).catch(() => null) : null;
-  return menuCard({ ...data, pending, stats });
+  return menuCard({ ...data, stats });
 }
 
 /** The value a picker currently has, mirroring the menu card. */

@@ -89,7 +89,7 @@ const config = {
   appId: 'cli_test', botOpenId: 'ou_bot', workspace: '/tmp/ws', model: null,
   busyMode: 'queue',
   contextEnhancement: { group: { enabled: false, fields: [], guidance: '' }, direct: { enabled: false, fields: [], guidance: '' } },
-  access: { direct: 'all', group: 'all', allowOpenIds: [] },
+  access: { group: 'all', allowOpenIds: [] },
 };
 
 function inbound(text, extra = {}) {

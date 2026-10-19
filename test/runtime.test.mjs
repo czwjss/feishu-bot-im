@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -95,6 +95,14 @@ const sent = await manager.sendFileForSession({ sessionId: 'sess-2', path: file 
 assert.equal(sent.fileName, 'a.txt');
 assert.equal(calls.at(-1).kind, 'file-msg');
 
+// 7b) 话题会话回传文件也发到群 chat id
+{
+  await s1.bindSession('topic:oc_3:1', 'sess-3');
+  const topicSent = await manager.sendFileForSession({ sessionId: 'sess-3', path: file });
+  assert.equal(topicSent.chatId, 'oc_3', 'topic binding resolves to the chat id');
+  assert.equal(calls.at(-1).chatId, 'oc_3');
+}
+
 // 8) 投递：按路由直发（不再有目标清单）
 {
   await r1.deliver('oc_daily', '测试消息');
@@ -120,12 +128,23 @@ assert.equal(calls.at(-1).kind, 'file-msg');
   );
 }
 
-// 10) 移除机器人：只清它自己的密钥和配置
+// 10) 移除机器人：只清它自己的密钥、配置与落盘数据
+const exists = (path) => access(path).then(() => true, () => false);
+await writeFile(join(dir, `state-${first.id}.json`), '{}');
+await writeFile(join(dir, `status-${first.id}.json`), '{}');
+await writeFile(join(dir, `events-${first.id}.log`), '');
+await writeFile(join(dir, `state-${second.id}.json`), '{}');
+await mkdir(join(dir, 'inbox', first.id), { recursive: true });
+await writeFile(join(dir, 'inbox', first.id, 'a.txt'), 'hi');
 await manager.removeBot(first.id);
 assert.equal(configStore.bots.length, 1);
 assert.equal(configStore.bots[0].id, second.id);
 assert.equal(secrets.size, 1);
-assert.equal(manager.runTimes?manager.runTimes.size:undefined, undefined);
+assert.equal(await exists(join(dir, `state-${first.id}.json`)), false, 'state file removed');
+assert.equal(await exists(join(dir, `status-${first.id}.json`)), false, 'status file removed');
+assert.equal(await exists(join(dir, `events-${first.id}.log`)), false, 'event log removed');
+assert.equal(await exists(join(dir, 'inbox', first.id)), false, 'inbox removed');
+assert.equal(await exists(join(dir, `state-${second.id}.json`)), true, 'other bot untouched');
 
 await rm(dir, { recursive: true, force: true });
-console.log('runtime (multi-bot): 10 scenarios passed');
+console.log('runtime (multi-bot): 12 scenarios passed');

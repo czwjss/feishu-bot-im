@@ -55,6 +55,12 @@ assert.deepEqual(calls.at(-1), ['save', { processDetail: 'brief' }], 'progress d
 await handle('bot.topics.set', { botId: 'bot_1', enabled: false });
 assert.deepEqual(calls.at(-1), ['save', { topicsEnabled: false }], 'topics switch saved');
 
+await handle('bot.eavesdrop.set', { botId: 'bot_1', eavesdrop: { enabled: true, limit: 0 } });
+assert.deepEqual(calls.at(-1), ['save', { eavesdrop: { enabled: true, limit: 0 } }], 'eavesdrop settings saved');
+
+await handle('bot.mentions.set', { botId: 'bot_1', mentions: { enabled: true, allowAll: false } });
+assert.deepEqual(calls.at(-1), ['save', { mentions: { enabled: true, allowAll: false } }], 'mention settings saved');
+
 const ce = await handle('bot.context-enhancement.set', {
   botId: 'bot_1',
   config: { group: { enabled: true, fields: ['senderId'], guidance: 'g' }, direct: { enabled: false, fields: [], guidance: '' } },
@@ -88,4 +94,4 @@ assert.equal(bad.error.code, 'bad-request');
 // 未知机器人向上抛错，由 installRpc 转成 {ok:false} 交给前端
 await assert.rejects(() => handle('bot.reconnect', { botId: 'bot_x' }), /机器人不存在/);
 
-console.log('rpc handler (multi-bot): 17 assertions passed');
+console.log('rpc handler (multi-bot): 19 assertions passed');

@@ -216,44 +216,6 @@ export class FeishuBot {
     return response?.data?.message_id ?? messageId;
   }
 
-  /**
-   * Probe one capability with the cheapest call that needs it.
-   * Returns { code, violations } — code 0 or a non-scope business error means
-   * the permission is present.
-   */
-  async probeScope(probe) {
-    const call = {
-      'chat.list': () => this.#client.im.v1.chat.list({ params: { page_size: 1 } }),
-      'contact.user': () => this.#client.contact.v3.user.get({
-        path: { user_id: 'ou_00000000000000000000000000000000' },
-        params: { user_id_type: 'open_id' },
-      }),
-      'message.list': () => this.#client.im.v1.message.list({
-        params: { container_id_type: 'chat', container_id: 'oc_00000000000000000000000000000000', page_size: 1 },
-      }),
-      // 发到一个不存在的会话：需要 send 权限，但不会真的发出消息
-      'message.send': () => this.#client.im.v1.message.create({
-        params: { receive_id_type: 'chat_id' },
-        data: { receive_id: 'oc_00000000000000000000000000000000', msg_type: 'text', content: JSON.stringify({ text: 'probe' }) },
-      }),
-      // 上传 1 字节文件：需要 im:resource，不产生可见消息
-      'file.upload': () => this.#client.im.v1.file.create({
-        data: { file_type: 'stream', file_name: 'probe.txt', file: Buffer.from('x') },
-      }),
-    }[probe];
-    if (typeof call !== 'function') return { code: 0, violations: [] };
-    try {
-      const response = await call();
-      return { code: Number(response?.code ?? 0), violations: [] };
-    } catch (error) {
-      const data = error?.response?.data ?? {};
-      const violations = Array.isArray(data?.error?.permission_violations)
-        ? data.error.permission_violations.map((item) => item?.subject ?? item?.name).filter(Boolean)
-        : [];
-      return { code: Number(data?.code ?? error?.code ?? -1), violations };
-    }
-  }
-
   /** Tenant token for direct OpenAPI calls the SDK does not wrap. */
   async #tenantToken() {
     if (this.#token && this.#token.expiresAt > Date.now() + 60_000) return this.#token.value;

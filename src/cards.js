@@ -207,7 +207,7 @@ function usageSections(stats) {
 /** Menu card: session and workspace dropdowns plus usage stats and actions. */
 export function menuCard({
   sessionId, sessions = [], currentWorkspace = null, workspaces = [],
-  running = false, model = null, models = [], efforts = [], presets = [], sessionWorkspace = null, stats = null,
+  models = [], efforts = [], sessionWorkspace = null, stats = null,
 }) {
   const select = (name, action, items, placeholder) => ({
     tag: 'select_static',
@@ -264,12 +264,6 @@ export function menuCard({
   if (efforts.length > 0) {
     elements.push(row('思考强度', select('reasoning_pick', 'reasoning_pick', efforts,
       efforts.find((item) => item.current)?.label ?? '选择强度')));
-  }
-  if (presets.length > 0) {
-    const control = select('preset_pick', 'preset_pick', presets,
-      presets.find((item) => item.current)?.label ?? '跟随 Host 默认');
-    control.disabled = true;
-    elements.push(row('预设', control));
   }
   elements.push(...usageSections(stats));
 

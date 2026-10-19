@@ -4,11 +4,12 @@
  * Each bot has its own credential ref, state file, long connection, bridge and
  * settings; the manager routes Host events to the bot that owns the Session.
  */
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 
 import { validateContextEnhancementConfig } from './context-enhancement.js';
 import { secretRefFor } from './config.js';
+import { chatIdOfKey } from './message-text.js';
 import { FeishuBot, verifyCredentials } from './feishu.js';
 import { FeishuBridge } from './bridge.js';
 import { RegistrationManager } from './registration.js';
@@ -25,6 +26,9 @@ export const REQUIRED_SCOPES = Object.freeze([
   'cardkit:card:write',
 ]);
 export const REQUIRED_EVENTS = Object.freeze(['im.message.receive_v1']);
+
+/** Extra scope needed to receive messages the bot was not mentioned in. */
+export const EAVESDROP_SCOPES = Object.freeze(['im:message.group_msg']);
 
 const STATES = Object.freeze({
   IDLE: 'idle',
@@ -169,6 +173,8 @@ export class BotRuntime {
       permissionPreset: config.permissionPreset ?? null,
       busyMode: config.busyMode ?? 'queue',
       contextEnhancement: config.contextEnhancement ?? null,
+      eavesdrop: config.eavesdrop ?? null,
+      mentions: config.mentions ?? null,
       access: config.access ?? null,
       connectedAt: config.connectedAt ?? null,
       boundChats: Object.keys(this.#stateStore.value.sessions).length,
@@ -359,8 +365,9 @@ export class BotRuntime {
   async sendTest() {
     if (!this.#bot) throw new Error('机器人尚未连接');
     const chatKey = Object.keys(this.#stateStore.value.sessions)[0];
-    if (!chatKey) throw new Error('还没有可测试的会话：先在飞书里给这个机器人发一条消息');
-    await this.#bot.sendText(chatKey.replace(/^chat:/, ''), 'DeepSeek Harness 连接测试成功 ✅');
+    const chatId = chatIdOfKey(chatKey);
+    if (!chatId) throw new Error('还没有可测试的会话：先在飞书里给这个机器人发一条消息');
+    await this.#bot.sendText(chatId, 'DeepSeek Harness 连接测试成功 ✅');
     return true;
   }
 
@@ -368,8 +375,8 @@ export class BotRuntime {
     if (!this.#bot) throw new Error('机器人尚未连接');
     const chatKey = (sessionId ? this.#stateStore.keyForSession(sessionId) : null)
       ?? Object.keys(this.#stateStore.value.sessions ?? {})[0];
-    if (!chatKey) throw new Error('还没有可用的飞书会话：先在飞书里给机器人发一条消息');
-    const chatId = chatKey.replace(/^chat:/, '');
+    const chatId = chatIdOfKey(chatKey);
+    if (!chatId) throw new Error('还没有可用的飞书会话：先在飞书里给机器人发一条消息');
     const base = this.config?.workspace ?? process.cwd();
     const absolute = isAbsolute(path) ? path : resolve(base, path);
     signal?.throwIfAborted?.();
@@ -526,7 +533,20 @@ export class RuntimeManager {
     this.#runtimes.delete(botId);
     await this.#ctx.credentials.unset(bot.secretRef).catch(() => undefined);
     await this.#configStore.remove(botId);
+    await this.#removeBotData(botId);
     return true;
+  }
+
+  /** Drop the per-bot state, status, event log and inbox left on disk. */
+  async #removeBotData(botId) {
+    if (!this.#dataDir || !/^[A-Za-z0-9_-]+$/.test(botId)) return;
+    const targets = [
+      join(this.#dataDir, `state-${botId}.json`),
+      join(this.#dataDir, `status-${botId}.json`),
+      join(this.#dataDir, `events-${botId}.log`),
+      join(this.#dataDir, 'inbox', botId),
+    ];
+    await Promise.all(targets.map((path) => rm(path, { recursive: true, force: true }).catch(() => undefined)));
   }
 
   async reconnectBot(botId) {
@@ -556,7 +576,7 @@ export class RuntimeManager {
         createOnly: false,
         appId: bot.appId,
         addons: {
-          scopes: { tenant: REQUIRED_SCOPES },
+          scopes: { tenant: bot.eavesdrop?.enabled ? [...REQUIRED_SCOPES, ...EAVESDROP_SCOPES] : REQUIRED_SCOPES },
           events: { items: { tenant: REQUIRED_EVENTS } },
         },
       };

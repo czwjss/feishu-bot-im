@@ -118,6 +118,14 @@ export function createRpcHandler({ manager, harness, version }) {
         await runtimeOf(input).saveContextEnhancement(input.config);
         return ok(await runtimeOf(input).status());
 
+      case 'bot.eavesdrop.set':
+        await runtimeOf(input).save({ eavesdrop: input.eavesdrop });
+        return ok(await runtimeOf(input).status());
+
+      case 'bot.mentions.set':
+        await runtimeOf(input).save({ mentions: input.mentions });
+        return ok(await runtimeOf(input).status());
+
       case 'models.list': {
         const catalog = await harness.modelCatalog();
         const groups = (catalog?.groups ?? []).map((group) => ({

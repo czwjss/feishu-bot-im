@@ -18,6 +18,10 @@ export const INJECTED_CONTEXT_TAGS = Object.freeze({
   guidanceClose: '</feishu_bot_source_guidance>',
   topicSyncOpen: '<feishu_bot_topic_sync>',
   topicSyncClose: '</feishu_bot_topic_sync>',
+  eavesdropOpen: '<feishu_bot_eavesdrop>',
+  eavesdropClose: '</feishu_bot_eavesdrop>',
+  peopleOpen: '<feishu_bot_people>',
+  peopleClose: '</feishu_bot_people>',
 });
 
 export const CONTEXT_ENHANCEMENT_FIELDS = Object.freeze([

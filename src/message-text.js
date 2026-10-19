@@ -1,4 +1,12 @@
 /** Text helpers shared by the bridge and the turn runner. */
+
+/** `chat:<id>` / `topic:<id>:<n>` → the Feishu chat id (`oc_…`). */
+export function chatIdOfKey(key) {
+  if (typeof key !== 'string' || !key) return null;
+  if (key.startsWith('topic:')) return key.split(':')[1] || null;
+  return key.replace(/^chat:/, '') || null;
+}
+
 export function scopedValue(value, scope, fallback) {
   if (value && typeof value === 'object') return value[scope] ?? fallback;
   return value ?? fallback;

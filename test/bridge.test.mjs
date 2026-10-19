@@ -18,6 +18,7 @@ class FakeBot {
   async updateText(id, text) { this.updates.push({ id, text }); return id; }
   async sendCard(chatId, card) { const id = `m${++seq}`; this.cards.push({ chatId, card, id }); return id; }
   async getChatName(chatId) { return chatId === 'oc_group' ? '研发群' : null; }
+  async getUserName(openId) { return openId === 'ou_user' ? '测试用户' : null; }
   async getMessage(id) { return id === 'om_bot_msg' ? { senderId: 'ou_bot', senderType: 'app' } : { senderId: 'ou_other', senderType: 'user' }; }
   async patchCard(id, card) { this.patches.push({ id, card }); return id; }
   async addReaction(messageId, emoji) { this.reactions = this.reactions ?? []; const id = `r${this.reactions.length + 1}`; this.reactions.push({ messageId, emoji, id }); return id; }
@@ -82,7 +83,9 @@ function makeBridge(overrides = {}) {
     workspace: null,
     model: null,
     busyMode: 'queue',
-    access: { direct: 'all', group: 'all', allowOpenIds: [], managers: ['ou_user'] },
+    access: { group: 'all', allowOpenIds: [], managers: ['ou_user'] },
+    // Tests opt in explicitly; production normalization turns this on by default.
+    eavesdrop: { enabled: false, limit: 0 },
     ...overrides,
   };
   const bridge = new FeishuBridge({
@@ -365,7 +368,7 @@ function message(overrides = {}) {
 
 // 13b) 群内管理动作只允许白名单
 {
-  const config = { access: { direct: 'all', group: 'all', allowOpenIds: [], managers: ['ou_admin'] } };
+  const config = { access: { group: 'all', allowOpenIds: [], managers: ['ou_admin'] } };
   const { bot, bridge } = makeBridge(config);
   await bridge.handleMessage(message({
     chat_id: 'oc_group', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
@@ -385,7 +388,7 @@ function message(overrides = {}) {
 
 // 13c) 群内卡片上的管理动作同样受限
 {
-  const config = { access: { direct: 'all', group: 'all', allowOpenIds: [], managers: [] } };
+  const config = { access: { group: 'all', allowOpenIds: [], managers: [] } };
   const { bridge } = makeBridge(config);
   // 先让 bridge 认识这个群（群类型来自入站消息）
   await bridge.handleMessage(message({ chat_id: 'oc_group', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }] }));
@@ -458,7 +461,7 @@ function message(overrides = {}) {
 
 // 13e2) 话题不受管理白名单限制；开关关闭后拒绝
 {
-  const restricted = makeBridge({ access: { direct: 'all', group: 'all', allowOpenIds: [], managers: [] } });
+  const restricted = makeBridge({ access: { group: 'all', allowOpenIds: [], managers: [] } });
   await restricted.bridge.handleMessage(message({
     chat_id: 'oc_topic_open', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
     content: JSON.stringify({ text: '/topic 任意成员可开话题\n正文' }),
@@ -723,9 +726,287 @@ function message(overrides = {}) {
   const content = harness.prompts.at(-1).content;
   assert.equal(content.length, 1);
   assert.equal(content[0].text, '你好');
-  assert.equal(contextBySession.get('sess-1'), undefined, 'group scope is off, so nothing is injected');
+  const context = contextBySession.get('sess-1') ?? '';
+  assert.ok(!context.includes('<feishu_bot_source_guidance>'), 'group scope is off, so no guidance is injected');
+  assert.match(context, /需要明确让某人收到消息或同步重要信息时才 @/, 'mention guidance is still present');
+  bridge.dispose();
+}
+
+// 17) 话题会话的审批卡发往群 chat id，而不是 topic 绑定键
+{
+  const { bot, bridge } = makeBridge();
+  await state.bindSession('topic:oc_topic:1', 'sess-topic-approve');
+  const request = {
+    callId: 'call-t', toolName: 'bash', signal: new AbortController().signal,
+    agent: { session: { id: 'sess-topic-approve', snapshotEvents: () => [{ type: 'approval/asked', data: { id: 'ap-t', callId: 'call-t' } }] } },
+  };
+  const pending = bridge.handleApproval(request, () => new Promise(() => {}));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(bot.cards.length, 1, 'topic approval card is sent');
+  assert.equal(bot.cards[0].chatId, 'oc_topic', 'card goes to the chat, not "topic:oc_topic:1"');
+  const toast = await bridge.onCardAction({
+    operator: { open_id: 'ou_user' },
+    action: { value: { action: 'approve:ap-t' } },
+    context: { open_message_id: bot.cards[0].id, open_chat_id: 'oc_topic' },
+  });
+  assert.equal(toast.toast.type, 'success');
+  assert.equal(await pending, 'allowed-once');
+  bridge.dispose();
+}
+
+// 18) 只 @ 机器人、没有正文的消息不触发轮次
+{
+  const { harness, bridge } = makeBridge();
+  await bridge.handleMessage(message({ chat_id: 'oc_empty', content: JSON.stringify({ text: '' }) }));
+  assert.equal(harness.created, 0, 'no session is created for an empty mention');
+  assert.equal(harness.prompts.length, 0, 'no prompt is submitted');
+  bridge.dispose();
+}
+
+// 19) 群聊审批只允许管理白名单成员操作
+{
+  const { bot, bridge } = makeBridge();
+  // Bind an explicit Session id: every FakeHarness numbers its Sessions from 1,
+  // so a created session would collide with bindings left by earlier scenarios.
+  await state.bindSession('chat:oc_group_approve', 'sess-group-approve');
+  await bridge.handleMessage(message({
+    chat_id: 'oc_group_approve', chat_type: 'group',
+    mentions: [{ id: { open_id: 'ou_bot' } }], content: JSON.stringify({ text: '跑个命令' }),
+  }));
+  const sessionId = 'sess-group-approve';
+  const request = {
+    callId: 'call-g', toolName: 'bash', signal: new AbortController().signal,
+    agent: { session: { id: sessionId, snapshotEvents: () => [{ type: 'approval/asked', data: { id: 'ap-g', callId: 'call-g' } }] } },
+  };
+  const pending = bridge.handleApproval(request, () => new Promise(() => {}));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const denied = await bridge.onCardAction({
+    operator: { open_id: 'ou_other' },
+    action: { value: { action: 'approve:ap-g' } },
+    context: { open_message_id: bot.cards.at(-1).id, open_chat_id: 'oc_group_approve' },
+  });
+  assert.equal(denied.toast.type, 'warning', 'non-manager cannot approve in a group');
+  const allowed = await bridge.onCardAction({
+    operator: { open_id: 'ou_user' },
+    action: { value: { action: 'approve:ap-g' } },
+    context: { open_message_id: bot.cards.at(-1).id, open_chat_id: 'oc_group_approve' },
+  });
+  assert.equal(allowed.toast.type, 'success');
+  assert.equal(await pending, 'allowed-once', 'the manager can still approve');
+  bridge.dispose();
+}
+
+// 20) 话题同步摘要全部随消息注入（全部保留，不按话题去重）
+{
+  const { harness, bridge } = makeBridge();
+  await state.bindSession('chat:oc_sync_latest', 'sess-sync-latest');
+  await state.addSynced('oc_sync_latest', { topicId: 1, title: '旧标题', summary: '旧结论', at: new Date().toISOString() });
+  await state.addSynced('oc_sync_latest', { topicId: 1, title: '新标题', summary: '新结论', at: new Date().toISOString() });
+  await state.addSynced('oc_sync_latest', { topicId: 2, title: '第二个', summary: '二结论', at: new Date().toISOString() });
+  await bridge.handleMessage(message({ chat_id: 'oc_sync_latest', content: JSON.stringify({ text: '继续' }) }));
+  const syncPart = harness.prompts.at(-1).content.find((part) => String(part.text).includes('<feishu_bot_topic_sync>'));
+  assert.ok(syncPart, 'sync block still rides the prompt');
+  assert.match(syncPart.text, /旧结论/, 'every synced summary is kept');
+  assert.match(syncPart.text, /新结论/);
+  assert.match(syncPart.text, /二结论/);
+  bridge.dispose();
+}
+
+// 21) 话题会话的提问卡同样发到群 chat id
+{
+  const { bot, bridge } = makeBridge();
+  await state.bindSession('topic:oc_topic_q:1', 'sess-topic-question');
+  const pending = bridge.handleQuestion({
+    agent: { session: { id: 'sess-topic-question' } },
+    questions: [{ id: 'q-t', question: '选哪个？', options: [{ label: 'A' }] }],
+  }, () => new Promise(() => {}));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(bot.cards[0].chatId, 'oc_topic_q', 'question card goes to the chat');
+  await bridge.onCardAction({
+    operator: { open_id: 'ou_user' },
+    action: { value: { action: 'answer:q-t:0' } },
+    context: { open_message_id: bot.cards[0].id, open_chat_id: 'oc_topic_q' },
+  });
+  assert.deepEqual(await pending, { answers: [{ id: 'q-t', selected: ['A'] }] });
+  bridge.dispose();
+}
+
+// 22) 私聊不支持话题（没有线程语义，无法继续）
+{
+  const { bot, harness, bridge } = makeBridge();
+  await bridge.handleMessage(message({ chat_id: 'oc_dm_topic', content: JSON.stringify({ text: '/topic 私聊话题' }) }));
+  assert.equal(harness.created, 0, 'no topic session in a private chat');
+  assert.match(cardText(bot), /私聊不支持话题/);
+  bridge.dispose();
+}
+
+// 23) 旁听：未 @ 消息进入缓冲，下次 @ 时注入一次
+{
+  const { bot, harness, bridge } = makeBridge({ eavesdrop: { enabled: true, limit: 0 } });
+  await bridge.handleMessage(message({
+    chat_id: 'oc_listen', chat_type: 'group', mentions: [],
+    content: JSON.stringify({ text: '今晚发版吗' }),
+  }));
+  assert.equal(harness.prompts.length, 0, 'eavesdropped messages do not start a turn');
+  assert.equal(bot.cards.length, 0, 'no card for eavesdropped messages');
+  await bridge.handleMessage(message({
+    chat_id: 'oc_listen', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
+    content: JSON.stringify({ text: '你们在聊什么' }),
+  }));
+  const block = harness.prompts.at(-1).content.find((part) => String(part.text).includes('<feishu_bot_eavesdrop>'));
+  assert.ok(block, 'the buffer rides the next mention');
+  assert.match(block.text, /今晚发版吗/);
+  assert.match(block.text, /测试用户\(ou_user\)：今晚发版吗/, 'the record carries both name and open_id');
+  await bridge.handleMessage(message({
+    chat_id: 'oc_listen', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
+    content: JSON.stringify({ text: '继续' }),
+  }));
+  assert.ok(
+    !harness.prompts.at(-1).content.some((part) => String(part.text).includes('今晚发版吗')),
+    'already injected context is not repeated',
+  );
+  bridge.dispose();
+}
+
+// 24) 旁听条数：limit=N 只保留最新 N 条
+{
+  const { harness, bridge } = makeBridge({ eavesdrop: { enabled: true, limit: 2 } });
+  for (const text of ['m1', 'm2', 'm3']) {
+    await bridge.handleMessage(message({
+      chat_id: 'oc_listen_limit', chat_type: 'group', mentions: [],
+      content: JSON.stringify({ text }),
+    }));
+  }
+  await bridge.handleMessage(message({
+    chat_id: 'oc_listen_limit', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
+    content: JSON.stringify({ text: '总结' }),
+  }));
+  const block = harness.prompts.at(-1).content.find((part) => String(part.text).includes('<feishu_bot_eavesdrop>'));
+  assert.ok(block);
+  assert.ok(!block.text.includes('m1'), 'the oldest message was rolled off');
+  assert.match(block.text, /m2/);
+  assert.match(block.text, /m3/);
+  bridge.dispose();
+}
+
+// 25) 旁听按话题隔离：话题缓冲不会进主会话，主会话缓冲也不会进话题
+{
+  const { harness, bridge } = makeBridge({ eavesdrop: { enabled: true, limit: 0 } });
+  const topic = await state.createTopic({
+    chatId: 'oc_topic_listen', title: '旁听话题', brief: '', sessionId: 'sess-topic-listen', rootMessageId: 'om_topic_listen_root',
+  });
+  await state.bindSession(`topic:oc_topic_listen:${topic.topicId}`, 'sess-topic-listen');
+  await bridge.handleMessage(message({
+    chat_id: 'oc_topic_listen', chat_type: 'group', parent_id: 'om_topic_listen_root', mentions: [],
+    content: JSON.stringify({ text: '话题里的闲聊' }),
+  }));
+  assert.equal(harness.prompts.length, 0);
+  await bridge.handleMessage(message({
+    chat_id: 'oc_topic_listen', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
+    content: JSON.stringify({ text: '主会话' }),
+  }));
+  assert.ok(!JSON.stringify(harness.prompts.at(-1).content).includes('话题里的闲聊'), 'main chat has its own buffer');
+  await bridge.handleMessage(message({
+    chat_id: 'oc_topic_listen', chat_type: 'group', parent_id: 'om_topic_listen_root', mentions: [{ id: { open_id: 'ou_bot' } }],
+    content: JSON.stringify({ text: '话题里问' }),
+  }));
+  const block = harness.prompts.at(-1).content.find((part) => String(part.text).includes('话题里的闲聊'));
+  assert.ok(block, 'topic buffer is scoped to the topic');
+  bridge.dispose();
+}
+
+// 26) 旁听图片：默认只记占位符，不下载
+{
+  const { harness, bridge } = makeBridge({ eavesdrop: { enabled: true, limit: 0 } });
+  await bridge.handleMessage(message({
+    chat_id: 'oc_listen_image', chat_type: 'group', mentions: [], message_type: 'image',
+    content: JSON.stringify({ image_key: 'ik_listen' }),
+  }));
+  await bridge.handleMessage(message({
+    chat_id: 'oc_listen_image', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
+    content: JSON.stringify({ text: '图里是什么' }),
+  }));
+  const content = harness.prompts.at(-1).content;
+  const block = content.find((part) => String(part.text).includes('<feishu_bot_eavesdrop>'));
+  assert.match(block.text, /\[图片\]/);
+  assert.ok(!content.some((part) => part.type === 'image'), 'media is not downloaded in placeholder mode');
+  bridge.dispose();
+}
+
+// 27) 白名单拒绝的旁听消息不记录，也不在群里刷无权限提示
+{
+  const { bot, harness, bridge } = makeBridge({
+    eavesdrop: { enabled: true, limit: 0 },
+    access: { group: 'allowlist', allowOpenIds: ['ou_allowed'], managers: ['ou_user'] },
+  });
+  const denied = message({
+    chat_id: 'oc_listen_deny', chat_type: 'group', mentions: [],
+    content: JSON.stringify({ text: '被拒绝的闲聊' }),
+  });
+  denied.sender = { sender_type: 'user', sender_id: { open_id: 'ou_other' } };
+  await bridge.handleMessage(denied);
+  assert.equal(bot.cards.length, 0, 'no notice for an un-addressed message');
+  const allowed = message({
+    chat_id: 'oc_listen_deny', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
+    content: JSON.stringify({ text: '在吗' }),
+  });
+  allowed.sender = { sender_type: 'user', sender_id: { open_id: 'ou_allowed' } };
+  await bridge.handleMessage(allowed);
+  assert.ok(!JSON.stringify(harness.prompts.at(-1).content).includes('被拒绝的闲聊'), 'denied messages are not buffered');
+  bridge.dispose();
+}
+
+// 28) @ 人：名单内保留，未知 id 与 @all 擦除；当前消息提到的人也会注入 open_id
+{
+  const { bot, harness, bridge } = makeBridge({ mentions: { enabled: true, allowAll: false } });
+  // Bind an explicit id: FakeHarness numbers Sessions from 1 in every test.
+  await state.bindSession('chat:oc_mention', 'sess-mention');
+  await bridge.handleMessage(message({
+    chat_id: 'oc_mention', chat_type: 'group',
+    mentions: [{ id: { open_id: 'ou_bot' } }, { id: { open_id: 'ou_zhang' }, name: '张三' }],
+    content: JSON.stringify({ text: '请通知一下' }),
+  }));
+  const prompt = JSON.stringify(harness.prompts.at(-1).content);
+  assert.match(prompt, /<feishu_bot_people>/, 'mentioned people are injected');
+  assert.match(prompt, /张三\(ou_zhang\)/, 'the mentioned person carries name and open_id');
+  const sessionId = 'sess-mention';
+  await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: sessionId }, {
+    type: 'assistant/message',
+    data: {
+      turn: 1,
+      message: { content: [{ type: 'text', text: '请 <at id=ou_user></at> 确认，<at id=ou_zhang></at> 也看下，<at id=ou_nobody></at> 不用，<at id=all></at> 不算。' }] },
+    },
+  });
+  await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+  const flat = JSON.stringify([...bot.cards.map((item) => item.card), ...bot.patches.map((item) => item.card)]);
+  assert.match(flat, /<at id=ou_user><\/at>/, 'current sender is mentionable');
+  assert.match(flat, /<at id=ou_zhang><\/at>/, 'mentioned person is mentionable');
+  assert.ok(!flat.includes('ou_nobody'), 'unknown ids are erased');
+  assert.ok(!flat.includes('id=all'), '@all is erased by default');
+  bridge.dispose();
+}
+
+// 29) 关闭 @ 能力：所有 at 标签擦除
+{
+  const { bot, bridge } = makeBridge({ mentions: { enabled: false } });
+  await state.bindSession('chat:oc_mention_off', 'sess-mention-off');
+  await bridge.handleMessage(message({
+    chat_id: 'oc_mention_off', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
+    content: JSON.stringify({ text: '请通知一下' }),
+  }));
+  const sessionId = 'sess-mention-off';
+  await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: sessionId }, {
+    type: 'assistant/message',
+    data: { turn: 1, message: { content: [{ type: 'text', text: '请 <at id=ou_user></at> 确认。' }] } },
+  });
+  await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+  const flat = JSON.stringify([...bot.cards.map((item) => item.card), ...bot.patches.map((item) => item.card)]);
+  assert.ok(!flat.includes('<at'), 'mentions are erased when the feature is off');
+  assert.ok(!flat.includes('ou_user'), 'the erased tag leaves no id behind');
   bridge.dispose();
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 36 scenarios passed');
+console.log('bridge: 49 scenarios passed');

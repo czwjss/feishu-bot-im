@@ -107,12 +107,13 @@ export function cacheHitRate(cache, input) {
 export function buildUsageTitle({ cumulative = null, turn = null, context = null } = {}) {
   const total = {
     input: (cumulative?.input ?? 0) + (turn?.input ?? 0),
+    output: (cumulative?.output ?? 0) + (turn?.output ?? 0),
     cache: (cumulative?.cache ?? 0) + (turn?.cache ?? 0),
     calls: (cumulative?.calls ?? 0) + (turn?.calls ?? 0),
   };
   if (total.calls <= 0) return null;
   const hit = cacheHitRate(total.cache, total.input);
-  const consumed = (total.input ?? 0) + (total.output ?? 0);
+  const consumed = total.input + total.output;
   const turnConsumed = (turn?.input ?? 0) + (turn?.output ?? 0);
   const parts = [
     `累计 ${formatTokens(consumed)}`,

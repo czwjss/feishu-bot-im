@@ -86,6 +86,15 @@ assert.equal(
   '**🪙 累计 2.0Ki tok · 本轮 2.0Ki tok · 缓存命中 0.0% · 上下文 90%**',
 );
 
+// 7b) 累计口径包含输出 token（不能只算输入）
+assert.equal(
+  buildUsageTitle({
+    cumulative: { input: 1000, output: 500, cache: 900, calls: 2 },
+    turn: { input: 2048, output: 948, cache: 1800, calls: 3 },
+  }),
+  '**🪙 累计 4.4Ki tok · 本轮 2.9Ki tok · 缓存命中 88.6%**',
+);
+
 const usageRows = buildUsageRows([
   { label: '主 Agent', input: 9700, cache: 896 },
   { label: '子智能体 · 调查', input: 1024, cache: 512 },
@@ -93,4 +102,4 @@ const usageRows = buildUsageRows([
 assert.match(usageRows, /^001\. 主 Agent · 消耗 9\.5Ki tok · 缓存命中 9\.2%/);
 assert.match(usageRows, /\n002\. 子智能体 · 调查 · 消耗 1\.0Ki tok · 缓存命中 50\.0%/);
 
-console.log('progress: 7 scenarios passed');
+console.log('progress: 8 scenarios passed');

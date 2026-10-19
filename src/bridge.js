@@ -5,10 +5,12 @@
  * single edited message → final answer. One chat maps to one DSH Session.
  */
 import { TurnRunner } from './turn.js';
-import { scopedValue, textOfContentOrPost } from './message-text.js';
+import { chatIdOfKey, scopedValue, textOfContentOrPost } from './message-text.js';
 import { approvalCard, questionCard, resolvedApprovalText, newSessionCard, adjustCard, noticeCard } from './cards.js';
 import { isAddressed, isAllowed, senderOpenId } from './access.js';
 import { collectMenuData, currentMenuValue, menuOptionLabel, runCommand } from './commands.js';
+import { EavesdropStore, describeMessageForEavesdrop, renderEavesdropBlock } from './eavesdrop.js';
+import { renderMentions } from './mentions.js';
 import { InboundContent } from './inbound.js';
 import { renderGuidanceBlock, renderSourceBlock } from './context-enhancement.js';
 import { appendFile, mkdir } from 'node:fs/promises';
@@ -28,7 +30,6 @@ export class FeishuBridge {
   #state;
   #logger;
   #version;
-  #pendingChats = new Map();
   #pending = new Map();
   #pendingByChat = new Map();
   #inbound;
@@ -42,8 +43,10 @@ export class FeishuBridge {
   #externalAsk = new Map();
   #reactionActive = new Map();
   #userNames = new Map();
+  #eavesdrop = new EavesdropStore();
+  #participants = new Map();
   #onContext;
-  #stats = { messagesReceived: 0, lastEventAt: null, lastEventType: null };
+  #stats = { messagesReceived: 0, events: 0, lastEventAt: null, lastEventType: null };
   #saveWorkspace;
   #disposed = false;
   #turns;
@@ -75,6 +78,7 @@ export class FeishuBridge {
       logEvent: (kind, detail) => this.#logEvent(kind, detail),
       processDetail: () => this.#config.processDetail ?? 'detailed',
       shouldRenderTurn: (sessionId) => this.#consumeTurnOrigin(sessionId),
+      renderMentions: (text, { chatKey, mode }) => this.#renderMentions(text, chatKey, mode),
     });
   }
 
@@ -85,7 +89,9 @@ export class FeishuBridge {
 
   /** Append one line per inbound event so "did anything arrive" is answerable. */
   #logEvent(kind, detail) {
-    this.#stats.messagesReceived += 1;
+    this.#stats.events += 1;
+    // Card sends/patches are also logged; only real inbound messages count here.
+    if (kind === 'message') this.#stats.messagesReceived += 1;
     this.#stats.lastEventAt = new Date().toISOString();
     this.#stats.lastEventType = kind;
     if (!this.#eventsPath) return;
@@ -104,7 +110,6 @@ export class FeishuBridge {
   dispose() {
     this.#disposed = true;
     this.#turns?.dispose();
-    this.#pendingChats.clear();
   }
 
   #log(level, message, error) {
@@ -131,18 +136,41 @@ export class FeishuBridge {
     await this.#state.markSeen(message.message_id);
 
     if (!isAllowed(this.#config, message, openId)) {
-      await sendNotice(this.#bot, message.chat_id, '当前账号没有使用权限。请让管理员在插件设置里把你的 Open ID 加入白名单。', '无权限');
+      // With the all-group-messages scope enabled every message arrives; only
+      // answer the addressed ones instead of spamming the chat with notices.
+      if (isAddressed(this.#config, message)) {
+        await sendNotice(this.#bot, message.chat_id, '当前账号没有使用权限。请让管理员在插件设置里把你的 Open ID 加入白名单。', '无权限');
+      }
       return;
     }
     const topic = this.#config.topicsEnabled === false ? null : this.#topicForMessage(message);
+    const chatKey = topic ? `topic:${message.chat_id}:${topic.topicId}` : `chat:${message.chat_id}`;
+    // Remember who spoke / who was mentioned so the model can @ them later.
+    const wantsMentions = this.#config.mentions?.enabled !== false;
+    const wantsName = wantsMentions || this.#config.eavesdrop?.enabled === true;
+    const senderName = wantsName && openId ? await this.#senderName(openId) : null;
+    const mentioned = new Map();
+    if (wantsMentions) {
+      this.#rememberParticipant(chatKey, openId, senderName);
+      for (const mention of Array.isArray(message.mentions) ? message.mentions : []) {
+        const mentionId = mention?.id?.open_id;
+        if (!mentionId) continue;
+        this.#rememberParticipant(chatKey, mentionId, mention.name);
+        if (mentionId === this.#config.botOpenId) continue;
+        const name = String(mention?.name ?? '').replace(/[<>&\r\n]/g, '').trim();
+        mentioned.set(mentionId, name || mentionId);
+      }
+    }
     // 话题内只有 @机器人 才处理；话题外按 @ 或引用机器人处理
     const addressed = topic
       ? isAddressed(this.#config, message)
       : (isAddressed(this.#config, message) || await this.#isReplyToBot(message));
-    if (!addressed) return;
+    if (!addressed) {
+      this.#recordEavesdrop(chatKey, message, openId, senderName);
+      return;
+    }
 
     const text = (textOfContentOrPost(message) ?? '').replace(/@_user_\d+/g, '').trim();
-    const chatKey = topic ? `topic:${message.chat_id}:${topic.topicId}` : `chat:${message.chat_id}`;
     this.#chatTypes.set(chatKey, message.chat_type);
 
     if (topic && text) {
@@ -163,7 +191,7 @@ export class FeishuBridge {
         return;
       }
     }
-    if (text && this.#resolveTextDecision(message.chat_id, text)) return;
+    if (text && this.#resolveTextDecision(chatKey, message.chat_id, openId, text)) return;
 
     if (text) {
       const match = COMMAND.exec(text);
@@ -171,6 +199,7 @@ export class FeishuBridge {
         const handled = await this.#runCommand(match[1].toLowerCase(), (match[2] ?? '').trim(), {
           chatId: message.chat_id,
           chatKey,
+          chatType: message.chat_type,
           messageId: message.message_id,
           openId,
         });
@@ -197,6 +226,10 @@ export class FeishuBridge {
       }
     }
 
+    // A bare mention (or an empty text body) carries no instruction: do not
+    // spend a turn on it.
+    if (parts.length === 0) return;
+
     await this.#react(message.message_id, REACTION.processing);
     await this.#submitPrompt({
       chatKey,
@@ -207,6 +240,7 @@ export class FeishuBridge {
       parts,
       text,
       openId,
+      people: [...mentioned.entries()].map(([id, name]) => ({ id, name })),
     });
   }
 
@@ -268,7 +302,81 @@ export class FeishuBridge {
     }
   }
 
-  async #submitPrompt({ chatKey, chatId, chatType, createTime, messageId, parts, text, openId }) {
+  // ── eavesdrop ─────────────────────────────────────────────────────────────
+
+  /** Non-addressed group messages become context for the next mention. */
+  #recordEavesdrop(chatKey, message, openId, senderName) {
+    if (this.#config.eavesdrop?.enabled !== true) return;
+    if (message?.chat_type !== 'group') return;
+    const described = describeMessageForEavesdrop(message);
+    if (!described.text) return;
+    this.#eavesdrop.record(chatKey, {
+      senderId: openId ?? null,
+      senderName: senderName ?? null,
+      at: Number(message.create_time) || Date.now(),
+      text: described.text,
+    }, this.#config.eavesdrop.limit ?? 0);
+  }
+
+  /** Keep the people seen in this chat/topic so mentions can be validated. */
+  #rememberParticipant(chatKey, openId, name) {
+    if (!openId || openId === this.#config.botOpenId) return;
+    let people = this.#participants.get(chatKey);
+    if (!people) {
+      people = new Map();
+      this.#participants.set(chatKey, people);
+    }
+    const current = people.get(openId);
+    people.set(openId, name || current || null);
+  }
+
+  /** open_id → name for everyone the model could legitimately @ here. */
+  #mentionDirectory(chatKey) {
+    const directory = new Map();
+    for (const [id, name] of this.#participants.get(chatKey) ?? []) {
+      directory.set(id, name || id);
+    }
+    return directory;
+  }
+
+  #renderMentions(text, chatKey, mode) {
+    const config = this.#config.mentions ?? {};
+    return renderMentions(text, {
+      mode,
+      enabled: config.enabled !== false,
+      allowAll: config.allowAll === true,
+      directory: this.#mentionDirectory(chatKey),
+    });
+  }
+
+  /** Fixed guidance appended to the Feishu session context. */
+  #mentionHint() {
+    return this.#config.mentions?.enabled !== false
+      ? '需要明确让某人收到消息或同步重要信息时才 @ 相关人，常规对话不需要 @。需要 @ 时直接输出 <at id=ou_xxx></at>，open_id 只能取自上下文里出现过的人（发送者或被 @ 的人）。'
+      : '';
+  }
+
+  /** Resolve a bounded number of display names once, at injection time. */
+  async #eavesdropEntries(entries) {
+    if (entries.length === 0) return entries;
+    const names = new Map();
+    let resolved = 0;
+    const result = [];
+    for (const entry of entries) {
+      let senderName = entry.senderName;
+      if (!senderName && entry.senderId && resolved < 10) {
+        if (!names.has(entry.senderId)) {
+          names.set(entry.senderId, await this.#senderName(entry.senderId));
+          resolved += 1;
+        }
+        senderName = names.get(entry.senderId);
+      }
+      result.push(senderName === entry.senderName ? entry : { ...entry, senderName });
+    }
+    return result;
+  }
+
+  async #submitPrompt({ chatKey, chatId, chatType, createTime, messageId, parts, text, openId, people = [] }) {
     let sessionId = this.#state.sessionFor(chatKey);
     const create = async () => {
       const override = this.#state.overrideFor?.(chatKey) ?? {};
@@ -303,7 +411,13 @@ export class FeishuBridge {
       return created;
     };
 
-    this.#pendingChats.set(chatKey, { openId, chatId, at: Date.now() });
+    // A brand-new Session should see the current buffer; an existing one keeps
+    // its watermark so earlier context is not injected twice.
+    if (!sessionId) this.#eavesdrop.reset(chatKey);
+    const reserved = this.#config.eavesdrop?.enabled === true ? this.#eavesdrop.take(chatKey) : null;
+    const eavesdropEntries = reserved ? await this.#eavesdropEntries(reserved.entries) : [];
+    const eavesdropBlock = renderEavesdropBlock(eavesdropEntries);
+
     const scopeKey = chatType === 'p2p' ? 'direct' : 'group';
     const wanted = scopedValue(this.#config.busyMode, scopeKey, 'queue') === 'steer' ? 'steer' : 'queue';
     // 当前轮不是飞书发起的（绑定会话里 Web 正在跑）时，飞书消息只能排队，不能插入。
@@ -335,10 +449,19 @@ export class FeishuBridge {
         syncBlock = ['<feishu_bot_topic_sync>', ...lines, '</feishu_bot_topic_sync>'].join('\n');
       }
     }
-    // The source block rides the prompt as a leading part; the Host-side
-    // pre-step rewrite turns it into its own producer-owned row.
+    // People mentioned in this message: gives the model their open_ids even
+    // though the mention placeholders are stripped from the user text.
+    let peopleBlock = null;
+    if (this.#config.mentions?.enabled !== false && people.length > 0) {
+      const lines = people.map((person) => `${person.name || person.id}(${person.id})`);
+      peopleBlock = ['<feishu_bot_people>', `本条消息提到的人：${lines.join('、')}`, '</feishu_bot_people>'].join('\n');
+    }
+    // The injected blocks ride the prompt as leading text parts; the Host-side
+    // pre-step rewrite turns each one into its own producer-owned row.
     const content = [
       ...(sourceBlock ? [{ type: 'text', text: sourceBlock }] : []),
+      ...(peopleBlock ? [{ type: 'text', text: peopleBlock }] : []),
+      ...(eavesdropBlock ? [{ type: 'text', text: eavesdropBlock }] : []),
       ...(syncBlock ? [{ type: 'text', text: syncBlock }] : []),
       ...parts,
     ];
@@ -349,21 +472,29 @@ export class FeishuBridge {
           sessionId = await create();
         } catch (error) {
           this.#log('error', 'session create failed', error);
+          if (reserved) this.#eavesdrop.rollback(chatKey, reserved.seq);
           await sendNotice(this.#bot, chatId, `创建会话失败：${error.message}`, '创建失败');
           await this.#abortReaction(chatKey, messageId);
           return;
         }
       }
       try {
+        // Set the per-session context before submitting so the first prompt
+        // also sees the mention guidance; systemPrompt.context is read while
+        // the Host builds the turn.
+        const mentionHint = this.#mentionHint();
+        this.#onContext(sessionId, this.#state.originOf?.(sessionId) === 'feishu'
+          ? [rawGuidance, mentionHint].filter(Boolean).join('\n\n')
+          : '');
         await this.#promptFeishu(sessionId, content, { mode });
-        // 只给机器人自己创建的会话注入常驻指令；接管别人的会话时不污染它的系统提示词。
-        this.#onContext(sessionId, this.#state.originOf?.(sessionId) === 'feishu' ? rawGuidance : '');
+        if (reserved) this.#eavesdrop.commit(chatKey, reserved.seq);
         return;
       } catch (error) {
         // A Session deleted from the Web UI must not wedge this chat forever.
         const stale = error?.code === 'session/not-found' || /not found/i.test(error?.message ?? '');
         if (!stale || attempt > 0) {
           this.#log('error', 'prompt failed', error);
+          if (reserved) this.#eavesdrop.rollback(chatKey, reserved.seq);
           await sendNotice(this.#bot, chatId, `提交失败：${error.message}`, '提交失败');
           await this.#abortReaction(chatKey, messageId);
           return;
@@ -381,7 +512,7 @@ export class FeishuBridge {
     const cached = this.#userNames.get(openId);
     if (cached && cached.expiresAt > Date.now()) return cached.name;
     const name = await Promise.resolve(this.#bot.getUserName?.(openId)).catch(() => null) ?? null;
-    this.#userNames.set(openId, { name, expiresAt: Date.now() + 10 * 60_000 });
+    this.#userNames.set(openId, { name, expiresAt: Date.now() + 30 * 60_000 });
     return name;
   }
 
@@ -435,6 +566,9 @@ export class FeishuBridge {
       chatId, title: cleanTitle, brief: body.slice(0, 1000), sessionId, rootMessageId,
     });
     await this.#state.bindSession(`topic:${chatId}:${topic.topicId}`, sessionId);
+    const guidance = renderGuidanceBlock(this.#contextScope('group')) ?? '';
+    const contextText = [guidance, this.#mentionHint()].filter(Boolean).join('\n\n');
+    if (contextText) this.#onContext(sessionId, contextText);
     await this.#promptFeishu(sessionId, [{ type: 'text', text: body || cleanTitle }], { mode: 'queue' })
       .catch((error) => this.#log('warn', 'topic prompt failed', error));
     return topic;
@@ -498,7 +632,7 @@ export class FeishuBridge {
 
   // ── commands ──────────────────────────────────────────────────────────────
 
-  /** Group management is restricted to the configured manager list. */
+  /** Group management (including approvals) is restricted to the manager list. */
   #canManage(chatKey, operatorId) {
     const chatType = this.#chatTypes.get(chatKey);
     if (chatType !== 'group') return true;
@@ -533,7 +667,11 @@ export class FeishuBridge {
         return next;
       },
       saveWorkspace: (value) => this.#saveWorkspace(value),
-      forgetSession: (sessionId) => this.#forgetSessionOrigin(sessionId),
+      forgetSession: (sessionId) => {
+        const key = typeof sessionId === 'string' ? this.#state.keyForSession?.(sessionId) : null;
+        if (key) this.#eavesdrop.reset(key);
+        this.#forgetSessionOrigin(sessionId);
+      },
       externalAsk: (sessionId) => this.#externalAsk.get(sessionId) ?? null,
       listPresets: () => this.#listPresets(),
       modelFor: (sessionId) => this.#sessionModels.get(sessionId) ?? null,
@@ -631,14 +769,11 @@ export class FeishuBridge {
 
   // ── interactions ──────────────────────────────────────────────────────────
 
-  chatForSession(sessionId) {
-    return this.#chatFor(sessionId);
-  }
-
-  #chatFor(sessionId) {
-    const entries = Object.entries(this.#state.value.sessions ?? {});
-    const found = entries.find(([, value]) => value === sessionId);
-    return found ? found[0].replace(/^chat:/, '') : null;
+  /** Session → its chat binding: `{ key, chatId }`, or null when unbound. */
+  #chatContextFor(sessionId) {
+    const key = typeof sessionId === 'string' ? this.#state.keyForSession(sessionId) : null;
+    const chatId = chatIdOfKey(key);
+    return chatId ? { key, chatId } : null;
   }
 
   #findApprovalId(request) {
@@ -689,8 +824,9 @@ export class FeishuBridge {
   /** Ask the chat to approve a tool call; races the Host's own answerer. */
   async handleApproval(request, next) {
     const sessionId = request?.agent?.session?.id;
-    const chatId = sessionId ? this.#chatFor(sessionId) : null;
-    if (!chatId) return next();
+    const binding = sessionId ? this.#chatContextFor(sessionId) : null;
+    if (!binding) return next();
+    const { key: chatKey, chatId } = binding;
     // 绑定会话里 Web 发起的轮次：审批留在 Web，不打扰飞书；只记下摘要供 /stop 说明。
     if (sessionId && this.#turnOrigin.get(sessionId) === 'external') {
       this.#rememberExternalAsk(sessionId, '审批', request.toolName ?? '工具');
@@ -706,6 +842,7 @@ export class FeishuBridge {
         id: approvalId,
         kind: 'approval',
         chatId,
+        chatKey,
         messageId: null,
         resolve,
       });
@@ -756,7 +893,7 @@ export class FeishuBridge {
   /** Ask the chat one question; a single-select answer comes back as a choice. */
   async handleQuestion(request, next) {
     const sessionId = request?.agent?.session?.id;
-    const chatId = sessionId ? this.#chatFor(sessionId) : null;
+    const chatId = sessionId ? this.#chatContextFor(sessionId)?.chatId ?? null : null;
     const question = Array.isArray(request?.questions) ? request.questions[0] : null;
     if (!chatId || !question) return next();
     // 绑定会话里 Web 发起的轮次：提问留在 Web，不打扰飞书；只记下摘要供 /stop 说明。
@@ -831,6 +968,9 @@ export class FeishuBridge {
       if (operator && entry.chatId !== event?.context?.open_chat_id) {
         return { toast: { type: 'info', content: '只能在发起审批的会话里操作' } };
       }
+      if (!this.#canManage(entry.chatKey ?? `chat:${entry.chatId}`, operator)) {
+        return { toast: { type: 'warning', content: '只有管理员可以在群里审批' } };
+      }
       this.#settle(id, kind === 'approve' ? 'allowed-once' : 'rejected');
       if (entry.messageId) {
         await this.#bot.patchCard(entry.messageId, approvalCard({
@@ -855,16 +995,20 @@ export class FeishuBridge {
   }
 
   /** Text fallback: 批准 / 拒绝（或 yes / no）answers a pending approval. */
-  #resolveTextDecision(chatId, text) {
+  #resolveTextDecision(chatKey, chatId, openId, text) {
     const normalized = text.trim().toLowerCase();
+    const approve = /^(批准|同意|允许|yes|y|ok)$/i.test(normalized);
+    const reject = /^(拒绝|不同意|deny|no|n)$/i.test(normalized);
+    if (!approve && !reject) return false;
     const ids = this.#pendingByChat.get(chatId);
     if (!ids || ids.size === 0) return false;
     for (const id of ids) {
       const entry = this.#pending.get(id);
       if (!entry || entry.kind !== 'approval') continue;
-      const approve = /^(批准|同意|允许|yes|y|ok)$/i.test(normalized);
-      const reject = /^(拒绝|不同意|deny|no|n)$/i.test(normalized);
-      if (!approve && !reject) continue;
+      if (!this.#canManage(chatKey, openId)) {
+        void sendNotice(this.#bot, chatId, '只有管理员可以审批。', '需要管理员', 'orange');
+        return true;
+      }
       this.#settle(id, approve ? 'allowed-once' : 'rejected');
       if (entry.messageId) {
         void this.#bot.patchCard(entry.messageId, approvalCard({
@@ -983,6 +1127,7 @@ export class FeishuBridge {
       this.#newSessionDraft.delete(chatKey);
       const previous = this.#state.sessionFor(chatKey);
       await this.#state.unbindSession(chatKey);
+      this.#eavesdrop.reset(chatKey);
       this.#forgetSessionOrigin(previous);
       await this.#state.setOverride?.(chatKey, {
         workspace: draft.workspace ?? null,
@@ -1014,6 +1159,9 @@ export class FeishuBridge {
       return undefined;
     }
     if (action === 'menu_close') {
+      // Closing discards unapplied dropdown picks and any new-session draft.
+      this.#menuPending.delete(chatKey);
+      this.#newSessionDraft.delete(chatKey);
       if (messageId) await this.#bot.deleteMessage?.(messageId).catch(() => undefined);
       return undefined;
     }
@@ -1030,13 +1178,17 @@ export class FeishuBridge {
       }
       const previous = this.#state.sessionFor(chatKey);
       await this.#state.bindSession(chatKey, pending.value);
-      if (previous && previous !== pending.value) this.#forgetSessionOrigin(previous);
+      if (previous && previous !== pending.value) {
+        this.#eavesdrop.reset(chatKey);
+        this.#forgetSessionOrigin(previous);
+      }
       if (!silent) await sendNotice(this.#bot, chatId, `已绑定会话：${pending.label}`, '会话已绑定');
       return { ok: true, detail: '后续消息进入该会话' };
     }
     if (pending.action === 'workspace_pick') {
       await this.#state.setOverride?.(chatKey, { workspace: pending.value });
       await this.#state.unbindSession(chatKey);
+      this.#eavesdrop.reset(chatKey);
       this.#forgetSessionOrigin(sessionId);
       if (!silent) await sendNotice(this.#bot, chatId, `工作区已切换为 ${pending.value}`, '工作区已切换');
       return { ok: true, detail: '下一条消息会在该目录新建会话' };

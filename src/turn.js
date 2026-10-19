@@ -6,6 +6,7 @@
  */
 import { textOfContent } from './harness.js';
 import { splitText } from './feishu.js';
+import { chatIdOfKey } from './message-text.js';
 import { turnCard } from './cards.js';
 import { sendNotice } from './notify.js';
 import { buildProgressText, buildPanelTitle, buildStepsMarkdown, buildUsageRows, buildUsageTitle, summarizeArguments } from './progress.js';
@@ -23,18 +24,26 @@ export class TurnRunner {
   #contextWindows = new Map();
   #disposed = false;
 
-  constructor({ bot, state, log, logEvent, processDetail, shouldRenderTurn }) {
+  constructor({ bot, state, log, logEvent, processDetail, shouldRenderTurn, renderMentions }) {
     this.#bot = bot;
     this.#state = state;
     this.#log = log;
     this.#logEvent = logEvent;
     this.#processDetail = typeof processDetail === 'function' ? processDetail : () => 'detailed';
     this.#shouldRenderTurn = typeof shouldRenderTurn === 'function' ? shouldRenderTurn : () => true;
+    this.#renderMentions = typeof renderMentions === 'function' ? renderMentions : (text) => text;
   }
 
   #shouldRenderTurn;
 
   #processDetail;
+
+  #renderMentions;
+
+  /** Validate/convert @ tags for the output path (card vs text). */
+  #mentionText(turn, text, mode) {
+    return this.#renderMentions(text, { chatKey: turn.chatKey, mode });
+  }
 
   dispose() {
     this.#disposed = true;
@@ -70,7 +79,8 @@ export class TurnRunner {
     const topic = chatKey.startsWith('topic:')
       ? this.#state.topicFor?.(chatKey.split(':')[1], Number(chatKey.split(':')[2]))
       : null;
-    const chatId = chatKey.startsWith('topic:') ? chatKey.split(':')[1] : chatKey.replace(/^chat:/, '');
+    const chatId = chatIdOfKey(chatKey);
+    if (!chatId) return;
 
     if (event.type === 'turn/start') {
       // 绑定到已有会话时，Web 侧触发的轮次不推卡片，但用量仍计入该 Session。
@@ -80,6 +90,7 @@ export class TurnRunner {
       const turn = {
         sessionId,
         chatId,
+        chatKey,
         silent: !render,
         topic: topic ?? null,
         turn: event.data?.turn,
@@ -290,7 +301,7 @@ export class TurnRunner {
   #card(turn, text, statusNote = null, force = false) {
     const panel = this.#toolPanel(turn, statusNote, force);
     const usage = this.#usagePanel(turn, force);
-    return turnCard(text, {
+    return turnCard(this.#mentionText(turn, text, 'card'), {
       ...(panel ?? {}),
       ...(panel ? {} : { note: statusNote }),
       ...(usage ?? {}),
@@ -348,7 +359,6 @@ export class TurnRunner {
         this.#logEvent('card-patch', `session=${turn.sessionId} turn=${turn.turn} id=${turn.cardMessageId}`);
         turn.rendered = body;
         turn.cardAt = Date.now();
-        this.#logEvent('card-send', `session=${turn.sessionId} turn=${turn.turn} id=${turn.cardMessageId ?? '-'}`);
         return;
       } catch (error) {
         this.#log('warn', 'answer card update failed; falling back to text', error);
@@ -358,10 +368,11 @@ export class TurnRunner {
       }
     }
     try {
+      const rendered = this.#mentionText(turn, body, 'text');
       if (!turn.placeholderId) {
-        turn.placeholderId = await this.#bot.sendText(turn.chatId, body);
+        turn.placeholderId = await this.#bot.sendText(turn.chatId, rendered);
       } else {
-        await this.#bot.updateText(turn.placeholderId, body);
+        await this.#bot.updateText(turn.placeholderId, rendered);
       }
       turn.rendered = body;
     } catch (error) {
@@ -419,13 +430,13 @@ export class TurnRunner {
         const chunks = splitText(final, 24_000);
         await this.#bot.patchCard(turn.cardMessageId, this.#card(turn, chunks[0] ?? final, this.#statusNote(kind), true));
         this.#logEvent('card-final', `session=${turn.sessionId} turn=${turn.turn} id=${turn.cardMessageId}`);
-        for (const rest of chunks.slice(1)) await sendNotice(this.#bot, turn.chatId, rest);
+        for (const rest of chunks.slice(1)) await sendNotice(this.#bot, turn.chatId, this.#mentionText(turn, rest, 'card'));
       } else if (turn.placeholderId) {
         const chunks = splitText(final, 3_500);
-        await this.#bot.updateText(turn.placeholderId, `${chunks[0] ?? final}\n\n${this.#statusNote(kind)}`);
-        for (const rest of chunks.slice(1)) await sendNotice(this.#bot, turn.chatId, rest);
+        await this.#bot.updateText(turn.placeholderId, `${this.#mentionText(turn, chunks[0] ?? final, 'text')}\n\n${this.#statusNote(kind)}`);
+        for (const rest of chunks.slice(1)) await sendNotice(this.#bot, turn.chatId, this.#mentionText(turn, rest, 'card'));
       } else {
-        await this.#bot.sendText(turn.chatId, final);
+        await this.#bot.sendText(turn.chatId, this.#mentionText(turn, final, 'text'));
       }
     } catch (error) {
       this.#log('error', 'final answer failed', error);

@@ -28,6 +28,8 @@ window.__ModuleLoader__.load({
       botBusyModeSet: 'bot.busy-mode.set',
       botColorSet: 'bot.color.set',
       botContextSet: 'bot.context-enhancement.set',
+      botEavesdropSet: 'bot.eavesdrop.set',
+      botMentionsSet: 'bot.mentions.set',
       botBotReplySet: 'bot.bot-reply.set',
       botTopicsSet: 'bot.topics.set',
       botProcessDetailSet: 'bot.process-detail.set',
@@ -571,7 +573,14 @@ window.__ModuleLoader__.load({
           topics: source.topicsEnabled !== false,
           processDetail: source.processDetail === 'brief' ? 'brief' : 'detailed',
           permissionPreset: source.permissionPreset ?? '',
-          direct: source.access?.direct ?? 'all',
+          eavesdrop: {
+            enabled: source.eavesdrop?.enabled !== false,
+            limit: Number.isFinite(Number(source.eavesdrop?.limit)) ? Number(source.eavesdrop.limit) : 0,
+          },
+          mentions: {
+            enabled: source.mentions?.enabled !== false,
+            allowAll: source.mentions?.allowAll === true,
+          },
           group: source.access?.group ?? 'all',
           allow: (source.access?.allowOpenIds ?? []).join(', '),
           managers: (source.access?.managers ?? []).join(', '),
@@ -627,7 +636,6 @@ window.__ModuleLoader__.load({
       const saveAccess = () => rpc(connection, API.botAccessSet, {
         botId: bot.id,
         access: {
-          direct: 'all',
           group: draft.group,
           allowOpenIds: draft.allow.split(/[\s,;，；、]+/).map((item) => item.trim()).filter(Boolean),
           managers: draft.managers.split(/[\s,;，；、]+/).map((item) => item.trim()).filter(Boolean),
@@ -644,7 +652,8 @@ window.__ModuleLoader__.load({
         group: {
           busyMode: value.busyMode?.group,
           group: value.group, allow: value.allow, managers: value.managers, ce: value.contextEnhancement?.group,
-          respondBot: value.respondBot, topics: value.topics,
+          respondBot: value.respondBot, topics: value.topics, eavesdrop: value.eavesdrop,
+          mentions: value.mentions,
         },
       });
 
@@ -675,6 +684,8 @@ window.__ModuleLoader__.load({
         if (scope === 'group') {
           await rpc(connection, API.botBotReplySet, { botId: bot.id, enabled: draft.respondBot === true });
           await rpc(connection, API.botTopicsSet, { botId: bot.id, enabled: draft.topics !== false });
+          await rpc(connection, API.botEavesdropSet, { botId: bot.id, eavesdrop: draft.eavesdrop });
+          await rpc(connection, API.botMentionsSet, { botId: bot.id, mentions: draft.mentions });
           await saveAccess();
         }
       });
@@ -872,6 +883,44 @@ window.__ModuleLoader__.load({
                   onChange: (event) => set({ respondBot: event.target.checked }),
                 }),
                 t('允许', 'Allow'))),
+            h(Field, { label: t('旁听群消息（默认开启）', 'Eavesdrop group messages (on by default)'), hint: t('只把未 @ 你的消息记为上下文，不会触发回复；图片/文件只记占位信息，模型需要时会请你 @ 它重发。需要 im:message.group_msg 权限；可用「补齐权限」扫码授权。', 'Only messages that do not mention the bot are kept as context; never triggers a reply; images/files become placeholders and the model asks you to mention it and resend them when needed. Requires im:message.group_msg; use "Grant permissions" to authorize.') },
+              h('label', { style: S.check },
+                h('input', {
+                  type: 'checkbox',
+                  checked: draft.eavesdrop.enabled,
+                  onChange: (event) => set({ eavesdrop: { ...draft.eavesdrop, enabled: event.target.checked } }),
+                }),
+                t('允许', 'Allow'))),
+            draft.eavesdrop.enabled
+              ? h(Field, { label: t('滚动保留条数', 'Rolling buffer size'), hint: t('0 表示不限制；超过后丢弃最旧的旁听消息。', '0 means unlimited; older messages are dropped past this limit.') },
+                h('input', {
+                  type: 'number', min: 0, style: S.input, value: draft.eavesdrop.limit,
+                  onChange: (event) => set({
+                    eavesdrop: {
+                      ...draft.eavesdrop,
+                      limit: Math.max(0, Number.parseInt(event.target.value, 10) || 0),
+                    },
+                  }),
+                }))
+              : null,
+            h(Field, { label: t('允许机器人 @ 人（默认开启）', 'Let the bot mention people (on by default)'), hint: t('只在需要明确让某人收到消息或同步重要信息时才 @；常规对话不需要。插件会校验 open_id，非法或未开启时擦除。', 'Mention only when someone must receive the message or important information must be synced; normal replies do not mention. The plugin validates open_ids and erases invalid or disabled mentions.') },
+              h('label', { style: S.check },
+                h('input', {
+                  type: 'checkbox',
+                  checked: draft.mentions.enabled,
+                  onChange: (event) => set({ mentions: { ...draft.mentions, enabled: event.target.checked } }),
+                }),
+                t('允许', 'Allow'))),
+            draft.mentions.enabled
+              ? h(Field, { label: t('禁止 @所有人（默认开启）', 'Forbid @all (on by default)'), hint: t('关闭后模型可以 @所有人；插件仍会校验 open_id。', 'When off, the model may mention everyone; open_ids are still validated.') },
+                h('label', { style: S.check },
+                  h('input', {
+                    type: 'checkbox',
+                    checked: draft.mentions.allowAll !== true,
+                    onChange: (event) => set({ mentions: { ...draft.mentions, allowAll: !event.target.checked } }),
+                  }),
+                  t('禁止', 'Forbid')))
+              : null,
             h(Field, { label: t('谁能使用群聊中的机器人', 'Who may use the bot in groups') },
               h('select', { style: S.input, value: draft.group, onChange: (event) => set({ group: event.target.value }) },
                 h('option', { value: 'all' }, t('所有用户', 'Everyone')),
@@ -880,7 +929,7 @@ window.__ModuleLoader__.load({
               ? h(Field, { label: t('群聊白名单 Open ID', 'Group allowlist Open IDs') },
                 h('textarea', { style: S.area, value: draft.allow, onChange: (event) => set({ allow: event.target.value }) }))
               : null,
-            h(Field, { label: t('管理白名单 Open ID（可执行 /new、停止、调整）', 'Manager allowlist (may run /new, stop, adjust)'), hint: t('留空表示没有人可以在群里执行管理操作。', 'Empty means nobody may manage in groups.') },
+            h(Field, { label: t('管理白名单 Open ID（可执行 /new、停止、调整与审批）', 'Manager allowlist (may run /new, stop, adjust and approve)'), hint: t('留空表示没有人可以在群里执行管理操作。', 'Empty means nobody may manage in groups.') },
               h('textarea', { style: S.area, value: draft.managers, onChange: (event) => set({ managers: event.target.value }) })),
             scopeEditor('group', t('群聊上下文注入', 'Group-chat context'))),
 

@@ -11,6 +11,8 @@ import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 
 import { normalizeContextEnhancementConfig } from './context-enhancement.js';
+import { normalizeEavesdropConfig } from './eavesdrop.js';
+import { normalizeMentionsConfig } from './mentions.js';
 import { randomUUID } from 'node:crypto';
 
 export const ACCESS_MODES = Object.freeze({ ALL: 'all', ALLOWLIST: 'allowlist' });
@@ -30,8 +32,8 @@ function normalizeOpenIds(value) {
 export function normalizeAccess(value) {
   const source = value && typeof value === 'object' ? value : {};
   const pick = (candidate) => (candidate === ACCESS_MODES.ALLOWLIST ? ACCESS_MODES.ALLOWLIST : ACCESS_MODES.ALL);
+  // Private chats are always open; only groups carry an access mode.
   return Object.freeze({
-    direct: pick(source.direct),
     group: pick(source.group),
     allowOpenIds: Object.freeze(normalizeOpenIds(source.allowOpenIds)),
     managers: Object.freeze(normalizeOpenIds(source.managers)),
@@ -97,6 +99,8 @@ export function normalizeBot(value, { legacyId } = {}) {
     permissionPreset: cleanString(source.permissionPreset),
     busyMode: normalizeScoped(source.busyMode, normalizeBusyMode),
     contextEnhancement: normalizeContextEnhancementConfig(source.contextEnhancement),
+    eavesdrop: normalizeEavesdropConfig(source.eavesdrop),
+    mentions: normalizeMentionsConfig(source.mentions),
     access: normalizeAccess(source.access),
     connectedAt: cleanString(source.connectedAt),
   });
