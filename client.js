@@ -835,6 +835,9 @@ window.__ModuleLoader__.load({
                 onChange: (event) => set({ permissionPreset: event.target.value }),
               },
                 h('option', { value: '' }, t('跟随 Host 默认', 'Host default')),
+                draft.permissionPreset && !(permissionOptions ?? []).some((item) => item.value === draft.permissionPreset)
+                  ? h('option', { value: draft.permissionPreset }, `${draft.permissionPreset}${t('（当前）', ' (current)')}`)
+                  : null,
                 (permissionOptions ?? []).map((item) => h('option', { key: item.value, value: item.value }, item.name ?? item.value)))),
             h(Field, { label: t('默认 Agent 预设（只影响新会话）', 'Default agent preset (new Sessions)') },
               h('select', { style: S.input, value: draft.preset, onChange: (event) => set({ preset: event.target.value }) },

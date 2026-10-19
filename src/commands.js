@@ -1,4 +1,5 @@
-import { menuCard, noticeCard } from './cards.js';
+import { menuCard } from './cards.js';
+import { sendNotice } from './notify.js';
 
 /**
  * Slash commands.
@@ -11,7 +12,7 @@ export async function runCommand(services, name, argument, context) {
   const { bot, state, harness, version, saveWorkspace, listPresets, savePreset, modelFor, log } = services;
   let config = services.config();
     const { chatId, chatKey, messageId } = context;
-    const notice = (text, title = null, tone = null) => bot.sendCard(chatId, noticeCard(text, title, tone)).catch(() => bot.sendText(chatId, text));
+    const notice = (text, title = null, tone = null) => sendNotice(bot, chatId, text, title, tone);
     switch (name) {
       case 'menu': {
         try {

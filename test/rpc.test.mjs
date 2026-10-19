@@ -68,6 +68,10 @@ assert.equal(permissions.value.defaultPreset, 'workspace-write');
 await handle('bot.permission.set', { botId: 'bot_1', permissionPreset: 'read-only' });
 assert.deepEqual(calls.at(-1), ['save', { permissionPreset: 'read-only' }], 'permission preset saved');
 
+const badPermission = await handle('bot.permission.set', { botId: 'bot_1', permissionPreset: 'nope' });
+assert.equal(badPermission.ok, false);
+assert.equal(badPermission.error.code, 'bad-request');
+
 const presets = await handle('presets.list', { botId: 'bot_1' });
 assert.deepEqual(presets.value.presets, [{ id: 'standard', name: 'Standard' }]);
 
@@ -84,4 +88,4 @@ assert.equal(bad.error.code, 'bad-request');
 // 未知机器人向上抛错，由 installRpc 转成 {ok:false} 交给前端
 await assert.rejects(() => handle('bot.reconnect', { botId: 'bot_x' }), /机器人不存在/);
 
-console.log('rpc handler (multi-bot): 16 assertions passed');
+console.log('rpc handler (multi-bot): 17 assertions passed');

@@ -76,13 +76,19 @@ export function createRpcHandler({ manager, harness, version }) {
         });
         return ok(await runtimeOf(input).status());
 
-      case 'bot.permission.set':
-        await runtimeOf(input).save({
-          permissionPreset: typeof input.permissionPreset === 'string' && input.permissionPreset.trim()
-            ? input.permissionPreset.trim()
-            : null,
-        });
+      case 'bot.permission.set': {
+        const permissionPreset = typeof input.permissionPreset === 'string' && input.permissionPreset.trim()
+          ? input.permissionPreset.trim()
+          : null;
+        if (permissionPreset) {
+          const catalog = await harness.invoke('permissionPresets', 'catalog', {}).catch(() => null);
+          if (catalog && !(catalog.options ?? []).some((item) => item.value === permissionPreset)) {
+            return fail('bad-request', `未知权限档位：${permissionPreset}`);
+          }
+        }
+        await runtimeOf(input).save({ permissionPreset });
         return ok(await runtimeOf(input).status());
+      }
 
       case 'bot.preset.set':
         await runtimeOf(input).save({ agentPreset: typeof input.preset === 'string' && input.preset.trim() ? input.preset.trim() : null });
