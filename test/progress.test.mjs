@@ -10,9 +10,9 @@ import {
   buildUsageTitle,
   cacheHitRate,
   formatDuration,
-  formatTokens,
   summarizeArguments,
 } from '../src/progress.js';
+import { formatTokens } from '../src/format.js';
 
 // 1) 参数摘要：按工具类型取关键字段并压平换行
 assert.equal(summarizeArguments('bash', JSON.stringify({ command: 'git status', description: 'show state' })), 'git status');

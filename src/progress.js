@@ -4,6 +4,7 @@
  * Kept separate from TurnRunner so the formatting rules are unit-testable and
  * the runner only owns state transitions.
  */
+import { formatTokens } from './format.js';
 
 /** How many tool calls the dropdown keeps (newest first). */
 export const STEP_OPTION_LIMIT = 20;
@@ -94,13 +95,7 @@ export function buildPanelTitle({ steps = [], elapsedMs = 0, thinkingMs = 0, fir
 }
 
 
-/** Token sizes: 9.5Ki / 1.2Mi. */
-export function formatTokens(value) {
-  const amount = Number.isFinite(value) && value > 0 ? value : 0;
-  if (amount < 1024) return `${amount} tok`;
-  if (amount < 1024 * 1024) return `${(amount / 1024).toFixed(1)}Ki tok`;
-  return `${(amount / (1024 * 1024)).toFixed(1)}Mi tok`;
-}
+
 
 /** Cache hit rate over input tokens; null when nothing was measured. */
 export function cacheHitRate(cache, input) {
