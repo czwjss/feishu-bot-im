@@ -801,7 +801,7 @@ export class FeishuBridge {
       || action === 'model_pick' || action === 'reasoning_pick'
       || action === 'menu_apply' || action === 'menu_cancel'
       || action === 'ns_workspace' || action === 'ns_model' || action === 'ns_reasoning' || action === 'ns_preset'
-      || action === 'new_session_create' || action === 'new_session_cancel' || action === 'menu_close') {
+      || action === 'new_session_create' || action === 'new_session_cancel' || action === 'compact' || action === 'menu_close') {
       return this.#handleMenuAction(action, event);
     }
     const [kind, id, indexRaw] = action.split(':');
@@ -880,7 +880,7 @@ export class FeishuBridge {
     const operator = event?.operator?.open_id ?? event?.operator?.operator_id?.open_id ?? null;
     const services = this.#services();
     const pickers = new Set(['session_pick', 'workspace_pick', 'model_pick', 'reasoning_pick']);
-    const managedActions = new Set(['menu_apply', 'new_session', 'new_session_create']);
+    const managedActions = new Set(['menu_apply', 'new_session', 'new_session_create', 'compact']);
     if (managedActions.has(action) && !this.#canManage(chatKey, operator)) {
       return { toast: { type: 'warning', content: '只有管理员可以在群里执行这个操作' } };
     }
@@ -971,6 +971,22 @@ export class FeishuBridge {
       });
       await this.#bot.sendText(chatId, '已按所选配置准备新会话，发送任意消息即可开始。');
       return { toast: { type: 'success', content: '新会话已就绪' } };
+    }
+    if (action === 'compact') {
+      const sessionId = this.#state.sessionFor(chatKey);
+      if (!sessionId) return { toast: { type: 'info', content: '当前还没有可压缩的会话' } };
+      try {
+        const value = await this.#harness.compact?.(sessionId);
+        const result = value?.result ?? value ?? {};
+        if (result.kind === 'error') {
+          return { toast: { type: 'warning', content: result.text ?? '压缩失败' } };
+        }
+        const text = result.text ?? '已触发压缩';
+        await this.#bot.sendText(chatId, `上下文压缩：${text}`);
+        return { toast: { type: 'success', content: '压缩完成' } };
+      } catch (error) {
+        return { toast: { type: 'warning', content: `压缩失败：${error.message}` } };
+      }
     }
     if (action === 'new_session_cancel') {
       this.#newSessionDraft.delete(chatKey);

@@ -39,6 +39,11 @@ class FakeHarness {
   async ensureWorkspace() { return 'ws-2'; }
   async prompt(sessionId, content, options) { this.prompts.push({ sessionId, content, options }); }
   async cancel(sessionId) { this.cancelled.push(sessionId); }
+  compacted = [];
+  async compact(sessionId) {
+    this.compacted.push(sessionId);
+    return { commandId: 'cmd-1', result: { kind: 'success', text: 'Compacted 3 history items' } };
+  }
   async listSessions() { return this.models; }
   async modelCatalog() { return { groups: [{ id: 'prov', name: 'Prov', models: [{ id: 'model-a', name: 'A' }] }] }; }
   async selectModel(id, selection) { this.lastModel = { id, selection }; return {}; }
@@ -152,6 +157,7 @@ function message(overrides = {}) {
   assert.ok(!/slash_run/.test(flat), 'command buttons are gone (native panel handles them)');
   assert.match(flat, /model_pick/, 'menu offers a model picker');
   assert.match(flat, /menu_apply/, 'menu offers an apply button');
+  assert.match(flat, /压缩上下文/, 'menu offers manual compaction');
   // 选择只登记待切换项，不立即生效
   await bridge.onCardAction({
     operator: { open_id: 'ou_user' },
@@ -166,6 +172,21 @@ function message(overrides = {}) {
     context: { open_chat_id: 'oc_panel', open_message_id: 'om_menu' },
   });
   assert.deepEqual(harness.lastModel?.selection, { provider: 'prov', model: 'model-a' });
+  bridge.dispose();
+}
+
+// 5c) 菜单：手动压缩上下文
+{
+  const { bot, harness, bridge } = makeBridge();
+  await state.bindSession('chat:oc_compact', 'sess-compact');
+  const result = await bridge.onCardAction({
+    operator: { open_id: 'ou_user' },
+    action: { value: { action: 'compact' } },
+    context: { open_chat_id: 'oc_compact', open_message_id: 'om_menu' },
+  });
+  assert.deepEqual(harness.compacted, ['sess-compact']);
+  assert.equal(result.toast.type, 'success');
+  assert.match(bot.text.at(-1).text, /上下文压缩：Compacted 3 history items/);
   bridge.dispose();
 }
 

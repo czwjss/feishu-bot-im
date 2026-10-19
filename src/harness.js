@@ -114,6 +114,15 @@ export class HarnessAdapter {
     return this.invoke('session', 'cancel', { request: { sessionId } });
   }
 
+  /** Run the host's `/compact` command for this Session. */
+  async compact(sessionId) {
+    return this.invoke('commands', 'execute', {
+      agentId: sessionId,
+      line: '/compact',
+      submittedAttachments: [],
+    });
+  }
+
   async listSessions() {
     const value = await this.invoke('session', 'list', { _request: {} });
     return Array.isArray(value?.items) ? value.items : [];

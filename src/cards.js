@@ -188,6 +188,13 @@ export function menuCard({
     columns: [
       fixedButton('新会话', 'new_session', 'primary'),
       fixedButton('调整', 'menu_apply', 'primary'),
+    ],
+  });
+  elements.push({
+    tag: 'column_set',
+    flex_mode: 'none',
+    columns: [
+      fixedButton('压缩上下文', 'compact'),
       fixedButton('关闭', 'menu_close', 'danger'),
     ],
   });
