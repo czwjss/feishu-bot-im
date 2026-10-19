@@ -148,8 +148,8 @@ function statLine(label, value) {
     tag: 'column_set',
     flex_mode: 'none',
     columns: [
-      { tag: 'column', width: 'auto', vertical_align: 'center', elements: [{ tag: 'markdown', content: label }] },
-      { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', horizontal_align: 'right', elements: [{ tag: 'markdown', content: value }] },
+      { tag: 'column', width: '100px', vertical_align: 'center', elements: [{ tag: 'markdown', content: label }] },
+      { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', elements: [{ tag: 'markdown', content: value }] },
     ],
   };
 }
