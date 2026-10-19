@@ -142,13 +142,16 @@ export function resolvedApprovalText(outcome) {
   return '⚠️ 审批已失效。';
 }
 
-/** One row of `属性 | 值 | 属性 | 值`, so both halves line up across rows. */
-function statPairRow(first, second = null) {
-  const attr = (item) => ({ tag: 'column', width: '100px', vertical_align: 'center', elements: [{ tag: 'markdown', content: item.label }] });
-  const value = (item) => ({ tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', horizontal_align: 'right', elements: [{ tag: 'markdown', content: item.value }] });
-  const columns = [attr(first), value(first)];
-  if (second) columns.push(attr(second), value(second));
-  return { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '12px', columns };
+/** One `属性 / 值` line: label left, value right-aligned. */
+function statLine(label, value) {
+  return {
+    tag: 'column_set',
+    flex_mode: 'none',
+    columns: [
+      { tag: 'column', width: 'auto', vertical_align: 'center', elements: [{ tag: 'markdown', content: label }] },
+      { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', horizontal_align: 'right', elements: [{ tag: 'markdown', content: value }] },
+    ],
+  };
 }
 
 /** Bordered subsection; the header holds only the title so both sections align. */
@@ -171,16 +174,13 @@ function usageSections(stats) {
       + (usage.cacheWriteTokens ?? 0) + (usage.outputTokens ?? 0);
     const prompt = (usage.uncachedInputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
     const hit = prompt > 0 ? Math.round(((usage.cacheReadTokens ?? 0) / prompt) * 100) : null;
-    elements.push(section(`🪙 Token 用量　总计 ${formatTokens(total)}`, [
-      statPairRow(
-        { label: '未缓存输入', value: formatTokens(usage.uncachedInputTokens) },
-        { label: '缓存读取', value: formatTokens(usage.cacheReadTokens) },
-      ),
-      statPairRow(
-        { label: '输出', value: formatTokens(usage.outputTokens) },
-        hit !== null ? { label: '缓存命中', value: `${hit}%` } : null,
-      ),
-    ]));
+    const rows = [
+      statLine('未缓存输入', formatTokens(usage.uncachedInputTokens)),
+      statLine('缓存读取', formatTokens(usage.cacheReadTokens)),
+      statLine('输出', formatTokens(usage.outputTokens)),
+    ];
+    if (hit !== null) rows.push(statLine('缓存命中', `${hit}%`));
+    elements.push(section(`🪙 Token 用量　总计 ${formatTokens(total)}`, rows));
   }
 
   const pressure = stats?.contextPressure;
@@ -191,11 +191,9 @@ function usageSections(stats) {
     const percent = Math.min(100, Math.round((used / windowSize) * 100));
     const rows = [];
     if (breakdown) {
-      rows.push(statPairRow(
-        { label: '系统提示词', value: `~${formatCompactTokens(breakdown.systemTokens)}` },
-        { label: '工具定义', value: `~${formatCompactTokens(breakdown.toolsTokens)}` },
-      ));
-      rows.push(statPairRow({ label: '对话消息', value: `~${formatCompactTokens(breakdown.messageTokens)}` }));
+      rows.push(statLine('系统提示词', `~${formatCompactTokens(breakdown.systemTokens)}`));
+      rows.push(statLine('工具定义', `~${formatCompactTokens(breakdown.toolsTokens)}`));
+      rows.push(statLine('对话消息', `~${formatCompactTokens(breakdown.messageTokens)}`));
     }
     if (rows.length === 0) rows.push({ tag: 'markdown', content: '暂无明细' });
     elements.push(section(
