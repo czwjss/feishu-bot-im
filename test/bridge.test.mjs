@@ -58,6 +58,8 @@ await configStore.load();
 const state = new StateStore(join(dir, 'state.json'));
 await state.load();
 
+const cardText = (bot) => JSON.stringify(bot.cards.at(-1)?.card ?? '');
+
 function makeBridge(overrides = {}) {
   const bot = new FakeBot();
   const harness = new FakeHarness();
@@ -139,7 +141,7 @@ function message(overrides = {}) {
   // 群聊白名单仍然生效
   await bridge.handleMessage(message({ chat_id: 'oc_deny', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }] }));
   assert.equal(harness.prompts.length, 1, 'group chat still respects the allowlist');
-  assert.match(bot.text.at(-1).text, /没有使用权限/);
+  assert.match(cardText(bot), /没有使用权限/);
   bridge.dispose();
 }
 
@@ -157,7 +159,7 @@ function message(overrides = {}) {
   assert.ok(!/slash_run/.test(flat), 'command buttons are gone (native panel handles them)');
   assert.match(flat, /model_pick/, 'menu offers a model picker');
   assert.match(flat, /menu_apply/, 'menu offers an apply button');
-  assert.match(flat, /压缩上下文/, 'menu offers manual compaction');
+  assert.match(flat, /"压缩"/, "menu offers manual compaction");
   // 选择只登记待切换项，不立即生效
   await bridge.onCardAction({
     operator: { open_id: 'ou_user' },
@@ -186,7 +188,7 @@ function message(overrides = {}) {
   });
   assert.deepEqual(harness.compacted, ['sess-compact']);
   assert.equal(result.toast.type, 'success');
-  assert.match(bot.text.at(-1).text, /上下文压缩：Compacted 3 history items/);
+  assert.match(cardText(bot), /上下文压缩：Compacted 3 history items/);
   bridge.dispose();
 }
 
@@ -194,9 +196,9 @@ function message(overrides = {}) {
 {
   const { bot, bridge } = makeBridge();
   await bridge.handleMessage(message({ chat_id: 'oc_cmd', content: JSON.stringify({ text: '/new' }) }));
-  assert.match(bot.text.at(-1).text, /全新会话/);
+  assert.match(cardText(bot), /全新会话/);
   await bridge.handleMessage(message({ chat_id: 'oc_cmd', content: JSON.stringify({ text: '/stop' }) }));
-  assert.match(bot.text.at(-1).text, /没有可停止|已请求停止/);
+  assert.match(cardText(bot), /没有可停止|已请求停止/);
   bridge.dispose();
 }
 
@@ -238,7 +240,7 @@ function message(overrides = {}) {
   await new Promise((resolve) => setTimeout(resolve, 10));
   await bridge.handleMessage(message({ chat_id: 'oc_text', content: JSON.stringify({ text: '拒绝' }) }));
   assert.equal(await pending, 'rejected');
-  assert.equal(bot.text.at(-1).text, '🚫 已拒绝。');
+  assert.match(cardText(bot), /🚫 已拒绝。/);
   bridge.dispose();
 }
 
@@ -348,7 +350,7 @@ function message(overrides = {}) {
     chat_id: 'oc_group', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
     content: JSON.stringify({ text: '/new' }),
   }));
-  assert.match(bot.text.at(-1).text, /只有管理员/);
+  assert.match(cardText(bot), /只有管理员/);
   await bridge.handleMessage({
     sender: { sender_type: 'user', sender_id: { open_id: 'ou_admin' } },
     message: {
@@ -356,7 +358,7 @@ function message(overrides = {}) {
       content: JSON.stringify({ text: '/new' }), mentions: [{ id: { open_id: 'ou_bot' } }],
     },
   });
-  assert.match(bot.text.at(-1).text, /全新会话/);
+  assert.match(cardText(bot), /全新会话/);
   bridge.dispose();
 }
 
@@ -448,7 +450,7 @@ function message(overrides = {}) {
     content: JSON.stringify({ text: '/topic 关闭时的尝试\n正文' }),
   }));
   assert.equal(off.harness.created, 0, 'disabled topics refuse creation');
-  assert.match(off.bot.text.at(-1).text, /话题功能已关闭/);
+  assert.match(cardText(off.bot), /话题功能已关闭/);
   restricted.bridge.dispose();
   off.bridge.dispose();
 }
@@ -572,7 +574,7 @@ function message(overrides = {}) {
   await bridge.handleMessage(message({ message_id: 'om_rb', chat_id: 'oc_rb', content: JSON.stringify({ text: '你好' }) }));
   const sessionId = state.sessionFor('chat:oc_rb');
   await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/start', data: { turn: 1 } });
-  assert.equal(bot.cards.length, 0, 'rolled-back prompt must not render a later turn');
+  assert.ok(bot.cards.every((item) => !JSON.stringify(item.card).includes('已收到')), 'rolled-back prompt must not render a later turn');
   bridge.dispose();
 }
 
@@ -607,8 +609,8 @@ function message(overrides = {}) {
     questions: [{ id: 'q-ask', question: '要部署到生产吗？', options: [{ label: '是' }, { label: '否' }] }],
   }, () => Promise.resolve('next'));
   await bridge.handleMessage(message({ chat_id: 'oc_ask', message_id: 'om_stop', content: JSON.stringify({ text: '/stop' }) }));
-  assert.match(bot.text.at(-1).text, /已请求停止当前任务/);
-  assert.match(bot.text.at(-1).text, /刚才在等你回答：要部署到生产吗/);
+  assert.match(cardText(bot), /已请求停止当前任务/);
+  assert.match(cardText(bot), /刚才在等你回答：要部署到生产吗/);
   bridge.dispose();
 }
 

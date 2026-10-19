@@ -6,7 +6,7 @@
  */
 import { textOfContent } from './harness.js';
 import { splitText } from './feishu.js';
-import { turnCard } from './cards.js';
+import { noticeCard, turnCard } from './cards.js';
 import { buildProgressText, buildPanelTitle, buildStepsMarkdown, buildUsageRows, buildUsageTitle, summarizeArguments } from './progress.js';
 
 /** Card body and both panels refresh together at this cadence. */
@@ -286,6 +286,14 @@ export class TurnRunner {
     return panel;
   }
 
+  async #notice(chatId, text) {
+    try {
+      await this.#bot.sendCard(chatId, noticeCard(text));
+    } catch {
+      await this.#bot.sendText(chatId, text).catch(() => undefined);
+    }
+  }
+
   #card(turn, text, statusNote = null, force = false) {
     const panel = this.#toolPanel(turn, statusNote, force);
     const usage = this.#usagePanel(turn, force);
@@ -410,8 +418,7 @@ export class TurnRunner {
           summary: String(final).slice(0, 1200),
           at: new Date().toISOString(),
         }).catch(() => undefined);
-        await this.#bot.sendText(turn.chatId, `话题 #${turn.topic.topicId}「${turn.topic.title}」已同步到主会话。`)
-          .catch(() => undefined);
+        await this.#notice(turn.chatId, `话题 #${turn.topic.topicId}「${turn.topic.title}」已同步到主会话。`);
       }
     }
     try {
@@ -419,17 +426,17 @@ export class TurnRunner {
         const chunks = splitText(final, 24_000);
         await this.#bot.patchCard(turn.cardMessageId, this.#card(turn, chunks[0] ?? final, this.#statusNote(kind), true));
         this.#logEvent('card-final', `session=${turn.sessionId} turn=${turn.turn} id=${turn.cardMessageId}`);
-        for (const rest of chunks.slice(1)) await this.#bot.sendText(turn.chatId, rest);
+        for (const rest of chunks.slice(1)) await this.#notice(turn.chatId, rest);
       } else if (turn.placeholderId) {
         const chunks = splitText(final, 3_500);
         await this.#bot.updateText(turn.placeholderId, `${chunks[0] ?? final}\n\n${this.#statusNote(kind)}`);
-        for (const rest of chunks.slice(1)) await this.#bot.sendText(turn.chatId, rest);
+        for (const rest of chunks.slice(1)) await this.#notice(turn.chatId, rest);
       } else {
         await this.#bot.sendText(turn.chatId, final);
       }
     } catch (error) {
       this.#log('error', 'final answer failed', error);
-      await this.#bot.sendText(turn.chatId, `回复发送失败：${error.message}`).catch(() => undefined);
+      await this.#notice(turn.chatId, `回复发送失败：${error.message}`);
     }
     if (snapshot.total.calls > 0) {
       await this.#state.addUsage?.(`usage:${turn.sessionId}`, snapshot.total).catch(() => undefined);

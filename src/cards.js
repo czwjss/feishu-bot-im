@@ -70,6 +70,14 @@ export function questionCard({ question, options, questionId, resolvedText }) {
   return card('需要你的选择', 'blue', elements);
 }
 
+/** Plain notice card used for command results and status messages. */
+export function noticeCard(text) {
+  return {
+    schema: '2.0',
+    body: { elements: [{ tag: 'markdown', content: typeof text === 'string' && text ? text : ' ' }] },
+  };
+}
+
 /** Answer/progress card with a collapsible panel holding the tool calls. */
 export function turnCard(text, {
   panelTitle = null, panelBody = '', note = null,
@@ -179,7 +187,7 @@ export function menuCard({
     width: 'weighted',
     weight: 1,
     horizontal_align: 'center',
-    elements: [{ ...button(label, action, type), width: '130px' }],
+    elements: [{ ...button(label, action, type), width: '100px' }],
   });
   elements.push({ tag: 'hr' });
   elements.push({
@@ -187,14 +195,8 @@ export function menuCard({
     flex_mode: 'none',
     columns: [
       fixedButton('新会话', 'new_session', 'primary'),
+      fixedButton('压缩', 'compact'),
       fixedButton('调整', 'menu_apply', 'primary'),
-    ],
-  });
-  elements.push({
-    tag: 'column_set',
-    flex_mode: 'none',
-    columns: [
-      fixedButton('压缩上下文', 'compact'),
       fixedButton('关闭', 'menu_close', 'danger'),
     ],
   });

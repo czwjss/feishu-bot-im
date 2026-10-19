@@ -6,7 +6,7 @@
  */
 import { TurnRunner } from './turn.js';
 import { scopedValue, textOfContentOrPost } from './message-text.js';
-import { approvalCard, questionCard, resolvedApprovalText, menuCard, newSessionCard, adjustCard } from './cards.js';
+import { approvalCard, questionCard, resolvedApprovalText, menuCard, newSessionCard, adjustCard, noticeCard } from './cards.js';
 import { isAddressed, isAllowed, senderOpenId } from './access.js';
 import { buildMenuCard, collectMenuData, currentMenuValue, menuOptionLabel, runCommand } from './commands.js';
 import { InboundContent } from './inbound.js';
@@ -106,6 +106,15 @@ export class FeishuBridge {
     this.#pendingChats.clear();
   }
 
+  /** Send a status notice as a card; fall back to text only if cards fail. */
+  async #notice(chatId, text) {
+    try {
+      await this.#bot.sendCard(chatId, noticeCard(text));
+    } catch {
+      await this.#bot.sendText(chatId, text).catch(() => undefined);
+    }
+  }
+
   #log(level, message, error) {
     const fn = this.#logger?.[level] ?? this.#logger?.info;
     if (typeof fn === 'function') fn.call(this.#logger, `[im-feishu] ${message}`, ...(error ? [error] : []));
@@ -130,7 +139,7 @@ export class FeishuBridge {
     await this.#state.markSeen(message.message_id);
 
     if (!isAllowed(this.#config, message, openId)) {
-      await this.#bot.sendText(message.chat_id, '当前账号没有使用权限。请让管理员在插件设置里把你的 Open ID 加入白名单。');
+      await this.#notice(message.chat_id, '当前账号没有使用权限。请让管理员在插件设置里把你的 Open ID 加入白名单。');
       return;
     }
     const topic = this.#config.topicsEnabled === false ? null : this.#topicForMessage(message);
@@ -152,9 +161,9 @@ export class FeishuBridge {
         const notice = '话题里不能再创建话题。需要新话题时，请在群里直接 @ 我并发 `/topic 标题`。';
         try {
           if (typeof this.#bot.replyTextInThread === 'function') await this.#bot.replyTextInThread(topic.rootMessageId, notice);
-          else await this.#bot.sendText(message.chat_id, notice);
+          else await this.#notice(message.chat_id, notice);
         } catch {
-          await this.#bot.sendText(message.chat_id, notice);
+          await this.#notice(message.chat_id, notice);
         }
         return;
       }
@@ -179,7 +188,7 @@ export class FeishuBridge {
 
     const supported = ['text', 'post', 'image', 'file'];
     if (!supported.includes(message.message_type)) {
-      await this.#bot.replyText(message.message_id, '目前支持文字、语音以外的图片与文件消息。');
+      await this.#notice(message.chat_id, '目前支持文字、图片和文件消息；语音和视频暂不支持。');
       return;
     }
 
@@ -188,7 +197,7 @@ export class FeishuBridge {
       const built = await this.#inbound.build(message, text);
       parts = built.parts;
       if (!built.hasInput) {
-        await this.#bot.replyText(message.message_id, '这条消息里没有可处理的内容。');
+        await this.#notice(message.chat_id, '这条消息里没有可处理的内容。');
         return;
       }
     }
@@ -330,7 +339,7 @@ export class FeishuBridge {
           sessionId = await create();
         } catch (error) {
           this.#log('error', 'session create failed', error);
-          await this.#bot.replyText(messageId, `创建会话失败：${error.message}`);
+          await this.#notice(chatId, `创建会话失败：${error.message}`);
           await this.#abortReaction(chatKey, messageId);
           return;
         }
@@ -345,7 +354,7 @@ export class FeishuBridge {
         const stale = error?.code === 'session/not-found' || /not found/i.test(error?.message ?? '');
         if (!stale || attempt > 0) {
           this.#log('error', 'prompt failed', error);
-          await this.#bot.replyText(messageId, `提交失败：${error.message}`);
+          await this.#notice(chatId, `提交失败：${error.message}`);
           await this.#abortReaction(chatKey, messageId);
           return;
         }
@@ -489,12 +498,12 @@ export class FeishuBridge {
 
   async #runCommand(name, argument, context) {
     if ((name === 'topic' || name === 'topic-sync') && this.#config.topicsEnabled === false) {
-      await this.#bot.sendText(context.chatId, '话题功能已关闭，可在机器人设置里开启。');
+      await this.#notice(context.chatId, '话题功能已关闭，可在机器人设置里开启。');
       return true;
     }
     const managed = name === 'new' || name === 'stop';
     if (managed && !this.#canManage(context.chatKey, context.openId ?? null)) {
-      await this.#bot.sendText(context.chatId, '只有管理员可以在群里执行这个操作。');
+      await this.#notice(context.chatId, '只有管理员可以在群里执行这个操作。');
       return true;
     }
     return runCommand(this.#services(), name, argument, context);
@@ -529,11 +538,11 @@ export class FeishuBridge {
       showTopics: async (chatId) => {
         const topics = this.#state.topicsOf?.(chatId) ?? [];
         if (topics.length === 0) {
-          await this.#bot.sendText(chatId, '还没有话题。发送 `/topic 标题` + 换行写正文即可开启。');
+          await this.#notice(chatId, '还没有话题。发送 `/topic 标题` + 换行写正文即可开启。');
           return;
         }
         const lines = topics.map((topic) => `#${topic.topicId} ${topic.title}`);
-        await this.#bot.sendText(chatId, ['话题列表：', ...lines].join('\n'));
+        await this.#notice(chatId, ['话题列表：', ...lines].join('\n'));
       },
       syncTopic: (chatId, topicId) => this.syncTopic(chatId, topicId),
       log: (level, message, error) => this.#log(level, message, error),
@@ -852,7 +861,7 @@ export class FeishuBridge {
           resolvedText: resolvedApprovalText(approve ? 'allowed-once' : 'rejected'),
         })).catch(() => undefined);
       }
-      void this.#bot.sendText(chatId, approve ? '✅ 已批准一次。' : '🚫 已拒绝。');
+      void this.#notice(chatId, approve ? '✅ 已批准一次。' : '🚫 已拒绝。');
       return true;
     }
     return false;
@@ -969,7 +978,7 @@ export class FeishuBridge {
         model: draft.model ?? null,
         preset: draft.preset ?? null,
       });
-      await this.#bot.sendText(chatId, '已按所选配置准备新会话，发送任意消息即可开始。');
+      await this.#notice(chatId, '已按所选配置准备新会话，发送任意消息即可开始。');
       return { toast: { type: 'success', content: '新会话已就绪' } };
     }
     if (action === 'compact') {
@@ -982,7 +991,7 @@ export class FeishuBridge {
           return { toast: { type: 'warning', content: result.text ?? '压缩失败' } };
         }
         const text = result.text ?? '已触发压缩';
-        await this.#bot.sendText(chatId, `上下文压缩：${text}`);
+        await this.#notice(chatId, `上下文压缩：${text}`);
         return { toast: { type: 'success', content: '压缩完成' } };
       } catch (error) {
         return { toast: { type: 'warning', content: `压缩失败：${error.message}` } };
@@ -1011,14 +1020,14 @@ export class FeishuBridge {
       const previous = this.#state.sessionFor(chatKey);
       await this.#state.bindSession(chatKey, pending.value);
       if (previous && previous !== pending.value) this.#forgetSessionOrigin(previous);
-      if (!silent) await this.#bot.sendText(chatId, `已绑定会话：${pending.label}`);
+      if (!silent) await this.#notice(chatId, `已绑定会话：${pending.label}`);
       return { ok: true, detail: '后续消息进入该会话' };
     }
     if (pending.action === 'workspace_pick') {
       await this.#state.setOverride?.(chatKey, { workspace: pending.value });
       await this.#state.unbindSession(chatKey);
       this.#forgetSessionOrigin(sessionId);
-      if (!silent) await this.#bot.sendText(chatId, `工作区已切换为 ${pending.value}`);
+      if (!silent) await this.#notice(chatId, `工作区已切换为 ${pending.value}`);
       return { ok: true, detail: '下一条消息会在该目录新建会话' };
     }
     if (pending.action === 'model_pick') {
@@ -1028,11 +1037,11 @@ export class FeishuBridge {
         await this.#harness.selectModel(sessionId, selection).catch((error) => this.#log('warn', 'selectModel failed', error));
         this.#sessionModels.set(sessionId, selection);
         if (this.#sessionModels.size > 500) this.#sessionModels.delete(this.#sessionModels.keys().next().value);
-        if (!silent) await this.#bot.sendText(chatId, `模型已切换为 ${pending.value}`);
+        if (!silent) await this.#notice(chatId, `模型已切换为 ${pending.value}`);
         return { ok: true, detail: '当前会话立即生效' };
       }
       await this.#state.setOverride?.(chatKey, { model: selection });
-      if (!silent) await this.#bot.sendText(chatId, `模型已切换为 ${pending.value}`);
+      if (!silent) await this.#notice(chatId, `模型已切换为 ${pending.value}`);
       return { ok: true, detail: '下一条消息的新会话生效' };
     }
     if (pending.action === 'reasoning_pick') {
@@ -1045,7 +1054,7 @@ export class FeishuBridge {
       } else {
         await this.#state.setOverride?.(chatKey, { model: selection });
       }
-      if (!silent) await this.#bot.sendText(chatId, `思考强度已切换为 ${pending.value}`);
+      if (!silent) await this.#notice(chatId, `思考强度已切换为 ${pending.value}`);
       return { ok: true, detail: sessionId ? '当前会话立即生效' : '下一条消息的新会话生效' };
     }
     return { ok: false, toast: { type: 'info', content: '没有待切换项' } };
