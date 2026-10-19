@@ -159,6 +159,31 @@ function statRow(label, value, bold = false) {
   };
 }
 
+/** Two stats on one line; `second` may be omitted. */
+function statPairRow(first, second = null) {
+  const cell = (label, value) => ([
+    { tag: 'column', width: 'auto', vertical_align: 'center', elements: [{ tag: 'markdown', content: label }] },
+    { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', horizontal_align: 'right', elements: [{ tag: 'markdown', content: value }] },
+  ]);
+  const columns = cell(first.label, first.value);
+  if (second) columns.push(...cell(second.label, second.value));
+  return { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '8px', columns };
+}
+
+/** Full-width 20-segment bar (column backgrounds need no text). */
+function contextBar(percent) {
+  const segments = 20;
+  const filled = Math.max(0, Math.min(segments, Math.round((percent / 100) * segments)));
+  const columns = Array.from({ length: segments }, (_, index) => ({
+    tag: 'column',
+    width: 'weighted',
+    weight: 1,
+    background_style: index < filled ? 'blue' : 'grey',
+    elements: [{ tag: 'markdown', content: ' ' }],
+  }));
+  return { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '0px', columns };
+}
+
 /** Menu card: session and workspace dropdowns plus usage stats and actions. */
 export function menuCard({
   sessionId, sessions = [], currentWorkspace = null, workspaces = [],
@@ -239,11 +264,12 @@ export function menuCard({
     const total = (usage.uncachedInputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0) + (usage.outputTokens ?? 0);
     const prompt = (usage.uncachedInputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
     const hit = prompt > 0 ? Math.round(((usage.cacheReadTokens ?? 0) / prompt) * 100) : null;
-    const rows = [];
-    if (hit !== null) rows.push(statRow('缓存命中', `${hit}%`));
-    rows.push(statRow('未缓存输入', formatTokens(usage.uncachedInputTokens)));
-    rows.push(statRow('缓存读取', formatTokens(usage.cacheReadTokens)));
-    rows.push(statRow('输出', formatTokens(usage.outputTokens)));
+    const rows = [
+      statPairRow({ label: '未缓存输入', value: formatTokens(usage.uncachedInputTokens) },
+        { label: '缓存读取', value: formatTokens(usage.cacheReadTokens) }),
+      statPairRow({ label: '输出', value: formatTokens(usage.outputTokens) },
+        hit !== null ? { label: '缓存命中', value: `${hit}%` } : null),
+    ];
     elements.push(section(`**🪙 Token 用量**　　${formatTokens(total)}`, rows));
   }
   const pressure = stats?.contextPressure ?? null;
@@ -252,14 +278,11 @@ export function menuCard({
   const used = Number(pressure?.projectedTokens ?? pressure?.pressureTokens ?? 0);
   if (windowSize > 0 && used > 0) {
     const percent = Math.min(100, Math.round((used / windowSize) * 100));
-    const filled = Math.round(percent / 10);
-    const rows = [
-      { tag: 'markdown', content: `${'🟦'.repeat(filled)}${'⬜'.repeat(10 - filled)}` },
-    ];
+    const rows = [contextBar(percent)];
     if (breakdown) {
-      rows.push(statRow('系统提示词', `~${formatCompact(breakdown.systemTokens)}`));
-      rows.push(statRow('工具定义', `~${formatCompact(breakdown.toolsTokens)}`));
-      rows.push(statRow('对话消息', `~${formatCompact(breakdown.messageTokens)}`));
+      rows.push(statPairRow({ label: '系统提示词', value: `~${formatCompact(breakdown.systemTokens)}` },
+        { label: '工具定义', value: `~${formatCompact(breakdown.toolsTokens)}` }));
+      rows.push(statPairRow({ label: '对话消息', value: `~${formatCompact(breakdown.messageTokens)}` }));
     }
     elements.push(section(`**📊 会话上下文**　已用 ${percent}%　${formatCompact(used)} / ${formatCompact(windowSize)}`, rows));
   }
