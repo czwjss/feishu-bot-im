@@ -211,9 +211,10 @@ export function menuCard({
   // 三等分栅格，每格内放一个固定宽度的按钮（约五个汉字）
   const fixedButton = (label, action, type) => ({
     tag: 'column',
-    width: '80px',
+    width: 'weighted',
+    weight: 1,
     horizontal_align: 'center',
-    elements: [{ ...button(label, action, type), width: 'fill' }],
+    elements: [{ ...button(label, action, type), width: '100px' }],
   });
   elements.push({ tag: 'hr' });
   elements.push({
