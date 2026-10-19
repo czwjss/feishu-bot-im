@@ -7,10 +7,9 @@
  *   { version: 2, bots: [ { id, appId, secretRef, alias, ...settings } ] }
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
-import { homedir } from 'node:os';
+import { dirname } from 'node:path';
 
-import { defaultContextEnhancement, normalizeContextEnhancementConfig } from './context-enhancement.js';
+import { normalizeContextEnhancementConfig } from './context-enhancement.js';
 import { randomUUID } from 'node:crypto';
 
 export const ACCESS_MODES = Object.freeze({ ALL: 'all', ALLOWLIST: 'allowlist' });
@@ -122,20 +121,6 @@ export function normalizeDocument(value) {
     if (legacy) bots.push(legacy);
   }
   return Object.freeze({ version: 2, bots: Object.freeze(bots) });
-}
-
-export function integrationDir(config = {}) {
-  const home = resolve(config.dshHome ?? process.env.DSH_HOME ?? join(homedir(), '.dsh'));
-  return resolve(config.dataDir ?? join(home, 'integrations', 'im-feishu'));
-}
-
-export function configPaths(config = {}) {
-  const root = integrationDir(config);
-  return {
-    root,
-    config: resolve(config.configPath ?? join(root, 'config.json')),
-    state: (botId) => resolve(join(root, `state-${botId}.json`)),
-  };
 }
 
 async function readJson(path) {

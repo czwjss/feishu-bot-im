@@ -6,7 +6,7 @@
  */
 import { textOfContent } from './harness.js';
 import { splitText } from './feishu.js';
-import { noticeCard, turnCard } from './cards.js';
+import { turnCard } from './cards.js';
 import { sendNotice } from './notify.js';
 import { buildProgressText, buildPanelTitle, buildStepsMarkdown, buildUsageRows, buildUsageTitle, summarizeArguments } from './progress.js';
 

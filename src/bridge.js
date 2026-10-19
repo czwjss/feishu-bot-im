@@ -6,9 +6,9 @@
  */
 import { TurnRunner } from './turn.js';
 import { scopedValue, textOfContentOrPost } from './message-text.js';
-import { approvalCard, questionCard, resolvedApprovalText, menuCard, newSessionCard, adjustCard, noticeCard } from './cards.js';
+import { approvalCard, questionCard, resolvedApprovalText, newSessionCard, adjustCard, noticeCard } from './cards.js';
 import { isAddressed, isAllowed, senderOpenId } from './access.js';
-import { buildMenuCard, collectMenuData, currentMenuValue, menuOptionLabel, runCommand } from './commands.js';
+import { collectMenuData, currentMenuValue, menuOptionLabel, runCommand } from './commands.js';
 import { InboundContent } from './inbound.js';
 import { renderGuidanceBlock, renderSourceBlock } from './context-enhancement.js';
 import { appendFile, mkdir } from 'node:fs/promises';

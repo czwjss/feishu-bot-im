@@ -154,7 +154,7 @@ function statLine(label, value) {
   };
 }
 
-/** Bordered subsection; the header holds only the title so both sections align. */
+/** Bordered subsection; its header carries the section title plus the summary value. */
 function section(title, rows) {
   return {
     tag: 'collapsible_panel',
@@ -273,7 +273,7 @@ export function menuCard({
   }
   elements.push(...usageSections(stats));
 
-  // 三等分栅格，每格内放一个固定宽度的按钮（约五个汉字）
+  // 一行四个固定宽度按钮
   const fixedButton = (label, action, type) => ({
     tag: 'column',
     width: 'weighted',

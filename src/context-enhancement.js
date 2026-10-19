@@ -32,17 +32,6 @@ const SOURCE_LIMITS = Object.freeze({
 
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
 
-function defaultScope() {
-  return { enabled: true, fields: ['senderId', 'senderName', 'botId', 'sentAt'], guidance: '' };
-}
-
-export function defaultContextEnhancement() {
-  return Object.freeze({
-    group: Object.freeze({ ...defaultScope(), fields: [...defaultScope().fields, 'conversationTitle'] }),
-    direct: Object.freeze(defaultScope()),
-  });
-}
-
 function invalid(message) {
   const error = new TypeError(message);
   error.code = 'context-enhancement-invalid';
