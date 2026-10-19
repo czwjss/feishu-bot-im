@@ -94,6 +94,7 @@ export function normalizeBot(value, { legacyId } = {}) {
     respondToBotMessages: source.respondToBotMessages !== false,
     topicsEnabled: source.topicsEnabled !== false,
     processDetail: source.processDetail === 'brief' ? 'brief' : 'detailed',
+    permissionPreset: cleanString(source.permissionPreset),
     busyMode: normalizeScoped(source.busyMode, normalizeBusyMode),
     contextEnhancement: normalizeContextEnhancementConfig(source.contextEnhancement),
     access: normalizeAccess(source.access),

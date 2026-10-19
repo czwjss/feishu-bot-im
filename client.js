@@ -33,6 +33,7 @@ window.__ModuleLoader__.load({
       botProcessDetailSet: 'bot.process-detail.set',
       botModelSet: 'bot.model.set',
       botPresetSet: 'bot.preset.set',
+      botPermissionSet: 'bot.permission.set',
       botReconnect: 'bot.reconnect',
       botRemove: 'bot.remove',
       botTest: 'bot.test',
@@ -44,6 +45,7 @@ window.__ModuleLoader__.load({
       provisionCancel: 'provision.cancel',
       provisionPoll: 'provision.poll',
       workspacesList: 'workspaces.list',
+      permissionList: 'permission.list',
     };
 
     const t = (zh, en) => ((navigator.language || '').toLowerCase().startsWith('zh') ? zh : en);
@@ -529,7 +531,7 @@ window.__ModuleLoader__.load({
     }
 
     // ── 4. 单个机器人卡片 ────────────────────────────────────────────────────
-    function BotCard({ connection, bot, models, presets, workspaces, onChanged }) {
+    function BotCard({ connection, bot, models, presets, workspaces, permissionOptions, onChanged }) {
       const [open, setOpen] = React.useState(false);
       const [aliasOpen, setAliasOpen] = React.useState(false);
       const [detailsOpen, setDetailsOpen] = React.useState(false);
@@ -568,6 +570,7 @@ window.__ModuleLoader__.load({
           respondBot: source.respondToBotMessages !== false,
           topics: source.topicsEnabled !== false,
           processDetail: source.processDetail === 'brief' ? 'brief' : 'detailed',
+          permissionPreset: source.permissionPreset ?? '',
           direct: source.access?.direct ?? 'all',
           group: source.access?.group ?? 'all',
           allow: (source.access?.allowOpenIds ?? []).join(', '),
@@ -635,6 +638,7 @@ window.__ModuleLoader__.load({
         general: {
           workspace: value.workspace, provider: value.provider, model: value.model,
           reasoningEffort: value.reasoningEffort, preset: value.preset, processDetail: value.processDetail,
+          permissionPreset: value.permissionPreset,
         },
         direct: { busyMode: value.busyMode?.direct, ce: value.contextEnhancement?.direct },
         group: {
@@ -659,6 +663,7 @@ window.__ModuleLoader__.load({
         });
         await rpc(connection, API.botPresetSet, { botId: bot.id, preset: draft.preset || null });
         await rpc(connection, API.botProcessDetailSet, { botId: bot.id, mode: draft.processDetail === 'brief' ? 'brief' : 'detailed' });
+        await rpc(connection, API.botPermissionSet, { botId: bot.id, permissionPreset: draft.permissionPreset || null });
       });
 
       const saveScope = (scope) => run(`s-${scope}`, async () => {
@@ -824,6 +829,13 @@ window.__ModuleLoader__.load({
               },
                 h('option', { value: 'detailed' }, t('详细', 'Detailed')),
                 h('option', { value: 'brief' }, t('简要', 'Brief')))),
+            h(Field, { label: t('新会话权限档位', 'New-session permission'), hint: t('只影响之后新建的会话，已有会话不变。', 'Applies only to Sessions created later.') },
+              h('select', {
+                style: S.input, value: draft.permissionPreset,
+                onChange: (event) => set({ permissionPreset: event.target.value }),
+              },
+                h('option', { value: '' }, t('跟随 Host 默认', 'Host default')),
+                (permissionOptions ?? []).map((item) => h('option', { key: item.value, value: item.value }, item.name ?? item.value)))),
             h(Field, { label: t('默认 Agent 预设（只影响新会话）', 'Default agent preset (new Sessions)') },
               h('select', { style: S.input, value: draft.preset, onChange: (event) => set({ preset: event.target.value }) },
                 h('option', { value: '' }, t('跟随 Host 默认预设', 'Host default preset')),
@@ -890,6 +902,7 @@ window.__ModuleLoader__.load({
       const [models, setModels] = React.useState([]);
       const [presets, setPresets] = React.useState([]);
       const [workspaces, setWorkspaces] = React.useState([]);
+      const [permissionOptions, setPermissionOptions] = React.useState([]);
       const [addMode, setAddMode] = React.useState(null);
       const [error, setError] = React.useState(null);
       const [loaded, setLoaded] = React.useState(false);
@@ -961,6 +974,9 @@ window.__ModuleLoader__.load({
         void rpc(connection, API.workspacesList, {}).then((value) => {
           if (alive) setWorkspaces(Array.isArray(value?.workspaces) ? value.workspaces : []);
         }).catch(() => undefined);
+        void rpc(connection, API.permissionList, {}).then((value) => {
+          if (alive) setPermissionOptions(Array.isArray(value?.options) ? value.options : []);
+        }).catch(() => undefined);
         return () => { alive = false; };
       }, [connection, loaded, state.bots.length]);
 
@@ -994,6 +1010,7 @@ window.__ModuleLoader__.load({
             models,
             presets,
             workspaces,
+            permissionOptions,
             onChanged: () => { void refresh(); },
           })),
         addMode

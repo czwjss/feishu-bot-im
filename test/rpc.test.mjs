@@ -19,6 +19,12 @@ const manager = {
   runtimes: [runtime],
 };
 const harness = {
+  invoke: async (namespace, method) => {
+    if (namespace === 'permissionPresets' && method === 'catalog') {
+      return { options: [{ value: 'read-only', name: '仅可查看' }, { value: 'workspace-write', name: '工作区内修改' }], defaultPreset: 'workspace-write' };
+    }
+    throw new Error('unexpected invoke');
+  },
   modelCatalog: async () => ({ groups: [{ id: 'p', name: 'P', models: [{ id: 'm', name: 'M', reasoning: { efforts: [{ id: 'high' }] } }] }], default: null }),
   workspaceBaseline: async () => ({ items: [{ path: '/tmp/a', title: 'A' }, { path: '/tmp/b' }] }),
 };
@@ -55,6 +61,13 @@ const ce = await handle('bot.context-enhancement.set', {
 });
 assert.equal(ce.ok, true);
 
+const permissions = await handle('permission.list', {});
+assert.deepEqual(permissions.value.options.map((item) => item.value), ['read-only', 'workspace-write']);
+assert.equal(permissions.value.defaultPreset, 'workspace-write');
+
+await handle('bot.permission.set', { botId: 'bot_1', permissionPreset: 'read-only' });
+assert.deepEqual(calls.at(-1), ['save', { permissionPreset: 'read-only' }], 'permission preset saved');
+
 const presets = await handle('presets.list', { botId: 'bot_1' });
 assert.deepEqual(presets.value.presets, [{ id: 'standard', name: 'Standard' }]);
 
@@ -71,4 +84,4 @@ assert.equal(bad.error.code, 'bad-request');
 // 未知机器人向上抛错，由 installRpc 转成 {ok:false} 交给前端
 await assert.rejects(() => handle('bot.reconnect', { botId: 'bot_x' }), /机器人不存在/);
 
-console.log('rpc handler (multi-bot): 13 assertions passed');
+console.log('rpc handler (multi-bot): 16 assertions passed');

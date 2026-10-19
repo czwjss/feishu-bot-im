@@ -166,6 +166,7 @@ export class BotRuntime {
       respondToBotMessages: config.respondToBotMessages !== false,
       topicsEnabled: config.topicsEnabled !== false,
       processDetail: config.processDetail === 'brief' ? 'brief' : 'detailed',
+      permissionPreset: config.permissionPreset ?? null,
       busyMode: config.busyMode ?? 'queue',
       contextEnhancement: config.contextEnhancement ?? null,
       access: config.access ?? null,

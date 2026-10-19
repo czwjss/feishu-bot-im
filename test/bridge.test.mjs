@@ -39,6 +39,11 @@ class FakeHarness {
   async ensureWorkspace() { return 'ws-2'; }
   async prompt(sessionId, content, options) { this.prompts.push({ sessionId, content, options }); }
   async cancel(sessionId) { this.cancelled.push(sessionId); }
+  permissions = [];
+  async setPermission(sessionId, preset) {
+    this.permissions.push({ sessionId, preset });
+    return { result: { kind: 'success', text: 'Permission updated.' } };
+  }
   compacted = [];
   async compact(sessionId) {
     this.compacted.push(sessionId);
@@ -109,6 +114,15 @@ function message(overrides = {}) {
   assert.equal(harness.prompts.length, 1);
   assert.deepEqual(harness.prompts[0].content, [{ type: 'text', text: '你好' }]);
   assert.equal(state.sessionFor('chat:oc_chat'), 'sess-1');
+  bridge.dispose();
+}
+
+// 1b) 新会话应用默认权限档位
+{
+  const { harness, bridge } = makeBridge({ permissionPreset: 'workspace-write' });
+  await bridge.handleMessage(message({ chat_id: 'oc_perm', content: JSON.stringify({ text: '你好' }) }));
+  assert.equal(harness.permissions.length, 1, 'new session gets the preset');
+  assert.equal(harness.permissions[0].preset, 'workspace-write');
   bridge.dispose();
 }
 
@@ -707,4 +721,4 @@ function message(overrides = {}) {
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 35 scenarios passed');
+console.log('bridge: 36 scenarios passed');

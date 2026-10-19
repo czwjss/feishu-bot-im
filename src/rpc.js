@@ -76,6 +76,14 @@ export function createRpcHandler({ manager, harness, version }) {
         });
         return ok(await runtimeOf(input).status());
 
+      case 'bot.permission.set':
+        await runtimeOf(input).save({
+          permissionPreset: typeof input.permissionPreset === 'string' && input.permissionPreset.trim()
+            ? input.permissionPreset.trim()
+            : null,
+        });
+        return ok(await runtimeOf(input).status());
+
       case 'bot.preset.set':
         await runtimeOf(input).save({ agentPreset: typeof input.preset === 'string' && input.preset.trim() ? input.preset.trim() : null });
         return ok(await runtimeOf(input).status());
@@ -116,6 +124,14 @@ export function createRpcHandler({ manager, harness, version }) {
           })),
         }));
         return ok({ groups, default: catalog?.default ?? null });
+      }
+
+      case 'permission.list': {
+        const catalog = await harness.invoke('permissionPresets', 'catalog', {});
+        return ok({
+          options: Array.isArray(catalog?.options) ? catalog.options : [],
+          defaultPreset: catalog?.defaultPreset ?? null,
+        });
       }
 
       case 'presets.list': {

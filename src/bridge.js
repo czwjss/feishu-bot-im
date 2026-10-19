@@ -224,6 +224,17 @@ export class FeishuBridge {
     if (this.#externalAsk.size > 100) this.#externalAsk.delete(this.#externalAsk.keys().next().value);
   }
 
+  /** Apply the bot's default permission preset to a freshly created Session. */
+  async #applyPermission(sessionId) {
+    const preset = this.#config.permissionPreset;
+    if (!preset) return;
+    try {
+      await this.#harness.setPermission?.(sessionId, preset);
+    } catch (error) {
+      this.#log('warn', 'permission preset failed', error);
+    }
+  }
+
   /** Forget a Session's pending render marks when the chat stops using it. */
   #forgetSessionOrigin(sessionId) {
     if (!sessionId) return;
@@ -293,6 +304,7 @@ export class FeishuBridge {
       if (model) {
         await this.#harness.selectModel(created, model).catch(() => undefined);
       }
+      await this.#applyPermission(created);
       return created;
     };
 
@@ -422,6 +434,7 @@ export class FeishuBridge {
       workspace: workspace || null, preset: preset ?? null, model, origin: 'feishu',
     });
     if (model) await this.#harness.selectModel(sessionId, model).catch(() => undefined);
+    await this.#applyPermission(sessionId);
 
     const topic = await this.#state.createTopic({
       chatId, title: cleanTitle, brief: body.slice(0, 1000), sessionId, rootMessageId,

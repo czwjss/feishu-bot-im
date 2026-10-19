@@ -114,6 +114,15 @@ export class HarnessAdapter {
     return this.invoke('session', 'cancel', { request: { sessionId } });
   }
 
+  /** Run the host's `/permission <preset>` command for this Session. */
+  async setPermission(sessionId, preset) {
+    return this.invoke('commands', 'execute', {
+      agentId: sessionId,
+      line: `/permission ${preset}`,
+      submittedAttachments: [],
+    });
+  }
+
   /** Run the host's `/compact` command for this Session. */
   async compact(sessionId) {
     return this.invoke('commands', 'execute', {
