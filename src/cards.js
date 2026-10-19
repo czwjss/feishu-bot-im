@@ -211,10 +211,9 @@ export function menuCard({
   // 三等分栅格，每格内放一个固定宽度的按钮（约五个汉字）
   const fixedButton = (label, action, type) => ({
     tag: 'column',
-    width: 'weighted',
-    weight: 1,
+    width: '80px',
     horizontal_align: 'center',
-    elements: [{ ...button(label, action, type), width: '100px' }],
+    elements: [{ ...button(label, action, type), width: 'fill' }],
   });
   elements.push({ tag: 'hr' });
   elements.push({
@@ -222,7 +221,7 @@ export function menuCard({
     flex_mode: 'none',
     columns: [
       fixedButton('新会话', 'new_session', 'primary'),
-      fixedButton('压缩', 'compact'),
+      fixedButton('压缩', 'compact', 'primary'),
       fixedButton('调整', 'menu_apply', 'primary'),
       fixedButton('关闭', 'menu_close', 'danger'),
     ],
