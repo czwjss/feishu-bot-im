@@ -142,15 +142,6 @@ export function resolvedApprovalText(outcome) {
   return '⚠️ 审批已失效。';
 }
 
-/** One row of `属性 | 值 | 属性 | 值`, so both halves line up across rows. */
-function statPairRow(first, second = null) {
-  const attr = (item) => ({ tag: 'column', width: '100px', vertical_align: 'center', elements: [{ tag: 'markdown', content: item.label }] });
-  const value = (item) => ({ tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', horizontal_align: 'right', elements: [{ tag: 'markdown', content: item.value }] });
-  const columns = [attr(first), value(first)];
-  if (second) columns.push(attr(second), value(second));
-  return { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '12px', columns };
-}
-
 /** Bordered subsection; the header holds only the title so both sections align. */
 function section(title, rows) {
   return {
@@ -171,16 +162,13 @@ function usageSections(stats) {
       + (usage.cacheWriteTokens ?? 0) + (usage.outputTokens ?? 0);
     const prompt = (usage.uncachedInputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
     const hit = prompt > 0 ? Math.round(((usage.cacheReadTokens ?? 0) / prompt) * 100) : null;
-    elements.push(section(`🪙 Token 用量　总计 ${formatTokens(total)}`, [
-      statPairRow(
-        { label: '未缓存输入', value: formatTokens(usage.uncachedInputTokens) },
-        { label: '缓存读取', value: formatTokens(usage.cacheReadTokens) },
-      ),
-      statPairRow(
-        { label: '输出', value: formatTokens(usage.outputTokens) },
-        hit !== null ? { label: '缓存命中', value: `${hit}%` } : null,
-      ),
-    ]));
+    const table = [
+      '| 属性 | 值 | 属性 | 值 |',
+      '| --- | ---: | --- | ---: |',
+      `| 未缓存输入 | ${formatTokens(usage.uncachedInputTokens)} | 缓存读取 | ${formatTokens(usage.cacheReadTokens)} |`,
+      `| 输出 | ${formatTokens(usage.outputTokens)} | 缓存命中 | ${hit !== null ? `${hit}%` : '—'} |`,
+    ].join('\n');
+    elements.push(section(`🪙 Token 用量　总计 ${formatTokens(total)}`, [{ tag: 'markdown', content: table }]));
   }
 
   const pressure = stats?.contextPressure;
@@ -189,18 +177,19 @@ function usageSections(stats) {
   const used = Number(pressure?.projectedTokens ?? pressure?.pressureTokens ?? 0);
   if (windowSize > 0 && used > 0) {
     const percent = Math.min(100, Math.round((used / windowSize) * 100));
-    const rows = [];
+    const rows = [
+      '| 属性 | 值 | 属性 | 值 |',
+      '| --- | ---: | --- | ---: |',
+    ];
     if (breakdown) {
-      rows.push(statPairRow(
-        { label: '系统提示词', value: `~${formatCompactTokens(breakdown.systemTokens)}` },
-        { label: '工具定义', value: `~${formatCompactTokens(breakdown.toolsTokens)}` },
-      ));
-      rows.push(statPairRow({ label: '对话消息', value: `~${formatCompactTokens(breakdown.messageTokens)}` }));
+      rows.push(`| 系统提示词 | ~${formatCompactTokens(breakdown.systemTokens)} | 工具定义 | ~${formatCompactTokens(breakdown.toolsTokens)} |`);
+      rows.push(`| 对话消息 | ~${formatCompactTokens(breakdown.messageTokens)} | | |`);
+    } else {
+      rows.push('| 暂无明细 | | | |');
     }
-    if (rows.length === 0) rows.push({ tag: 'markdown', content: '暂无明细' });
     elements.push(section(
       `📊 会话上下文　已用 ${percent}% · ${formatCompactTokens(used)} / ${formatCompactTokens(windowSize)}`,
-      rows,
+      [{ tag: 'markdown', content: rows.join('\n') }],
     ));
   }
   return elements;
