@@ -318,22 +318,44 @@ function message(overrides = {}) {
   });
   assert.equal(open.toast.type, 'info', 'new_session opens a settings card');
   const newSessionCard = bot.cards.at(-1);
-  assert.match(JSON.stringify(newSessionCard?.card ?? {}), /ns_model/, 'new-session card carries its own pickers');
+  const shown = JSON.stringify(newSessionCard?.card ?? {});
+  assert.match(shown, /ns_model/, 'new-session card carries its own pickers');
+  assert.ok(!shown.includes('创建后发送任意消息'), 'no create-footer copy');
   await bridge.onCardAction({
     operator: { open_id: 'ou_user' },
     action: { value: { action: 'new_session_cancel' } },
-    context: { open_message_id: 'om-ns', open_chat_id: 'oc_menu' },
+    context: { open_message_id: newSessionCard.id, open_chat_id: 'oc_menu' },
   });
-  assert.deepEqual(bot.deleted, ['om-ns'], 'cancel recalls the card instead of posting text');
-  await bridge.onCardAction({
+  assert.deepEqual(bot.deleted, [newSessionCard.id], 'cancel recalls the card instead of posting text');
+  const created = await bridge.onCardAction({
     operator: { open_id: 'ou_user' },
     action: { value: { action: 'new_session_create' } },
     context: { open_message_id: newSessionCard.id, open_chat_id: 'oc_menu' },
   });
   assert.equal(state.sessionFor('chat:oc_menu'), null, 'creating a session unbinds the chat');
-  assert.equal(bot.patches.at(-1)?.id, newSessionCard.id, 'ready state patches the original card');
-  assert.match(JSON.stringify(bot.patches.at(-1)?.card), /新会话已就绪/);
+  assert.equal(created.card?.type, 'raw', 'callback response carries the ready card');
+  assert.match(JSON.stringify(created.card?.data), /新会话已就绪/);
   assert.ok(!JSON.stringify(bot.cards).includes('新会话已就绪'), 'no extra ready card is sent');
+  bridge.dispose();
+}
+
+// 10b) 新建会话创建：回调响应直接带新卡片，不依赖 open_message_id
+{
+  const { bot, bridge } = makeBridge();
+  await bridge.handleMessage(message({ chat_id: 'oc_ns_id', content: JSON.stringify({ text: '/menu' }) }));
+  const menu = bot.cards[0];
+  await bridge.onCardAction({
+    operator: { open_id: 'ou_user' },
+    action: { value: { action: 'new_session' } },
+    context: { open_message_id: menu.id, open_chat_id: 'oc_ns_id' },
+  });
+  const created = await bridge.onCardAction({
+    operator: { open_id: 'ou_user' },
+    action: { value: { action: 'new_session_create' } },
+    context: { open_chat_id: 'oc_ns_id' },
+  });
+  assert.equal(created.card?.type, 'raw', 'card response does not need a callback message id');
+  assert.match(JSON.stringify(created.card?.data), /新会话已就绪/);
   bridge.dispose();
 }
 
@@ -1030,4 +1052,4 @@ function message(overrides = {}) {
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 49 scenarios passed');
+console.log('bridge: 50 scenarios passed');

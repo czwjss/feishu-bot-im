@@ -1164,17 +1164,10 @@ export class FeishuBridge {
         preset: draft.preset ?? null,
       });
       const readyText = '已按所选配置准备新会话，发送任意消息即可开始。';
-      if (messageId) {
-        try {
-          await this.#bot.patchCard(messageId, noticeCard(readyText, '新会话已就绪'));
-        } catch (error) {
-          this.#log('warn', 'new-session ready card patch failed', error);
-          await sendNotice(this.#bot, chatId, readyText, '新会话已就绪');
-        }
-      } else {
-        await sendNotice(this.#bot, chatId, readyText, '新会话已就绪');
-      }
-      return { toast: { type: 'success', content: '新会话已就绪' } };
+      return {
+        toast: { type: 'success', content: '新会话已就绪' },
+        card: { type: 'raw', data: noticeCard(readyText, '新会话已就绪') },
+      };
     }
     if (action === 'compact') {
       const sessionId = this.#state.sessionFor(chatKey);

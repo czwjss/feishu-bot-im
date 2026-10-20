@@ -333,7 +333,6 @@ export function newSessionCard({ workspaces = [], models = [], efforts = [], pre
       { tag: 'column', width: 'weighted', weight: 1, horizontal_align: 'center', elements: [button('取消', 'new_session_cancel')] },
     ],
   });
-  elements.push({ tag: 'markdown', content: '创建后发送任意消息，会话即按以上配置建立。' });
   return card('新建会话', 'blue', elements);
 }
 

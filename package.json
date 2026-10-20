@@ -1,6 +1,6 @@
 {
   "name": "@czwjss/feishu-bot-im",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "type": "module",
   "description": "飞书机器人：DeepSeek Harness 的飞书接入插件（多机器人、扫码接入、卡片回复、上下文注入）",
   "exports": {
