@@ -144,6 +144,8 @@ export async function collectMenuData(services, chatKey) {
     .map((item) => ({ value: item.id, label: item.name ?? item.id, current: item.id === (override.preset ?? config.agentPreset ?? null) }));
   return {
     sessionId,
+    statsEnabled: state.statsFor?.(chatKey) === true,
+    toolsEnabled: state.toolsFor?.(chatKey) === true,
     presets,
     sessions: visible,
     sessionWorkspace: currentSession?.cwd ?? override.workspace ?? null,

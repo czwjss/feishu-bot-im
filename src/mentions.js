@@ -29,6 +29,17 @@ function cleanName(value, fallback) {
   return name || fallback;
 }
 
+/** Collect the open_ids explicitly written in `<at>` tags. */
+export function extractMentionIds(text) {
+  if (typeof text !== 'string' || !text) return [];
+  const ids = new Set();
+  for (const tag of text.match(AT_TAG_PATTERN) ?? []) {
+    const id = AT_ID_PATTERN.exec(tag)?.[1];
+    if (id) ids.add(id);
+  }
+  return [...ids];
+}
+
 /**
  * Rewrite every `<at>` tag for one output mode. `directory` maps a known
  * open_id to its display name; ids not in it are treated as invalid.

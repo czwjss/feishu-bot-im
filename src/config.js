@@ -249,13 +249,15 @@ export class StateStore {
     const counters = parsed && typeof parsed.counters === 'object' && parsed.counters ? parsed.counters : {};
     const synced = parsed && typeof parsed.synced === 'object' && parsed.synced ? parsed.synced : {};
     const usage = parsed && typeof parsed.usage === 'object' && parsed.usage ? parsed.usage : {};
+    const stats = parsed && typeof parsed.stats === 'object' && parsed.stats ? parsed.stats : {};
+    const tools = parsed && typeof parsed.tools === 'object' && parsed.tools ? parsed.tools : {};
     const cleanSessions = {};
     for (const [key, value] of Object.entries(sessions)) {
       const topicMatch = /^topic:([^:]+):(\d+)$/.exec(key);
       if (topicMatch && !topics[`${topicMatch[1]}:${topicMatch[2]}`]) continue;
       cleanSessions[key] = value;
     }
-    this.#value = { sessions: cleanSessions, seen, meta: { ...meta }, overrides: { ...overrides }, topics: { ...topics }, counters: { ...counters }, synced: { ...synced }, usage: { ...usage } };
+    this.#value = { sessions: cleanSessions, seen, meta: { ...meta }, overrides: { ...overrides }, topics: { ...topics }, counters: { ...counters }, synced: { ...synced }, usage: { ...usage }, stats: { ...stats }, tools: { ...tools } };
     return this;
   }
 
@@ -269,11 +271,43 @@ export class StateStore {
       counters: { ...(this.#value.counters ?? {}) },
       synced: { ...(this.#value.synced ?? {}) },
       usage: { ...(this.#value.usage ?? {}) },
+      stats: { ...(this.#value.stats ?? {}) },
+      tools: { ...(this.#value.tools ?? {}) },
     };
     this.#value = snapshot;
     const run = this.#cache.then(() => writeJsonAtomic(this.#path, snapshot));
     this.#cache = run.catch(() => undefined);
     return run;
+  }
+
+  /** Per-chat display switch for token/context statistics. Off by default. */
+  statsFor(key) {
+    return this.#value.stats?.[key] === true;
+  }
+
+  async setStats(key, enabled) {
+    if (typeof key !== 'string') return false;
+    const stats = { ...(this.#value.stats ?? {}) };
+    if (enabled) stats[key] = true;
+    else delete stats[key];
+    this.#value = { ...this.#value, stats };
+    await this.#persist();
+    return enabled === true;
+  }
+
+  /** Per-chat display switch for the tool-call panel. Off by default. */
+  toolsFor(key) {
+    return this.#value.tools?.[key] === true;
+  }
+
+  async setTools(key, enabled) {
+    if (typeof key !== 'string') return false;
+    const tools = { ...(this.#value.tools ?? {}) };
+    if (enabled) tools[key] = true;
+    else delete tools[key];
+    this.#value = { ...this.#value, tools };
+    await this.#persist();
+    return enabled === true;
   }
 
   /** Persisted token totals for one chat (cumulative across turns). */

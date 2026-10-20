@@ -201,6 +201,36 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
+// 5d) 菜单统计常驻；Token 统计与工具调用是两个独立开关
+{
+  const { bot, bridge } = makeBridge();
+  await state.bindSession('chat:oc_stats_menu', 'sess-1');
+  await bridge.handleMessage(message({ chat_id: 'oc_stats_menu', content: JSON.stringify({ text: '/menu' }) }));
+  const menu = bot.cards.at(-1);
+  const before = JSON.stringify(menu.card);
+  assert.match(before, /stats_toggle/, 'menu offers the token toggle');
+  assert.match(before, /tools_toggle/, 'menu offers the tools toggle');
+  assert.match(before, /🪙 Token 用量/, 'menu statistics stay visible');
+  assert.match(before, /已关闭/, 'both reply-card panels are off by default');
+  const stats = await bridge.onCardAction({
+    operator: { open_id: 'ou_user' },
+    action: { value: { action: 'stats_toggle' } },
+    context: { open_chat_id: 'oc_stats_menu', open_message_id: menu.id },
+  });
+  assert.equal(state.statsFor('chat:oc_stats_menu'), true, 'token toggle is persisted');
+  assert.equal(state.toolsFor('chat:oc_stats_menu'), false, 'token toggle does not enable tools');
+  const afterStats = JSON.stringify(stats.card.data);
+  assert.match(afterStats, /🪙 Token 用量/, 'menu statistics are unaffected');
+  const tools = await bridge.onCardAction({
+    operator: { open_id: 'ou_user' },
+    action: { value: { action: 'tools_toggle' } },
+    context: { open_chat_id: 'oc_stats_menu', open_message_id: menu.id },
+  });
+  assert.equal(state.toolsFor('chat:oc_stats_menu'), true, 'tools toggle is persisted');
+  assert.match(JSON.stringify(tools.card.data), /已开启/, 'tools toggle reflects enabled state');
+  bridge.dispose();
+}
+
 // 5c) 菜单：手动压缩上下文
 {
   const { bot, harness, bridge } = makeBridge();
@@ -728,6 +758,81 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
+// 13r) 定时任务 prompt 里明确写出的 @ 会加入校验名单
+{
+  const { bot, bridge } = makeBridge();
+  await state.bindSession('chat:oc_sched_at', 'sess-sched-at');
+  await bridge.onSessionEvent({ id: 'sess-sched-at' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: 'sess-sched-at' }, {
+    type: 'user/message',
+    data: {
+      source: { kind: 'schedule' },
+      content: [{
+        type: 'text',
+        text: '[SCHEDULE REMINDER] reminders_json: [{"reminder_prompt":"先输出 <at id=ou_user></at>，再夸一句"}]',
+      }],
+    },
+  });
+  await bridge.onSessionEvent({ id: 'sess-sched-at' }, {
+    type: 'assistant/message',
+    data: { turn: 1, message: { content: [{ type: 'text', text: '<at id=ou_user></at> 你很帅 <at id=ou_nobody></at>' }] } },
+  });
+  await bridge.onSessionEvent({ id: 'sess-sched-at' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+  const flat = JSON.stringify([...bot.cards.map((item) => item.card), ...bot.patches.map((item) => item.card)]);
+  assert.match(flat, /<at id=ou_user><\/at>/, 'schedule prompt mention is kept');
+  assert.ok(!flat.includes('ou_nobody'), 'unknown ids are still erased');
+  bridge.dispose();
+}
+
+// 13s) Token 统计与工具调用面板可独立开关
+{
+  const { bot, harness, bridge } = makeBridge();
+  await state.bindSession('chat:oc_stats_turn', 'sess-stats-turn');
+  const runTurn = async (turn, text) => {
+    await bridge.handleMessage(message({ chat_id: 'oc_stats_turn', content: JSON.stringify({ text }) }));
+    const requestId = harness.prompts.at(-1).options.requestId;
+    await bridge.onSessionEvent({ id: 'sess-stats-turn' }, { type: 'turn/start', data: { turn } });
+    await bridge.onSessionEvent({ id: 'sess-stats-turn' }, {
+      type: 'user/message',
+      data: { source: { kind: 'user', rpcId: requestId } },
+    });
+    await bridge.onSessionEvent({ id: 'sess-stats-turn' }, {
+      type: 'tool/call',
+      data: { turn, step: 1, callId: 'c1', name: 'bash', arguments: JSON.stringify({ command: 'ls' }) },
+    });
+    await bridge.onSessionEvent({ id: 'sess-stats-turn' }, {
+      type: 'tool/result',
+      data: { turn, step: 1, message: { toolCallId: 'c1', isError: false, content: [{ type: 'text', text: 'ok' }] } },
+    });
+    await bridge.onSessionEvent({ id: 'sess-stats-turn' }, {
+      type: 'assistant/message',
+      data: {
+        turn,
+        usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, totalTokens: 110 },
+        message: { content: [{ type: 'text', text: `第${turn}轮回答` }] },
+      },
+    });
+    await bridge.onSessionEvent({ id: 'sess-stats-turn' }, { type: 'turn/end', data: { turn, reason: { kind: 'completed' } } });
+    return JSON.stringify(bot.patches.at(-1)?.card ?? {});
+  };
+  const first = await runTurn(1, '第一次');
+  assert.ok(!first.includes('🪙'), 'token panel is off by default');
+  assert.ok(!first.includes('工具调用'), 'tool panel is off by default');
+  await state.setStats('chat:oc_stats_turn', true);
+  const second = await runTurn(2, '第二次');
+  assert.match(second, /🪙 累计/, 'enabling token stats shows the usage panel');
+  assert.ok(!second.includes('工具调用'), 'token stats do not enable the tool panel');
+  await state.setTools('chat:oc_stats_turn', true);
+  const third = await runTurn(3, '第三次');
+  assert.match(third, /工具调用/, 'enabling tools shows the tool panel');
+  assert.match(third, /🪙 累计/, 'token stats stay independently controlled');
+  await state.setStats('chat:oc_stats_turn', false);
+  const fourth = await runTurn(4, '第四次');
+  assert.ok(!fourth.includes('🪙'), 'disabling token stats leaves the tool panel');
+  assert.match(fourth, /工具调用/, 'tool panel remains on');
+  bridge.dispose();
+}
+
 // 14) 群聊：回复机器人消息即视为被叫到
 {
   const { harness, bridge } = makeBridge();
@@ -1121,4 +1226,4 @@ function message(overrides = {}) {
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 52 scenarios passed');
+console.log('bridge: 55 scenarios passed');

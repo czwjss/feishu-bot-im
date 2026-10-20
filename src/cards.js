@@ -207,7 +207,7 @@ function usageSections(stats) {
 /** Menu card: session and workspace dropdowns plus usage stats and actions. */
 export function menuCard({
   sessionId, sessions = [], currentWorkspace = null, workspaces = [],
-  models = [], efforts = [], sessionWorkspace = null, stats = null,
+  models = [], efforts = [], sessionWorkspace = null, stats = null, statsEnabled = false, toolsEnabled = false,
 }) {
   const select = (name, action, items, placeholder) => ({
     tag: 'select_static',
@@ -265,6 +265,9 @@ export function menuCard({
     elements.push(row('思考强度', select('reasoning_pick', 'reasoning_pick', efforts,
       efforts.find((item) => item.current)?.label ?? '选择强度')));
   }
+  // The usage panel stays visible; these switches only control per-reply panels.
+  elements.push(row('Token 统计', button(statsEnabled ? '已开启' : '已关闭', 'stats_toggle', statsEnabled ? 'primary' : 'default')));
+  elements.push(row('工具调用', button(toolsEnabled ? '已开启' : '已关闭', 'tools_toggle', toolsEnabled ? 'primary' : 'default')));
   elements.push(...usageSections(stats));
 
   // 一行四个固定宽度按钮

@@ -108,6 +108,8 @@ function inbound(text, extra = {}) {
   const client = recordingClient();
   const bot = new FeishuBot({ appId: 'cli_test', appSecret: 'x', client });
   const bridge = new FeishuBridge({ bot, harness, config, state, version: 't', inboxDir: join(dir, 'inbox'), eventsPath: join(dir, 'events.log') });
+  await state.setStats('chat:oc_e2e', true);
+  await state.setTools('chat:oc_e2e', true);
   await bridge.handleMessage(inbound('你好'));
   assert.deepEqual(harness.prompts.at(-1).content, [{ type: 'text', text: '你好' }], 'user content stays clean');
   assert.equal(harness.lastCreate.workspaceId, 'ws-1', 'session must carry workspaceId');

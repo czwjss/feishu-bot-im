@@ -8,9 +8,9 @@ import { TurnRunner } from './turn.js';
 import { chatIdOfKey, scopedValue, textOfContentOrPost } from './message-text.js';
 import { approvalCard, questionCard, resolvedApprovalText, newSessionCard, adjustCard, noticeCard } from './cards.js';
 import { isAddressed, isAllowed, senderOpenId } from './access.js';
-import { collectMenuData, currentMenuValue, menuOptionLabel, runCommand } from './commands.js';
+import { buildMenuCard, collectMenuData, currentMenuValue, menuOptionLabel, runCommand } from './commands.js';
 import { EavesdropStore, describeMessageForEavesdrop, renderEavesdropBlock } from './eavesdrop.js';
-import { renderMentions } from './mentions.js';
+import { extractMentionIds, renderMentions } from './mentions.js';
 import { InboundContent } from './inbound.js';
 import { renderGuidanceBlock, renderSourceBlock } from './context-enhancement.js';
 import { appendFile, mkdir } from 'node:fs/promises';
@@ -84,6 +84,8 @@ export class FeishuBridge {
       processDetail: () => this.#config.processDetail ?? 'detailed',
       classifyUserMessage: (sessionId, source) => this.#classifyUserMessage(sessionId, source),
       onTurnOrigin: (sessionId, kind) => this.#turnOrigin.set(sessionId, kind),
+      showStats: (chatKey) => this.#state.statsFor?.(chatKey) === true,
+      showTools: (chatKey) => this.#state.toolsFor?.(chatKey) === true,
       renderMentions: (text, { chatKey, mode }) => this.#renderMentions(text, chatKey, mode),
     });
   }
@@ -565,6 +567,27 @@ export class FeishuBridge {
     return name;
   }
 
+  /**
+   * A schedule reminder has no sender of its own. Its prompt is the user's
+   * instruction, so ids explicitly written there are legitimate @ targets even
+   * after a restart emptied the in-memory roster.
+   */
+  async #seedScheduleMentions(sessionId, content) {
+    if (this.#config.mentions?.enabled === false) return;
+    const chatKey = this.#state.keyForSession?.(sessionId);
+    if (!chatKey) return;
+    const text = typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content.map((part) => (part?.type === 'text' ? String(part.text ?? '') : '')).join('\n')
+        : '';
+    for (const id of extractMentionIds(text).slice(0, 20)) {
+      if (id === 'all' || id === this.#config.botOpenId) continue;
+      const name = await this.#senderName(id);
+      this.#rememberParticipant(chatKey, id, name);
+    }
+  }
+
   /** Message that belongs to a topic: a reply to its card or a thread post. */
   #topicForMessage(message) {
     const rootId = message?.root_id ?? message?.parent_id;
@@ -801,6 +824,9 @@ export class FeishuBridge {
   }
 
   async onSessionEvent(session, event) {
+    if (event?.type === 'user/message' && event.data?.source?.kind === 'schedule') {
+      await this.#seedScheduleMentions(session?.id, event.data?.content);
+    }
     const chatKey = this.#state.keyForSession?.(session?.id);
     if (chatKey && event?.type === 'turn/start') this.#startTurnReactions(chatKey);
     const result = await this.#turns.onSessionEvent(session, event);
@@ -1006,7 +1032,7 @@ export class FeishuBridge {
 
     if (action === 'session_pick' || action === 'workspace_pick' || action === 'new_session'
       || action === 'model_pick' || action === 'reasoning_pick'
-      || action === 'menu_apply' || action === 'menu_cancel'
+      || action === 'menu_apply' || action === 'menu_cancel' || action === 'stats_toggle' || action === 'tools_toggle'
       || action === 'ns_workspace' || action === 'ns_model' || action === 'ns_reasoning' || action === 'ns_preset'
       || action === 'new_session_create' || action === 'new_session_cancel' || action === 'compact' || action === 'menu_close') {
       return this.#handleMenuAction(action, event);
@@ -1094,7 +1120,7 @@ export class FeishuBridge {
     const operator = event?.operator?.open_id ?? event?.operator?.operator_id?.open_id ?? null;
     const services = this.#services();
     const pickers = new Set(['session_pick', 'workspace_pick', 'model_pick', 'reasoning_pick']);
-    const managedActions = new Set(['menu_apply', 'new_session', 'new_session_create', 'compact']);
+    const managedActions = new Set(['menu_apply', 'new_session', 'new_session_create', 'compact', 'stats_toggle', 'tools_toggle']);
     if (managedActions.has(action) && !this.#canManage(chatKey, operator)) {
       return { toast: { type: 'warning', content: '只有管理员可以在群里执行这个操作' } };
     }
@@ -1210,6 +1236,21 @@ export class FeishuBridge {
       this.#newSessionDraft.delete(chatKey);
       if (messageId) await this.#bot.deleteMessage?.(messageId).catch(() => undefined);
       return undefined;
+    }
+    if (action === 'stats_toggle' || action === 'tools_toggle') {
+      const isStats = action === 'stats_toggle';
+      const enabled = isStats
+        ? this.#state.statsFor?.(chatKey) === true
+        : this.#state.toolsFor?.(chatKey) === true;
+      if (isStats) await this.#state.setStats?.(chatKey, !enabled);
+      else await this.#state.setTools?.(chatKey, !enabled);
+      // The rebuilt menu shows current values; drop hidden pending picks.
+      this.#menuPending.delete(chatKey);
+      const card = await buildMenuCard(services, { chatKey });
+      return {
+        toast: { type: 'success', content: `${isStats ? 'Token 统计' : '工具调用'}已${enabled ? '关闭' : '开启'}` },
+        card: { type: 'raw', data: card },
+      };
     }
     if (action === 'menu_close') {
       // Closing discards unapplied dropdown picks and any new-session draft.

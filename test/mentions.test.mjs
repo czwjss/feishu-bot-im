@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { normalizeMentionsConfig, renderMentions } from '../src/mentions.js';
+import { extractMentionIds, normalizeMentionsConfig, renderMentions } from '../src/mentions.js';
 import { normalizeBot } from '../src/config.js';
 
 // 1) 默认：允许 @ 人、禁止 @所有人
@@ -49,4 +49,10 @@ assert.equal(
 const dirty = new Map([['ou_x', '张<三>&\n']]);
 assert.equal(renderMentions('<at id=ou_x></at>', { mode: 'text', directory: dirty }), '<at user_id="ou_x">张三</at>');
 
-console.log('mentions: 7 scenarios passed');
+// 8) 从 schedule prompt 等文本里提取明确写出的 @ id
+assert.deepEqual(extractMentionIds('请 <at id=ou_zhang></at> 看下'), ['ou_zhang']);
+assert.deepEqual(extractMentionIds('<at id=ou_a></at> <at id="ou_b"/> <at id=ou_a></at>'), ['ou_a', 'ou_b']);
+assert.deepEqual(extractMentionIds('没有 at 标签'), []);
+assert.deepEqual(extractMentionIds('<at></at> <at id=bad id></at>'), ['bad']);
+
+console.log('mentions: 8 scenarios passed');

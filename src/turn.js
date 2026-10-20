@@ -24,7 +24,7 @@ export class TurnRunner {
   #contextWindows = new Map();
   #disposed = false;
 
-  constructor({ bot, state, log, logEvent, processDetail, classifyUserMessage, onTurnOrigin, renderMentions }) {
+  constructor({ bot, state, log, logEvent, processDetail, classifyUserMessage, onTurnOrigin, showStats, showTools, renderMentions }) {
     this.#bot = bot;
     this.#state = state;
     this.#log = log;
@@ -32,12 +32,18 @@ export class TurnRunner {
     this.#processDetail = typeof processDetail === 'function' ? processDetail : () => 'detailed';
     this.#classifyUserMessage = typeof classifyUserMessage === 'function' ? classifyUserMessage : () => null;
     this.#onTurnOrigin = typeof onTurnOrigin === 'function' ? onTurnOrigin : () => undefined;
+    this.#showStats = typeof showStats === 'function' ? showStats : () => false;
+    this.#showTools = typeof showTools === 'function' ? showTools : () => false;
     this.#renderMentions = typeof renderMentions === 'function' ? renderMentions : (text) => text;
   }
 
   #classifyUserMessage;
 
   #onTurnOrigin;
+
+  #showStats;
+
+  #showTools;
 
   #processDetail;
 
@@ -333,8 +339,8 @@ export class TurnRunner {
   }
 
   #card(turn, text, statusNote = null, force = false) {
-    const panel = this.#toolPanel(turn, statusNote, force);
-    const usage = this.#usagePanel(turn, force);
+    const panel = this.#showTools(turn.chatKey) ? this.#toolPanel(turn, statusNote, force) : null;
+    const usage = this.#showStats(turn.chatKey) ? this.#usagePanel(turn, force) : null;
     return turnCard(this.#mentionText(turn, text, 'card'), {
       ...(panel ?? {}),
       ...(panel ? {} : { note: statusNote }),
