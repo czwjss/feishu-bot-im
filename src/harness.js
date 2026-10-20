@@ -99,10 +99,10 @@ export class HarnessAdapter {
     return value.sessionId;
   }
 
-  async prompt(sessionId, content, { mode = 'queue', signal } = {}) {
+  async prompt(sessionId, content, { mode = 'queue', signal, requestId } = {}) {
     const parts = typeof content === 'string' ? [{ type: 'text', text: content }] : content;
     const request = {
-      requestId: `im-feishu-${randomUUID()}`,
+      requestId: requestId ?? `im-feishu-${randomUUID()}`,
       sessionId,
       mode: mode === 'steer' ? 'steer' : 'queue',
       content: parts,

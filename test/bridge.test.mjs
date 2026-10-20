@@ -585,6 +585,10 @@ function message(overrides = {}) {
   await state.bindSession('chat:oc_steer2', 'sess-own');
   await own.bridge.handleMessage(message({ chat_id: 'oc_steer2', content: JSON.stringify({ text: '第一步' }) }));
   await own.bridge.onSessionEvent({ id: 'sess-own' }, { type: 'turn/start', data: { turn: 1 } });
+  await own.bridge.onSessionEvent({ id: 'sess-own' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user', rpcId: own.harness.prompts.at(-1).options.requestId } },
+  });
   await own.bridge.handleMessage(message({ chat_id: 'oc_steer2', content: JSON.stringify({ text: '补充指令' }) }));
   assert.equal(own.harness.prompts.at(-1)?.options?.mode, 'steer', 'feishu turn may be steered');
   bridge.dispose();
@@ -604,13 +608,22 @@ function message(overrides = {}) {
 
 // 13l) 排队两条飞书消息：两个 turn 各渲染一张卡片
 {
-  const { bot, bridge } = makeBridge();
+  const { bot, harness, bridge } = makeBridge();
   await state.bindSession('chat:oc_fifo', 'sess-fifo');
   await bridge.handleMessage(message({ message_id: 'om_f1', chat_id: 'oc_fifo', content: JSON.stringify({ text: '第一条' }) }));
   await bridge.handleMessage(message({ message_id: 'om_f2', chat_id: 'oc_fifo', content: JSON.stringify({ text: '第二条' }) }));
+  const [firstPrompt, secondPrompt] = harness.prompts;
   await bridge.onSessionEvent({ id: 'sess-fifo' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: 'sess-fifo' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user', rpcId: firstPrompt.options.requestId } },
+  });
   await bridge.onSessionEvent({ id: 'sess-fifo' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
   await bridge.onSessionEvent({ id: 'sess-fifo' }, { type: 'turn/start', data: { turn: 2 } });
+  await bridge.onSessionEvent({ id: 'sess-fifo' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user', rpcId: secondPrompt.options.requestId } },
+  });
   await bridge.onSessionEvent({ id: 'sess-fifo' }, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } });
   assert.equal(bot.cards.length, 2, 'each queued prompt renders its own card');
   bridge.dispose();
@@ -660,6 +673,58 @@ function message(overrides = {}) {
   await bridge.handleMessage(message({ chat_id: 'oc_ask', message_id: 'om_stop', content: JSON.stringify({ text: '/stop' }) }));
   assert.match(cardText(bot), /已请求停止当前任务/);
   assert.match(cardText(bot), /刚才在等你回答：要部署到生产吗/);
+  bridge.dispose();
+}
+
+// 13p) 定时任务轮次：从 silent 切到飞书正常渲染
+{
+  const { bot, bridge } = makeBridge();
+  await state.bindSession('chat:oc_schedule', 'sess-schedule');
+  await bridge.onSessionEvent({ id: 'sess-schedule' }, { type: 'turn/start', data: { turn: 1 } });
+  assert.equal(bot.cards.length, 0, 'silent turn starts without a card');
+  await bridge.onSessionEvent({ id: 'sess-schedule' }, {
+    type: 'user/message',
+    data: { role: 'user', content: [{ type: 'text', text: '普通 Web 消息' }] },
+  });
+  assert.equal(bot.cards.length, 0, 'ordinary web message stays silent');
+  await bridge.onSessionEvent({ id: 'sess-schedule' }, {
+    type: 'user/message',
+    data: { source: { kind: 'schedule' }, role: 'user', content: [{ type: 'text', text: '[SCHEDULE REMINDER] 夸我' }] },
+  });
+  assert.equal(bot.cards.length, 1, 'schedule reminder un-silences the turn');
+  assert.match(cardText(bot), /已收到/);
+  await bridge.onSessionEvent({ id: 'sess-schedule' }, {
+    type: 'assistant/message',
+    data: { turn: 1, message: { content: [{ type: 'text', text: '你很棒' }] } },
+  });
+  await bridge.onSessionEvent({ id: 'sess-schedule' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+  assert.match(JSON.stringify(bot.patches.at(-1)?.card), /你很棒/);
+  assert.equal(bot.patches.at(-1)?.id, bot.cards[0].id, 'same card lifecycle');
+  bridge.dispose();
+}
+
+// 13q) 同一 Session 绑定两个 chat：按 prompt rpcId 发到来源 chat
+{
+  const { bot, harness, bridge } = makeBridge();
+  await state.bindSession('chat:oc_shared_a', 'sess-shared');
+  await state.bindSession('chat:oc_shared_b', 'sess-shared');
+  await bridge.handleMessage(message({
+    chat_id: 'oc_shared_b', chat_type: 'group',
+    mentions: [{ id: { open_id: 'ou_bot' } }],
+    content: JSON.stringify({ text: '发给 b' }),
+  }));
+  const requestId = harness.prompts.at(-1).options.requestId;
+  await bridge.onSessionEvent({ id: 'sess-shared' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: 'sess-shared' }, {
+    type: 'user/message',
+    data: { source: { kind: 'plugin:im-feishu', form: 'source' } },
+  });
+  assert.equal(bot.cards.length, 0, 'plugin row does not classify the turn');
+  await bridge.onSessionEvent({ id: 'sess-shared' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user', rpcId: requestId } },
+  });
+  assert.equal(bot.cards.at(-1)?.chatId, 'oc_shared_b', 'routes to the prompt chat');
   bridge.dispose();
 }
 
@@ -1013,7 +1078,9 @@ function message(overrides = {}) {
   assert.match(prompt, /<feishu_bot_people>/, 'mentioned people are injected');
   assert.match(prompt, /张三\(ou_zhang\)/, 'the mentioned person carries name and open_id');
   const sessionId = 'sess-mention';
+  const requestId = harness.prompts.at(-1).options.requestId;
   await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: sessionId }, { type: 'user/message', data: { source: { kind: 'user', rpcId: requestId } } });
   await bridge.onSessionEvent({ id: sessionId }, {
     type: 'assistant/message',
     data: {
@@ -1032,14 +1099,16 @@ function message(overrides = {}) {
 
 // 29) 关闭 @ 能力：所有 at 标签擦除
 {
-  const { bot, bridge } = makeBridge({ mentions: { enabled: false } });
+  const { bot, harness, bridge } = makeBridge({ mentions: { enabled: false } });
   await state.bindSession('chat:oc_mention_off', 'sess-mention-off');
   await bridge.handleMessage(message({
     chat_id: 'oc_mention_off', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
     content: JSON.stringify({ text: '请通知一下' }),
   }));
   const sessionId = 'sess-mention-off';
+  const requestId = harness.prompts.at(-1).options.requestId;
   await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: sessionId }, { type: 'user/message', data: { source: { kind: 'user', rpcId: requestId } } });
   await bridge.onSessionEvent({ id: sessionId }, {
     type: 'assistant/message',
     data: { turn: 1, message: { content: [{ type: 'text', text: '请 <at id=ou_user></at> 确认。' }] } },
@@ -1052,4 +1121,4 @@ function message(overrides = {}) {
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 50 scenarios passed');
+console.log('bridge: 52 scenarios passed');

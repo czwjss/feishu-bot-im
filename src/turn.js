@@ -24,17 +24,20 @@ export class TurnRunner {
   #contextWindows = new Map();
   #disposed = false;
 
-  constructor({ bot, state, log, logEvent, processDetail, shouldRenderTurn, renderMentions }) {
+  constructor({ bot, state, log, logEvent, processDetail, classifyUserMessage, onTurnOrigin, renderMentions }) {
     this.#bot = bot;
     this.#state = state;
     this.#log = log;
     this.#logEvent = logEvent;
     this.#processDetail = typeof processDetail === 'function' ? processDetail : () => 'detailed';
-    this.#shouldRenderTurn = typeof shouldRenderTurn === 'function' ? shouldRenderTurn : () => true;
+    this.#classifyUserMessage = typeof classifyUserMessage === 'function' ? classifyUserMessage : () => null;
+    this.#onTurnOrigin = typeof onTurnOrigin === 'function' ? onTurnOrigin : () => undefined;
     this.#renderMentions = typeof renderMentions === 'function' ? renderMentions : (text) => text;
   }
 
-  #shouldRenderTurn;
+  #classifyUserMessage;
+
+  #onTurnOrigin;
 
   #processDetail;
 
@@ -69,6 +72,15 @@ export class TurnRunner {
     return this.#turns.get(`${sessionId}:${turn}`) ?? null;
   }
 
+  /** Latest active turn for a session (schedule events carry no turn number). */
+  #activeTurnFor(sessionId) {
+    let latest = null;
+    for (const turn of this.#turns.values()) {
+      if (turn.sessionId === sessionId) latest = turn;
+    }
+    return latest;
+  }
+
   async onSessionEvent(session, event) {
     if (this.#disposed) return;
     const sessionId = session?.id;
@@ -83,15 +95,17 @@ export class TurnRunner {
     if (!chatId) return;
 
     if (event.type === 'turn/start') {
-      // 绑定到已有会话时，Web 侧触发的轮次不推卡片，但用量仍计入该 Session。
-      const render = this.#shouldRenderTurn(sessionId);
+      // The turn starts silent; its user/message source decides whether (and
+      // to which chat) it renders. Ordinary Web turns stay silent.
+      this.#onTurnOrigin(sessionId, 'external');
       const key = `${sessionId}:${event.data?.turn}`;
       if (this.#turns.has(key)) return;
       const turn = {
         sessionId,
         chatId,
         chatKey,
-        silent: !render,
+        silent: true,
+        originKind: null,
         topic: topic ?? null,
         turn: event.data?.turn,
         answer: '',
@@ -115,7 +129,6 @@ export class TurnRunner {
         startedAt: Date.now(),
       };
       this.#turns.set(key, turn);
-      if (!turn.silent) await this.#flushTurn(turn, '⏳ 已收到，正在处理…');
       return;
     }
 
@@ -129,6 +142,27 @@ export class TurnRunner {
         for (const active of this.#turns.values()) {
           if (active.sessionId === sessionId) active.contextWindow = window;
         }
+      }
+      return;
+    }
+
+    // The actual user message carries the prompt rpcId (Feishu) or
+    // source.kind=schedule. Plugin/system rows carry neither and are ignored
+    // until the real message arrives. Its origin also picks the exact chat for
+    // shared Sessions and un-silences the turn.
+    if (event.type === 'user/message') {
+      const active = this.#activeTurnFor(sessionId);
+      if (!active || active.originKind) return;
+      const origin = this.#classifyUserMessage(sessionId, event.data?.source);
+      if (!origin) return;
+      active.originKind = origin.kind;
+      if (origin.chatKey) active.chatKey = origin.chatKey;
+      if (origin.chatId) active.chatId = origin.chatId;
+      if (origin.topic !== undefined) active.topic = origin.topic;
+      this.#onTurnOrigin(sessionId, origin.kind === 'feishu' ? 'feishu' : 'external');
+      if (origin.kind !== 'external' && active.silent) {
+        active.silent = false;
+        await this.#flushTurn(active, '⏳ 已收到，正在处理…');
       }
       return;
     }

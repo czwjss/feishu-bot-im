@@ -77,7 +77,7 @@ const harness = {
   async createSession(opts) { this.created += 1; this.lastCreate = opts; return `sess-${this.created}`; },
   async resolveWorkspaceId() { return 'ws-1'; },
   async ensureWorkspace() { return null; },
-  async prompt(id, content) { this.prompts.push({ id, content }); },
+  async prompt(id, content, options) { this.prompts.push({ id, content, options }); },
   async cancel() {},
   async listSessions() { return [{ sessionId: 'sess-1', updatedAt: Date.now(), running: false }]; },
   async modelCatalog() { return { groups: [{ id: 'p', name: 'P', models: [{ id: 'm', name: 'M' }] }] }; },
@@ -115,6 +115,10 @@ function inbound(text, extra = {}) {
   // request/context 可能先于 turn/start 到达：窗口按 session 缓存
   await bridge.onSessionEvent({ id: 'sess-1' }, { type: 'request/context', data: { provider: 'p', model: 'm', contextWindow: 100000 } });
   await bridge.onSessionEvent({ id: 'sess-1' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: 'sess-1' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user', rpcId: harness.prompts.at(-1).options.requestId } },
+  });
   const create = client.calls.find((c) => c.api === 'message.create');
   assert.ok(create, 'turn start creates the answer card message');
   assert.equal(create.data.msg_type, 'interactive');
@@ -248,6 +252,10 @@ function inbound(text, extra = {}) {
     },
   });
   await bridge.onSessionEvent({ id: 'sess-topic' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: 'sess-topic' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user', rpcId: harness.prompts.at(-1).options.requestId } },
+  });
   await bridge.onSessionEvent({ id: 'sess-topic' }, { type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'text', text: '第一轮回答' }] } } });
   await bridge.onSessionEvent({ id: 'sess-topic' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
   const replies = client.calls.filter((call) => call.api === 'message.reply');
@@ -278,6 +286,10 @@ function inbound(text, extra = {}) {
   });
   assert.equal(state.topicFor('oc_e2e', topic.topicId)?.syncRequested, true, 'sync command marked');
   await bridge.onSessionEvent({ id: 'sess-sync' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: 'sess-sync' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user', rpcId: harness.prompts.at(-1).options.requestId } },
+  });
   await bridge.onSessionEvent({ id: 'sess-sync' }, { type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'text', text: '结论要点一' }] } } });
   await bridge.onSessionEvent({ id: 'sess-sync' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
   const synced = state.syncedFor('oc_e2e');

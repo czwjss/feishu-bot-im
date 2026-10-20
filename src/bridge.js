@@ -16,6 +16,7 @@ import { renderGuidanceBlock, renderSourceBlock } from './context-enhancement.js
 import { appendFile, mkdir } from 'node:fs/promises';
 import { sendNotice } from './notify.js';
 import { dirname } from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 
 const COMMAND = /^\/([a-z][a-z0-9-]*)(?:\s+([\s\S]*))?$/i;
@@ -42,7 +43,7 @@ export class FeishuBridge {
   #chatNames = new Map();
   #reactions = new Map();
   #reactionQueue = new Map();
-  #feishuTurns = new Map();
+  #feishuPromptOrigins = new Map();
   #turnOrigin = new Map();
   #externalAsk = new Map();
   #reactionActive = new Map();
@@ -81,7 +82,8 @@ export class FeishuBridge {
       log: (level, message, error) => this.#log(level, message, error),
       logEvent: (kind, detail) => this.#logEvent(kind, detail),
       processDetail: () => this.#config.processDetail ?? 'detailed',
-      shouldRenderTurn: (sessionId) => this.#consumeTurnOrigin(sessionId),
+      classifyUserMessage: (sessionId, source) => this.#classifyUserMessage(sessionId, source),
+      onTurnOrigin: (sessionId, kind) => this.#turnOrigin.set(sessionId, kind),
       renderMentions: (text, { chatKey, mode }) => this.#renderMentions(text, chatKey, mode),
     });
   }
@@ -296,37 +298,55 @@ export class FeishuBridge {
   /** Forget a Session's pending render marks when the chat stops using it. */
   #forgetSessionOrigin(sessionId) {
     if (!sessionId) return;
-    this.#feishuTurns.delete(sessionId);
     this.#turnOrigin.delete(sessionId);
     this.#externalAsk.delete(sessionId);
+    for (const [requestId, origin] of this.#feishuPromptOrigins) {
+      if (origin.sessionId === sessionId) this.#feishuPromptOrigins.delete(requestId);
+    }
+  }
+
+  /** Topic metadata for a chat key (`chat:` or `topic:`). */
+  #topicOf(chatKey) {
+    if (!chatKey?.startsWith('topic:')) return { topic: null };
+    const [, chatId, topicId] = chatKey.split(':');
+    return { topic: this.#state.topicFor?.(chatId, Number(topicId)) ?? null };
   }
 
   /**
-   * FIFO 计数：飞书 prompt 与它的 turn 一一对应。孤儿标记（提交后未开跑）
-   * 会被下一次飞书 turn 消费，只让标记整体后移，不会漏渲染。
+   * Classify the user message that actually started a turn. Feishu prompts are
+   * matched by the `rpcId` the Host echoes from `session.prompt`; schedule
+   * reminders carry `source.kind=schedule`. Plugin/system rows return null.
    */
-  #consumeTurnOrigin(sessionId) {
-    const pending = this.#feishuTurns.get(sessionId) ?? 0;
-    if (pending <= 0) {
-      this.#turnOrigin.set(sessionId, 'external');
-      return false;
+  #classifyUserMessage(sessionId, source) {
+    const rpcId = typeof source?.rpcId === 'string' ? source.rpcId : null;
+    if (rpcId) {
+      const origin = this.#feishuPromptOrigins.get(rpcId);
+      if (origin && origin.sessionId === sessionId) {
+        this.#feishuPromptOrigins.delete(rpcId);
+        return { kind: 'feishu', chatKey: origin.chatKey, chatId: origin.chatId, ...this.#topicOf(origin.chatKey) };
+      }
     }
-    if (pending === 1) this.#feishuTurns.delete(sessionId);
-    else this.#feishuTurns.set(sessionId, pending - 1);
-    this.#turnOrigin.set(sessionId, 'feishu');
-    return true;
+    if (source?.kind === 'schedule') {
+      const chatKey = this.#state.keyForSession(sessionId);
+      const chatId = chatIdOfKey(chatKey);
+      if (!chatId) return null;
+      return { kind: 'schedule', chatKey, chatId, ...this.#topicOf(chatKey) };
+    }
+    if (source?.kind === 'user') return { kind: 'external', chatKey: null, chatId: null, topic: null };
+    return null;
   }
 
-  /** Prompt a Feishu-owned Session and remember that its turn must render to the chat. */
-  async #promptFeishu(sessionId, content, options) {
+  /** Prompt a Feishu-owned Session and remember the exact chat for its turn. */
+  async #promptFeishu(sessionId, content, options = {}) {
     if (typeof sessionId !== 'string') throw new Error('session required');
-    this.#feishuTurns.set(sessionId, (this.#feishuTurns.get(sessionId) ?? 0) + 1);
+    const chatKey = options.chatKey ?? this.#state.keyForSession(sessionId);
+    const chatId = options.chatId ?? chatIdOfKey(chatKey);
+    const requestId = `im-feishu-${randomUUID()}`;
+    if (chatKey && chatId) this.#feishuPromptOrigins.set(requestId, { chatKey, chatId, sessionId });
     try {
-      await this.#harness.prompt(sessionId, content, options);
+      await this.#harness.prompt(sessionId, content, { ...options, requestId });
     } catch (error) {
-      const pending = (this.#feishuTurns.get(sessionId) ?? 1) - 1;
-      if (pending <= 0) this.#feishuTurns.delete(sessionId);
-      else this.#feishuTurns.set(sessionId, pending);
+      this.#feishuPromptOrigins.delete(requestId);
       throw error;
     }
   }
@@ -515,7 +535,7 @@ export class FeishuBridge {
         this.#onContext(sessionId, this.#state.originOf?.(sessionId) === 'feishu'
           ? [rawGuidance, mentionHint].filter(Boolean).join('\n\n')
           : '');
-        await this.#promptFeishu(sessionId, content, { mode });
+        await this.#promptFeishu(sessionId, content, { mode, chatKey, chatId });
         if (reserved) this.#eavesdrop.commit(chatKey, reserved.seq);
         return;
       } catch (error) {
@@ -598,7 +618,8 @@ export class FeishuBridge {
     const guidance = renderGuidanceBlock(this.#contextScope('group')) ?? '';
     const contextText = [guidance, this.#mentionHint()].filter(Boolean).join('\n\n');
     if (contextText) this.#onContext(sessionId, contextText);
-    await this.#promptFeishu(sessionId, [{ type: 'text', text: body || cleanTitle }], { mode: 'queue' })
+    const topicKey = `topic:${chatId}:${topic.topicId}`;
+    await this.#promptFeishu(sessionId, [{ type: 'text', text: body || cleanTitle }], { mode: 'queue', chatKey: topicKey, chatId })
       .catch((error) => this.#log('warn', 'topic prompt failed', error));
     return topic;
   }
@@ -611,7 +632,7 @@ export class FeishuBridge {
     await this.#promptFeishu(topic.sessionId, [{
       type: 'text',
       text: '请用简洁要点总结到目前为止这个话题的讨论结论（不超过 300 字，直接给结论，不要复述过程）。',
-    }], { mode: 'queue' }).catch((error) => this.#log('warn', 'topic sync prompt failed', error));
+    }], { mode: 'queue', chatKey: `topic:${chatId}:${topic.topicId}`, chatId }).catch((error) => this.#log('warn', 'topic sync prompt failed', error));
     return topic;
   }
 
