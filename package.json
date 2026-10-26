@@ -1,6 +1,6 @@
 {
   "name": "@czwjss/feishu-bot-im",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "飞书机器人：DeepSeek Harness 的飞书接入插件（多机器人、扫码接入、卡片回复、上下文注入）",
   "exports": {
@@ -38,7 +38,7 @@
     "dsh": ">=0.2.0"
   },
   "scripts": {
-    "test": "node test/message-text.test.mjs && node test/eavesdrop.test.mjs && node test/mentions.test.mjs && node test/feishu-errors.test.mjs && node test/bridge.test.mjs && node test/rpc.test.mjs && node test/tool.test.mjs && node test/runtime.test.mjs && node test/context-enhancement.test.mjs && node test/injected-context.test.mjs && node test/feishu-e2e.test.mjs && node test/registration.test.mjs && node test/slash-commands.test.mjs && node test/progress.test.mjs && node test/feishu-upload.test.mjs"
+    "test": "node test/message-text.test.mjs && node test/eavesdrop.test.mjs && node test/mentions.test.mjs && node test/feishu-errors.test.mjs && node test/client-theme.test.mjs && node test/bridge.test.mjs && node test/rpc.test.mjs && node test/tool.test.mjs && node test/runtime.test.mjs && node test/context-enhancement.test.mjs && node test/injected-context.test.mjs && node test/feishu-e2e.test.mjs && node test/registration.test.mjs && node test/slash-commands.test.mjs && node test/progress.test.mjs && node test/feishu-upload.test.mjs"
   },
   "license": "MIT",
   "repository": {

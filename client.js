@@ -81,7 +81,7 @@ window.__ModuleLoader__.load({
 .bxf-page select {
   appearance: none; -webkit-appearance: none; cursor: pointer;
   padding-right: 30px !important;
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") !important;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") !important;
   background-repeat: no-repeat !important;
   background-position: right 10px center !important;
 }
@@ -92,23 +92,23 @@ window.__ModuleLoader__.load({
   border-color: var(--bxf-accent-edge, #93b4ff);
 }
 .bxf-page select option:checked {
-  background: var(--bxf-accent, #3370ff) linear-gradient(0deg, var(--bxf-accent, #3370ff), var(--bxf-accent, #3370ff));
-  color: #fff;
+  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-label-primary, #3370ff)) !important;
+  color: var(--dsw-alias-label-primary-foreground, var(--dsw-alias-bg-base, #fff)) !important;
 }
-.bxf-card { transition: box-shadow .16s ease, border-color .16s ease; background: var(--dsw-alias-bg-elevated, #fff); }
-.bxf-card > .bxf-head { background: var(--dsw-alias-bg-elevated, #fff); }
-.bxf-card:hover { box-shadow: 0 8px 22px rgba(15,23,42,.07); border-color: #d7dee9; }
+.bxf-card { transition: box-shadow .16s ease, border-color .16s ease; background: var(--dsw-alias-bg-layer-1, #fff); }
+.bxf-card > .bxf-head { background: var(--dsw-alias-bg-layer-1, #fff); }
+.bxf-card:hover { box-shadow: 0 8px 22px rgba(15,23,42,.07); border-color: var(--dsw-alias-border-l2); }
 .bxf-head { border-radius: 0; }
 .bxf-panel-head:hover .bxf-panel-title { color: var(--bxf-accent, #3370ff); }
 .bxf-btn:hover { filter: brightness(.97); }
-.bxf-icon-btn:hover { background: rgba(148,163,184,.18); color: #3370ff; }
+.bxf-icon-btn:hover { background: rgba(148,163,184,.18); color: var(--bxf-accent, var(--dsw-alias-brand-primary)); }
 .bxf-mini { background: transparent !important; -webkit-appearance: none; appearance: none;
   font-size: 11px; padding: 3px 8px; border-radius: 7px; cursor: pointer;
-  border: 1px solid var(--dsw-alias-border, #e2e8f0); background: transparent; color: #64748b; }
+  border: 1px solid var(--dsw-alias-border-l1, #e2e8f0); background: transparent; color: var(--dsw-alias-label-secondary); }
 .bxf-mini:hover { color: var(--bxf-accent, #3370ff); border-color: var(--bxf-accent-edge, #93b4ff); background: var(--bxf-accent-soft, rgba(51,112,255,.10)) !important; }
 .bxf-check { background: transparent !important; -webkit-appearance: none; appearance: none;
   width: 27px; height: 27px; border-radius: 8px; cursor: pointer; flex: none;
-  border: 1px solid var(--dsw-alias-border, #d1d5db); background: transparent;
+  border: 1px solid var(--dsw-alias-border-l1, #d1d5db); background: transparent;
   color: var(--bxf-accent, #3370ff); font-size: 13px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
 .bxf-check:hover, .bxf-check:focus { background: var(--bxf-accent-soft, rgba(51,112,255,.10)) !important; border-color: var(--bxf-accent-edge, #93b4ff); }
 .bxf-check:active { background: var(--bxf-accent-soft, rgba(51,112,255,.10)) !important; }
@@ -119,10 +119,10 @@ window.__ModuleLoader__.load({
 .bxf-btn:active { transform: translateY(1px); }
 .bxf-tip { position: relative; display: inline-flex; align-items: center; justify-content: center;
   width: 15px; height: 15px; margin-left: 6px; border-radius: 50%;
-  background: rgba(148,163,184,.24); color: #475569; font-size: 10px; font-weight: 700;
+  background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); font-size: 10px; font-weight: 700;
   cursor: help; user-select: none; flex: none; }
 .bxf-tip-body { position: absolute; left: 0; top: 21px; min-width: 180px; max-width: 300px;
-  padding: 8px 10px; border-radius: 8px; background: #1f2937; color: #fff;
+  padding: 8px 10px; border-radius: 8px; background: var(--dsw-alias-bg-overlay); color: var(--dsw-alias-label-primary); border: 1px solid var(--dsw-alias-border-l1);
   font-size: 11px; font-weight: 400; line-height: 1.55; white-space: normal;
   box-shadow: 0 10px 26px rgba(15,23,42,.22); opacity: 0; visibility: hidden;
   transition: opacity .12s ease; z-index: 30; pointer-events: none; }
@@ -132,15 +132,15 @@ window.__ModuleLoader__.load({
 `;
 
     const S = {
-      page: { padding: '18px 22px', maxWidth: '980px', color: 'var(--dsw-alias-text-primary, #1c1c1e)' },
+      page: { padding: '18px 22px', maxWidth: '980px', color: 'var(--dsw-alias-label-primary, #1c1c1e)' },
       head: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '14px' },
       title: { margin: 0, fontSize: '18px', fontWeight: 600 },
-      sub: { margin: '2px 0 0', fontSize: '12px', color: 'var(--dsw-alias-text-secondary, #6b7280)' },
+      sub: { margin: '2px 0 0', fontSize: '12px', color: 'var(--dsw-alias-label-secondary, #6b7280)' },
       labelrow: { display: 'flex', alignItems: 'center', marginBottom: '5px' },
       card: {
-        border: '1px solid var(--dsw-alias-border, #e5e7eb)',
+        border: '1px solid var(--dsw-alias-border-l1, #e5e7eb)',
         borderRadius: '12px',
-        background: 'var(--dsw-alias-bg-elevated, #fff)',
+        background: 'var(--dsw-alias-bg-layer-1, #fff)',
         marginBottom: '12px',
         overflow: 'hidden',
         boxShadow: '0 1px 2px rgba(15,23,42,.04)',
@@ -152,57 +152,62 @@ window.__ModuleLoader__.load({
       idRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginTop: '2px' },
       iconBtn: {
         border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px 4px', borderRadius: '6px',
-        fontSize: '12px', lineHeight: 1, color: '#94a3b8', transition: 'background .15s ease, color .15s ease',
+        fontSize: '12px', lineHeight: 1, color: 'var(--dsw-alias-label-secondary)', transition: 'background .15s ease, color .15s ease',
       },
-      meta: { fontSize: '12px', color: 'var(--dsw-alias-text-secondary, #6b7280)', marginTop: '2px' },
+      meta: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary, #6b7280)', marginTop: '2px' },
       badge: (tone) => ({
         display: 'inline-block', padding: '1px 8px', borderRadius: '999px', fontSize: '11px',
         background: tone === 'ok' ? 'rgba(16,185,129,.12)' : tone === 'warn' ? 'rgba(245,158,11,.16)' : 'rgba(148,163,184,.18)',
-        color: tone === 'ok' ? '#047857' : tone === 'warn' ? '#b45309' : '#475569',
+        color: tone === 'ok' ? 'var(--dsw-alias-state-success-primary)' : tone === 'warn' ? 'var(--dsw-alias-state-warn-primary)' : 'var(--dsw-alias-state-idle-primary)',
       }),
-      body: { borderTop: '1px solid var(--dsw-alias-border, #e5e7eb)', padding: '4px 14px 14px' },
-      panel: { borderTop: '1px solid var(--dsw-alias-border, #f1f5f9)', padding: '10px 0' },
+      body: { borderTop: '1px solid var(--dsw-alias-border-l1, #e5e7eb)', padding: '4px 14px 14px' },
+      panel: { borderTop: '1px solid var(--dsw-alias-border-l1, #f1f5f9)', padding: '10px 0' },
       panelHead: { display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, padding: '2px 0' },
       panelBody: { marginTop: '8px', display: 'grid', gap: '10px' },
-      label: { display: 'block', fontSize: '12px', fontWeight: 500, marginBottom: '4px', color: 'var(--dsw-alias-text-secondary, #4b5563)' },
-      hint: { fontSize: '11px', color: 'var(--dsw-alias-text-secondary, #6b7280)', marginTop: '3px', lineHeight: 1.5 },
+      label: { display: 'block', fontSize: '12px', fontWeight: 500, marginBottom: '4px', color: 'var(--dsw-alias-label-secondary, #4b5563)' },
+      hint: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #6b7280)', marginTop: '3px', lineHeight: 1.5 },
       input: {
         width: '100%', boxSizing: 'border-box', height: '34px', padding: '0 10px', fontSize: '13px', borderRadius: '8px',
-        border: '1px solid var(--dsw-alias-border, #d1d5db)', background: 'var(--dsw-alias-bg-base, #fff)', color: 'inherit',
+        border: '1px solid var(--dsw-alias-border-l2, #d1d5db)', background: 'var(--dsw-alias-bg-layer-2, #fff)', color: 'var(--dsw-alias-label-primary)',
       },
-      area: { width: '100%', boxSizing: 'border-box', minHeight: '62px', padding: '7px 9px', fontSize: '12px', borderRadius: '8px', border: '1px solid var(--dsw-alias-border, #d1d5db)', background: 'var(--dsw-alias-bg-base, #fff)', color: 'inherit' },
+      area: { width: '100%', boxSizing: 'border-box', minHeight: '62px', padding: '7px 9px', fontSize: '12px', borderRadius: '8px', border: '1px solid var(--dsw-alias-border-l2, #d1d5db)', background: 'var(--dsw-alias-bg-layer-2, #fff)', color: 'var(--dsw-alias-label-primary)' },
       row: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' },
       btn: (kind) => ({
         padding: '6px 12px', fontSize: '12px', borderRadius: '8px', cursor: 'pointer',
-        border: kind === 'primary' ? '1px solid transparent' : '1px solid var(--dsw-alias-border, #d1d5db)',
-        background: kind === 'primary' ? 'var(--dsw-alias-brand-bg, #3370ff)' : 'transparent',
-        color: kind === 'primary' ? '#fff' : 'inherit',
+        border: kind === 'primary' ? '1px solid transparent' : '1px solid var(--dsw-alias-border-l1, #d1d5db)',
+        background: kind === 'primary'
+          ? 'var(--dsw-alias-button-primary-fill, var(--dsw-alias-label-primary, #3370ff))'
+          : 'transparent',
+        color: kind === 'primary'
+          ? 'var(--dsw-alias-label-primary-foreground, var(--dsw-alias-bg-base, #fff))'
+          : 'inherit',
       }),
       dangerBtn: {
         padding: '5px 12px', fontSize: '12px', borderRadius: '8px', cursor: 'pointer',
-        border: '1px solid rgba(185,28,28,.35)', background: 'transparent', color: '#b91c1c',
+        border: '1px solid var(--dsw-alias-state-error-primary)', background: 'transparent', color: 'var(--dsw-alias-state-error-primary)',
       },
-      error: { fontSize: '12px', color: '#b91c1c' },
+      error: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' },
       toast: {
         position: 'fixed', top: '24px', left: '50%', transform: 'translateX(-50%)',
-        background: 'rgba(17,24,39,0.92)', color: '#fff', fontSize: '13px',
+        background: 'var(--dsw-alias-bg-overlay)', color: 'var(--dsw-alias-label-primary)', fontSize: '13px', border: '1px solid var(--dsw-alias-border-l1)',
         padding: '8px 18px', borderRadius: '8px', zIndex: 9999,
         boxShadow: '0 6px 20px rgba(0,0,0,0.18)', pointerEvents: 'none',
       },
       check: {
         width: '27px', height: '27px', borderRadius: '8px', cursor: 'pointer', flex: 'none',
-        border: '1px solid var(--dsw-alias-border, #d1d5db)', background: 'transparent',
+        border: '1px solid var(--dsw-alias-border-l2, #d1d5db)', background: 'transparent',
         color: 'var(--bxf-accent, #3370ff)', fontSize: '13px', lineHeight: 1,
       },
       checkRow: { display: 'flex', flexWrap: 'wrap', gap: '6px 14px' },
-      check: { fontSize: '12px', display: 'flex', gap: '5px', alignItems: 'center' },
+      checkLabel: { fontSize: '12px', display: 'flex', gap: '5px', alignItems: 'center' },
       overlay: {
         position: 'fixed', inset: 0, background: 'rgba(15,23,42,.35)', display: 'flex',
         alignItems: 'center', justifyContent: 'center', zIndex: 60, padding: '20px',
       },
       modal: {
-        width: 'min(460px, 100%)', background: 'var(--dsw-alias-bg-elevated, #fff)', borderRadius: '14px',
-        padding: '18px', boxShadow: '0 24px 60px rgba(15,23,42,.24)', border: '1px solid var(--dsw-alias-border, #e5e7eb)',
+        width: 'min(460px, 100%)', background: 'var(--dsw-alias-bg-layer-1, #fff)', color: 'var(--dsw-alias-label-primary)',
+        borderRadius: '14px', padding: '18px', boxShadow: '0 24px 60px rgba(15,23,42,.24)',
+        border: '1px solid var(--dsw-alias-border-l1, #e5e7eb)',
       },
     };
 
@@ -222,10 +227,10 @@ window.__ModuleLoader__.load({
       render() {
         const { error, stack } = this.state;
         if (!error) return this.props.children;
-        return h('div', { style: { padding: '16px', color: '#b91c1c', fontSize: '12px' } },
+        return h('div', { style: { padding: '16px', color: 'var(--dsw-alias-state-error-primary)', fontSize: '12px' } },
           h('div', { style: { fontWeight: 600, marginBottom: '6px' } }, t('这里出错了', 'Something broke')),
           h('pre', { style: { whiteSpace: 'pre-wrap', margin: 0 } }, String(error?.message ?? error)),
-          stack ? h('pre', { style: { whiteSpace: 'pre-wrap', marginTop: '8px', color: '#6b7280' } }, stack) : null);
+          stack ? h('pre', { style: { whiteSpace: 'pre-wrap', marginTop: '8px', color: 'var(--dsw-alias-label-secondary)' } }, stack) : null);
       }
     }
 
@@ -387,11 +392,16 @@ window.__ModuleLoader__.load({
           mode === 'scan'
             ? h('div', { style: { display: 'grid', justifyItems: 'center', gap: '8px', marginTop: '10px' } },
               scan?.qrCodeDataUrl
-                ? h('img', { src: scan.qrCodeDataUrl, width: 200, height: 200, alt: 'QR' })
+                ? h('div', {
+                  style: {
+                    padding: '10px', background: '#fff', borderRadius: '12px', lineHeight: 0,
+                    border: '1px solid var(--dsw-alias-border-l1)', boxShadow: '0 2px 10px rgba(15,23,42,.08)',
+                  },
+                }, h('img', { src: scan.qrCodeDataUrl, width: 200, height: 200, alt: 'QR' }))
                 : h('div', {
                   style: {
                     width: '200px', height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    borderRadius: '10px', background: 'rgba(148,163,184,.10)', color: '#94a3b8', fontSize: '12px',
+                    borderRadius: '10px', background: 'var(--dsw-alias-bg-layer-2)', color: 'var(--dsw-alias-label-secondary)', fontSize: '12px',
                   },
                 }, t('正在生成二维码…', 'Preparing QR…')),
               h('div', { style: { ...S.hint, textAlign: 'center' } },
@@ -480,8 +490,8 @@ window.__ModuleLoader__.load({
                   onClick: () => setColor(key),
                   style: {
                     width: '26px', height: '26px', borderRadius: '50%', cursor: 'pointer',
-                    background: palette.main, border: color === key ? '2px solid #1f2937' : '2px solid transparent',
-                    boxShadow: color === key ? '0 0 0 2px #fff inset' : 'none',
+                    background: palette.main, border: color === key ? '2px solid var(--dsw-alias-label-primary)' : '2px solid transparent',
+                    boxShadow: color === key ? '0 0 0 2px var(--dsw-alias-bg-layer-1) inset' : 'none',
                   },
                 })))),
             error ? h('div', { style: S.error }, error) : null),
@@ -518,10 +528,10 @@ window.__ModuleLoader__.load({
           h('h3', { style: { margin: '0 0 10px', fontSize: '15px' } }, t('连接详情', 'Connection details')),
           h('div', { style: { display: 'grid', gap: '6px' } },
             rows.map(([key, value]) => h('div', { key, style: { display: 'flex', gap: '10px', fontSize: '12px' } },
-              h('span', { style: { width: '96px', color: 'var(--dsw-alias-text-secondary, #6b7280)', flex: 'none' } }, key),
+              h('span', { style: { width: '96px', color: 'var(--dsw-alias-label-secondary, #6b7280)', flex: 'none' } }, key),
               h('span', { style: { wordBreak: 'break-all' } }, value ?? '—')))),
-          h('div', { style: { borderTop: '1px solid var(--dsw-alias-border, #e5e7eb)', marginTop: '14px', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
-            h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-text-secondary, #6b7280)' } },
+          h('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l1, #e5e7eb)', marginTop: '14px', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+            h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary, #6b7280)' } },
               t('缺少权限时，扫码一次即可补齐', 'Scan once to grant the required permissions')),
             h('button', { type: 'button', style: S.btn('primary'), onClick: onGrant },
               t('补齐权限', 'Grant permissions'))),
@@ -705,10 +715,10 @@ window.__ModuleLoader__.load({
           contextEnhancement: { ...current.contextEnhancement, [scopeKey]: { ...scope, ...patch } },
         }));
         const fields = scopeKey === 'group' ? CE_FIELDS : CE_FIELDS.filter((field) => field !== 'conversationTitle');
-        return h('div', { style: { borderTop: '1px dashed var(--dsw-alias-border, #e5e7eb)', paddingTop: '8px' } },
+        return h('div', { style: { borderTop: '1px dashed var(--dsw-alias-border-l1, #e5e7eb)', paddingTop: '8px' } },
           h(FieldLabel, { label, hint: t('注入哪些来源字段：只勾选模型无法自行推断的消息元信息。', 'Which source fields to inject.') }),
           h('div', { style: S.checkRow },
-            fields.map((field) => h('label', { key: field, style: S.check },
+            fields.map((field) => h('label', { key: field, style: S.checkLabel },
               h('input', {
                 type: 'checkbox',
                 checked: (scope.fields ?? []).includes(field),
@@ -866,7 +876,7 @@ window.__ModuleLoader__.load({
                 h('option', { value: 'queue' }, t('排队等待', 'Queue')),
                 h('option', { value: 'steer' }, t('插入为补充指令', 'Steer')))),
             h(Field, { label: t('启用话题', 'Enable topics'), hint: t('开启后所有群成员都能用 /topic 开话题、/topic-sync 同步结论，不受管理白名单限制。', 'Anyone in the group may open or sync topics; the manager list does not apply.') },
-              h('label', { style: S.check },
+              h('label', { style: S.checkLabel },
                 h('input', {
                   type: 'checkbox',
                   checked: draft.topics !== false,
@@ -874,7 +884,7 @@ window.__ModuleLoader__.load({
                 }),
                 t('允许', 'Allow'))),
             h(Field, { label: t('响应其它机器人的消息', 'Reply to other bots'), hint: t('开启后，其它机器人（应用）在群里的发言也会触发本机器人。', 'When on, messages from other bots also trigger this bot.') },
-              h('label', { style: S.check },
+              h('label', { style: S.checkLabel },
                 h('input', {
                   type: 'checkbox',
                   checked: draft.respondBot === true,
@@ -882,7 +892,7 @@ window.__ModuleLoader__.load({
                 }),
                 t('允许', 'Allow'))),
             h(Field, { label: t('旁听群消息（默认开启）', 'Eavesdrop group messages (on by default)'), hint: t('只把未 @ 你的消息记为上下文，不会触发回复；图片/文件只记占位信息，模型需要时会请你 @ 它重发。需要 im:message.group_msg 权限；可用「补齐权限」扫码授权。', 'Only messages that do not mention the bot are kept as context; never triggers a reply; images/files become placeholders and the model asks you to mention it and resend them when needed. Requires im:message.group_msg; use "Grant permissions" to authorize.') },
-              h('label', { style: S.check },
+              h('label', { style: S.checkLabel },
                 h('input', {
                   type: 'checkbox',
                   checked: draft.eavesdrop.enabled,
@@ -902,7 +912,7 @@ window.__ModuleLoader__.load({
                 }))
               : null,
             h(Field, { label: t('允许机器人 @ 人（默认开启）', 'Let the bot mention people (on by default)'), hint: t('只在需要明确让某人收到消息或同步重要信息时才 @；常规对话不需要。插件会校验 open_id，非法或未开启时擦除。', 'Mention only when someone must receive the message or important information must be synced; normal replies do not mention. The plugin validates open_ids and erases invalid or disabled mentions.') },
-              h('label', { style: S.check },
+              h('label', { style: S.checkLabel },
                 h('input', {
                   type: 'checkbox',
                   checked: draft.mentions.enabled,
@@ -911,7 +921,7 @@ window.__ModuleLoader__.load({
                 t('允许', 'Allow'))),
             draft.mentions.enabled
               ? h(Field, { label: t('禁止 @所有人（默认开启）', 'Forbid @all (on by default)'), hint: t('关闭后模型可以 @所有人；插件仍会校验 open_id。', 'When off, the model may mention everyone; open_ids are still validated.') },
-                h('label', { style: S.check },
+                h('label', { style: S.checkLabel },
                   h('input', {
                     type: 'checkbox',
                     checked: draft.mentions.allowAll !== true,
