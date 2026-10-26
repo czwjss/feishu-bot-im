@@ -17,6 +17,35 @@ class FakeBot {
   async replyText(messageId, text) { this.replies.push({ messageId, text }); return `m${++seq}`; }
   async updateText(id, text) { this.updates.push({ id, text }); return id; }
   async sendCard(chatId, card) { const id = `m${++seq}`; this.cards.push({ chatId, card, id }); return id; }
+  cardKit = false;
+  cardEntities = [];
+  cardRefs = [];
+  cardTextUpdates = [];
+  cardUpdates = [];
+  async createCard(card) {
+    if (!this.cardKit) throw new Error('cardkit unavailable');
+    const id = `card_${++seq}`;
+    this.cardEntities.push({ id, card });
+    return id;
+  }
+  async sendCardRef(chatId, cardId, uuid) {
+    const id = `m${++seq}`;
+    this.cardRefs.push({ chatId, cardId, id, uuid });
+    return id;
+  }
+  async replyCardRefInThread(messageId, cardId, uuid) {
+    const id = `m${++seq}`;
+    this.cardRefs.push({ messageId, cardId, id, uuid });
+    return { messageId: id, threadId: 'thread_1' };
+  }
+  async updateCardText(cardId, elementId, content, sequence, uuid) {
+    this.cardTextUpdates.push({ cardId, elementId, content, sequence, uuid });
+    return cardId;
+  }
+  async updateCard(cardId, card, sequence, uuid) {
+    this.cardUpdates.push({ cardId, card, sequence, uuid });
+    return cardId;
+  }
   async getChatName(chatId) { return chatId === 'oc_group' ? '研发群' : null; }
   async getUserName(openId) { return openId === 'ou_user' ? '测试用户' : null; }
   async getMessage(id) { return id === 'om_bot_msg' ? { senderId: 'ou_bot', senderType: 'app' } : { senderId: 'ou_other', senderType: 'user' }; }
@@ -675,6 +704,9 @@ function message(overrides = {}) {
   const { bot, bridge } = makeBridge();
   await state.bindSession('chat:oc_webturn', 'sess-web-turn');
   await bridge.onSessionEvent({ id: 'sess-web-turn' }, { type: 'turn/start', data: { turn: 1 } });
+  bridge.onAssistantStream({ session: { id: 'sess-web-turn' } }, { chunk: { type: 'text-delta', text: 'Web 流式内容' } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(bot.cards.length, 0, 'silent Web turn never streams to Feishu');
   let approvalsNext = 0;
   await bridge.handleApproval({
     callId: 'call-w', toolName: 'bash', signal: new AbortController().signal,
@@ -830,6 +862,242 @@ function message(overrides = {}) {
   const fourth = await runTurn(4, '第四次');
   assert.ok(!fourth.includes('🪙'), 'disabling token stats leaves the tool panel');
   assert.match(fourth, /工具调用/, 'tool panel remains on');
+  bridge.dispose();
+}
+
+// 13t) 流式 chunk 不会并发 patch 同一张卡
+{
+  const { bot, harness, bridge } = makeBridge();
+  await state.bindSession('chat:oc_flush', 'sess-flush');
+  await bridge.handleMessage(message({ chat_id: 'oc_flush', content: JSON.stringify({ text: '开始' }) }));
+  const requestId = harness.prompts.at(-1).options.requestId;
+  await bridge.onSessionEvent({ id: 'sess-flush' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: 'sess-flush' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user', rpcId: requestId } },
+  });
+  assert.equal(bot.cards.length, 1, 'CardKit unavailable falls back to a raw card');
+  const realPatch = bot.patchCard.bind(bot);
+  let active = 0;
+  let maxActive = 0;
+  let calls = 0;
+  bot.patchCard = async (id, card) => {
+    active += 1;
+    calls += 1;
+    maxActive = Math.max(maxActive, active);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    active -= 1;
+    return realPatch(id, card);
+  };
+  const realNow = Date.now;
+  const base = Date.now();
+  Date.now = () => base + 11_000;
+  try {
+    for (let i = 0; i < 8; i += 1) {
+      bridge.onAssistantStream({ session: { id: 'sess-flush' } }, { chunk: { type: 'text-delta', text: `片段${i}` } });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  } finally {
+    Date.now = realNow;
+  }
+  assert.equal(maxActive, 1, 'card patches never overlap');
+  assert.equal(calls, 1, 'concurrent flushes coalesce into one patch');
+  bridge.dispose();
+}
+
+// 13u) 230020 限频会重试，而不是直接把卡片判死
+{
+  const { bot, harness, bridge } = makeBridge();
+  await state.bindSession('chat:oc_429', 'sess-429');
+  await bridge.handleMessage(message({ chat_id: 'oc_429', content: JSON.stringify({ text: '开始' }) }));
+  const requestId = harness.prompts.at(-1).options.requestId;
+  await bridge.onSessionEvent({ id: 'sess-429' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: 'sess-429' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user', rpcId: requestId } },
+  });
+  const realPatch = bot.patchCard.bind(bot);
+  let limited = false;
+  bot.patchCard = async (id, card) => {
+    if (!limited) {
+      limited = true;
+      const error = new Error('Request failed with status code 400');
+      error.response = { data: [{ message: 'bad request' }, { code: 230020, msg: 'too frequently' }] };
+      throw error;
+    }
+    return realPatch(id, card);
+  };
+  const realNow = Date.now;
+  const base = Date.now();
+  Date.now = () => base + 11_000;
+  try {
+    bridge.onAssistantStream({ session: { id: 'sess-429' } }, { chunk: { type: 'text-delta', text: '限频后重试' } });
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+  } finally {
+    Date.now = realNow;
+  }
+  assert.equal(limited, true, 'the fake rate limit was hit');
+  assert.ok(bot.patches.length >= 1, 'the card was patched after retry');
+  bridge.dispose();
+}
+
+// 13v) CardKit 回答卡：流式文本 + 终稿全量更新
+{
+  const { bot, harness, bridge } = makeBridge();
+  bot.cardKit = true;
+  await state.bindSession('chat:oc_cardkit', 'sess-cardkit');
+  await bridge.handleMessage(message({ chat_id: 'oc_cardkit', content: JSON.stringify({ text: '开始' }) }));
+  const requestId = harness.prompts.at(-1).options.requestId;
+  await bridge.onSessionEvent({ id: 'sess-cardkit' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: 'sess-cardkit' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user', rpcId: requestId } },
+  });
+  assert.equal(bot.cardEntities.length, 1, 'answer card entity is created');
+  assert.equal(bot.cardEntities[0].card.config.streaming_mode, true, 'card starts in streaming mode');
+  assert.equal(bot.cardRefs.length, 1, 'card entity is sent once');
+  const realNow = Date.now;
+  const base = Date.now();
+  Date.now = () => base + 1_000;
+  try {
+    bridge.onAssistantStream({ session: { id: 'sess-cardkit' } }, { type: 'start', turn: 1, attemptId: 'a1' });
+    bridge.onAssistantStream({ session: { id: 'sess-cardkit' } }, { type: 'chunk', attemptId: 'a1', chunk: { type: 'text-delta', text: '流式回答' } });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(bot.cardTextUpdates.length, 1, 'stream text updates the answer element');
+    assert.equal(bot.cardTextUpdates[0].elementId, 'answer');
+    assert.match(bot.cardTextUpdates[0].content, /流式回答/);
+    assert.equal(bot.cardTextUpdates[0].sequence, 1, 'stream update uses the first sequence');
+    await bridge.onSessionEvent({ id: 'sess-cardkit' }, {
+      type: 'assistant/message',
+      data: { turn: 1, message: { content: [{ type: 'text', text: '流式回答' }] } },
+    });
+    await bridge.onSessionEvent({ id: 'sess-cardkit' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+  } finally {
+    Date.now = realNow;
+  }
+  assert.equal(bot.cardUpdates.length, 1, 'final card is updated once');
+  assert.equal(bot.cardUpdates[0].card.config.streaming_mode, false, 'streaming is closed');
+  assert.match(JSON.stringify(bot.cardUpdates[0].card), /流式回答/);
+  assert.equal(bot.cardUpdates[0].sequence, 2, 'final update follows the stream sequence');
+  bridge.dispose();
+}
+
+// 13w) CardKit 流式期间独立更新工具 / Token 面板
+{
+  const { bot, harness, bridge } = makeBridge();
+  bot.cardKit = true;
+  await state.bindSession('chat:oc_cardkit_panels', 'sess-cardkit-panels');
+  await state.setTools('chat:oc_cardkit_panels', true);
+  await state.setStats('chat:oc_cardkit_panels', true);
+  await bridge.handleMessage(message({ chat_id: 'oc_cardkit_panels', content: JSON.stringify({ text: '开始' }) }));
+  const requestId = harness.prompts.at(-1).options.requestId;
+  await bridge.onSessionEvent({ id: 'sess-cardkit-panels' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: 'sess-cardkit-panels' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user', rpcId: requestId } },
+  });
+  const initial = JSON.stringify(bot.cardEntities[0].card);
+  assert.match(initial, /"element_id":"tools"/, 'streaming card has a tool panel element');
+  assert.match(initial, /"element_id":"usage"/, 'streaming card has a usage panel element');
+  assert.match(initial, /"expanded":true/, 'streaming panels start expanded');
+  await bridge.onSessionEvent({ id: 'sess-cardkit-panels' }, {
+    type: 'tool/call',
+    data: { turn: 1, step: 1, callId: 'c1', name: 'bash', arguments: JSON.stringify({ command: 'ls' }) },
+  });
+  await bridge.onSessionEvent({ id: 'sess-cardkit-panels' }, {
+    type: 'tool/result',
+    data: { turn: 1, step: 1, message: { toolCallId: 'c1', isError: false, content: [{ type: 'text', text: 'ok' }] } },
+  });
+  assert.ok(
+    bot.cardTextUpdates.some((item) => item.elementId === 'tools' && /bash/.test(item.content)),
+    'tool panel is updated during the stream',
+  );
+  const realNow = Date.now;
+  const base = Date.now();
+  Date.now = () => base + 2_000;
+  try {
+    await bridge.onSessionEvent({ id: 'sess-cardkit-panels' }, {
+      type: 'assistant/message',
+      data: {
+        turn: 1,
+        usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, totalTokens: 110 },
+        message: { content: [{ type: 'text', text: '面板测试' }] },
+      },
+    });
+  } finally {
+    Date.now = realNow;
+  }
+  assert.ok(
+    bot.cardTextUpdates.some((item) => item.elementId === 'usage' && /主 Agent|累计|输入/.test(item.content)),
+    'usage panel is updated during the stream',
+  );
+  await bridge.onSessionEvent({ id: 'sess-cardkit-panels' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+  const final = JSON.stringify(bot.cardUpdates.at(-1)?.card ?? {});
+  assert.match(final, /工具调用|bash/, 'final card still carries the tool panel');
+  assert.match(final, /Token|累计|主 Agent/, 'final card still carries the usage panel');
+  assert.match(final, /"expanded":true/, 'final CardKit card keeps the panels expanded');
+  bridge.dispose();
+}
+
+// 13x) CardKit 创建瞬时失败会先重试，而不是直接退化
+{
+  const { bot, harness, bridge } = makeBridge();
+  bot.cardKit = true;
+  const realCreate = bot.createCard.bind(bot);
+  let attempts = 0;
+  bot.createCard = async (card) => {
+    attempts += 1;
+    if (attempts === 1) {
+      const error = new Error('socket hang up');
+      error.code = 'ECONNRESET';
+      throw error;
+    }
+    return realCreate(card);
+  };
+  await state.bindSession('chat:oc_cardkit_retry', 'sess-cardkit-retry');
+  await bridge.handleMessage(message({ chat_id: 'oc_cardkit_retry', content: JSON.stringify({ text: '开始' }) }));
+  const requestId = harness.prompts.at(-1).options.requestId;
+  await bridge.onSessionEvent({ id: 'sess-cardkit-retry' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: 'sess-cardkit-retry' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user', rpcId: requestId } },
+  });
+  assert.equal(attempts, 2, 'transient create failure is retried');
+  assert.equal(bot.cardEntities.length, 1, 'second create succeeds');
+  assert.equal(bot.cardRefs.length, 1, 'card is sent after retry');
+  assert.equal(bot.cards.length, 0, 'no raw fallback after a successful retry');
+  bridge.dispose();
+}
+
+// 13z) CardKit 发送瞬时失败会复用同一个 uuid 重试
+{
+  const { bot, harness, bridge } = makeBridge();
+  bot.cardKit = true;
+  const realSend = bot.sendCardRef.bind(bot);
+  let attempts = 0;
+  const uuids = [];
+  bot.sendCardRef = async (chatId, cardId, uuid) => {
+    attempts += 1;
+    uuids.push(uuid);
+    if (attempts === 1) {
+      const error = new Error('socket hang up');
+      error.code = 'ECONNRESET';
+      throw error;
+    }
+    return realSend(chatId, cardId, uuid);
+  };
+  await state.bindSession('chat:oc_cardkit_send_retry', 'sess-cardkit-send');
+  await bridge.handleMessage(message({ chat_id: 'oc_cardkit_send_retry', content: JSON.stringify({ text: '开始' }) }));
+  const requestId = harness.prompts.at(-1).options.requestId;
+  await bridge.onSessionEvent({ id: 'sess-cardkit-send' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: 'sess-cardkit-send' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user', rpcId: requestId } },
+  });
+  assert.equal(attempts, 2, 'transient send failure is retried');
+  assert.equal(bot.cardRefs.length, 1, 'card is sent once');
+  assert.equal(uuids[0], uuids[1], 'retries reuse the same idempotency uuid');
+  assert.equal(bot.cards.length, 0, 'no raw fallback after a successful retry');
   bridge.dispose();
 }
 
@@ -1226,4 +1494,4 @@ function message(overrides = {}) {
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 55 scenarios passed');
+console.log('bridge: 61 scenarios passed');

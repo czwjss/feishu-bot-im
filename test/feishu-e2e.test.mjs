@@ -12,7 +12,7 @@ import { FeishuBot } from '../src/feishu.js';
 import { FeishuBridge } from '../src/bridge.js';
 
 let seq = 0;
-function recordingClient({ resourceBytes = null } = {}) {
+function recordingClient({ resourceBytes = null, cardKit = false } = {}) {
   const calls = [];
   const ok = (data) => ({ code: 0, msg: 'ok', data });
   const client = {
@@ -49,6 +49,28 @@ function recordingClient({ resourceBytes = null } = {}) {
       },
     },
   };
+  if (cardKit) {
+    client.cardkit = {
+      v1: {
+        card: {
+          create: async ({ data }) => {
+            calls.push({ api: 'cardkit.card.create', data });
+            return ok({ card_id: `card_${++seq}` });
+          },
+          update: async ({ path, data }) => {
+            calls.push({ api: 'cardkit.card.update', path, data });
+            return ok({});
+          },
+        },
+        cardElement: {
+          content: async ({ path, data }) => {
+            calls.push({ api: 'cardkit.cardElement.content', path, data });
+            return ok({});
+          },
+        },
+      },
+    };
+  }
   return client;
 }
 
@@ -317,5 +339,52 @@ function inbound(text, extra = {}) {
   bridge.dispose();
 }
 
+// 8) CardKit 回答卡：create → send → 流式 content → 终稿 update
+{
+  const client = recordingClient({ cardKit: true });
+  const bot = new FeishuBot({ appId: 'cli_test', appSecret: 'x', client });
+  const bridge = new FeishuBridge({ bot, harness, config, state, version: 't', inboxDir: join(dir, 'inbox') });
+  await bridge.handleMessage(inbound('开始', { chat_id: 'oc_cardkit_e2e', chat_type: 'p2p' }));
+  const sessionId = state.sessionFor('chat:oc_cardkit_e2e');
+  const requestId = harness.prompts.at(-1).options.requestId;
+  await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: sessionId }, { type: 'user/message', data: { source: { kind: 'user', rpcId: requestId } } });
+  const created = client.calls.find((call) => call.api === 'cardkit.card.create');
+  assert.ok(created, 'CardKit entity is created');
+  const streamingCard = JSON.parse(created.data.data);
+  assert.equal(streamingCard.config.streaming_mode, true);
+  assert.equal(streamingCard.body.elements[0].element_id, 'answer');
+  const sent = client.calls.find((call) => call.api === 'message.create' && String(call.data.content).includes('card_id'));
+  assert.ok(sent, 'CardKit entity is sent as a message');
+  const sentBody = JSON.parse(sent.data.content);
+  assert.equal(sentBody.type, 'card');
+  const realNow = Date.now;
+  const base = Date.now();
+  Date.now = () => base + 1_000;
+  try {
+    bridge.onAssistantStream({ session: { id: sessionId } }, { type: 'start', turn: 1, attemptId: 'a1' });
+    bridge.onAssistantStream({ session: { id: sessionId } }, { type: 'chunk', attemptId: 'a1', chunk: { type: 'text-delta', text: 'CardKit 回答' } });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const content = client.calls.find((call) => call.api === 'cardkit.cardElement.content');
+    assert.ok(content, 'stream text goes through CardKit');
+    assert.equal(content.path.element_id, 'answer');
+    assert.equal(content.data.sequence, 1);
+    await bridge.onSessionEvent({ id: sessionId }, {
+      type: 'assistant/message',
+      data: { turn: 1, message: { content: [{ type: 'text', text: 'CardKit 回答' }] } },
+    });
+    await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+  } finally {
+    Date.now = realNow;
+  }
+  const final = client.calls.find((call) => call.api === 'cardkit.card.update');
+  assert.ok(final, 'final card is a full CardKit update');
+  const finalCard = JSON.parse(final.data.card.data);
+  assert.equal(finalCard.config.streaming_mode, false);
+  assert.match(JSON.stringify(finalCard), /CardKit 回答/);
+  assert.equal(final.data.sequence, 2);
+  bridge.dispose();
+}
+
 await rm(dir, { recursive: true, force: true });
-console.log('feishu e2e (mock): 7 scenarios passed');
+console.log('feishu e2e (mock): 8 scenarios passed');

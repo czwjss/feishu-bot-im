@@ -109,14 +109,14 @@ export function noticeCard(text, title = null, tone = null) {
 /** Answer/progress card with a collapsible panel holding the tool calls. */
 export function turnCard(text, {
   panelTitle = null, panelBody = '', note = null,
-  usageTitle = null, usageBody = '',
+  usageTitle = null, usageBody = '', expanded = false,
 } = {}) {
   const elements = [{ tag: 'markdown', content: typeof text === 'string' && text ? text : ' ' }];
   if (panelTitle) {
     elements.push({ tag: 'hr' });
     elements.push({
       tag: 'collapsible_panel',
-      expanded: false,
+      expanded,
       border: { color: 'grey', corner_radius: '8px' },
       header: { title: { tag: 'markdown', content: panelTitle } },
       elements: [{ tag: 'markdown', content: panelBody || '（没有工具调用）' }],
@@ -126,7 +126,7 @@ export function turnCard(text, {
     elements.push({ tag: 'hr' });
     elements.push({
       tag: 'collapsible_panel',
-      expanded: false,
+      expanded,
       border: { color: 'grey', corner_radius: '8px' },
       header: { title: { tag: 'markdown', content: usageTitle } },
       elements: [{ tag: 'markdown', content: usageBody || '（没有用量数据）' }],
@@ -134,6 +134,57 @@ export function turnCard(text, {
   }
   if (note) elements.push({ tag: 'markdown', content: `*${note}*` });
   return { schema: '2.0', body: { elements } };
+}
+
+/** Live panel whose body is separately addressable for CardKit updates. */
+function streamPanel(elementId, title) {
+  return {
+    tag: 'collapsible_panel',
+    expanded: true,
+    border: { color: 'grey', corner_radius: '8px' },
+    header: { title: { tag: 'markdown', content: `**${title}**` } },
+    elements: [{
+      tag: 'markdown',
+      element_id: elementId,
+      content: '（等待中…）',
+    }],
+  };
+}
+
+/** CardKit card for live text plus optional live tool/token panels. */
+export function streamCard(text, { showTools = false, showStats = false } = {}) {
+  const elements = [{
+    tag: 'markdown',
+    element_id: 'answer',
+    content: typeof text === 'string' && text ? text : ' ',
+  }];
+  if (showTools) elements.push({ tag: 'hr' }, streamPanel('tools', '工具调用'));
+  if (showStats) elements.push({ tag: 'hr' }, streamPanel('usage', 'Token 用量'));
+  return {
+    schema: '2.0',
+    config: {
+      streaming_mode: true,
+      summary: { content: '正在生成…' },
+      streaming_config: {
+        print_frequency_ms: { default: 30 },
+        print_step: { default: 1 },
+        print_strategy: 'fast',
+      },
+    },
+    body: { elements },
+  };
+}
+
+/** Add the final config/title to an already-built card before a full CardKit update. */
+export function finalCard(card, text) {
+  return {
+    ...card,
+    config: {
+      ...(card?.config ?? {}),
+      streaming_mode: false,
+      summary: { content: String(text ?? '').replace(/<[^>]+>/g, '').slice(0, 80) },
+    },
+  };
 }
 
 export function resolvedApprovalText(outcome) {

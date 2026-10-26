@@ -5,6 +5,7 @@
  * delivery, resource download and the long-connection event loop.
  */
 import { chmod, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as Lark from '@larksuiteoapi/node-sdk';
@@ -18,6 +19,16 @@ function assertApiSuccess(operation, response) {
     throw error;
   }
   return response;
+}
+
+/** Inline card reference content used by both chat send and thread reply. */
+function cardRefContent(cardId) {
+  return JSON.stringify({ type: 'card', data: { card_id: cardId } });
+}
+
+/** CardKit payload shared by create and full update. */
+function cardJsonBody(card) {
+  return { type: 'card_json', data: JSON.stringify(card) };
 }
 
 /** Read the tenant token and bot identity so a bad App ID/Secret fails fast. */
@@ -343,19 +354,77 @@ export class FeishuBot {
     return messageId;
   }
 
+  /** CardKit API surface; absent in older SDKs or test doubles. */
+  #cardKitClient() {
+    const cardkit = this.#client?.cardkit?.v1;
+    if (!cardkit?.card?.create || !cardkit?.card?.update || !cardkit?.cardElement?.content) {
+      throw new Error('Feishu CardKit is unavailable');
+    }
+    return cardkit;
+  }
+
+  /** Create a CardKit card entity and return its card_id. */
+  async createCard(card) {
+    const response = assertApiSuccess('Feishu card entity create', await this.#cardKitClient().card.create({
+      data: cardJsonBody(card),
+    }));
+    const cardId = response?.data?.card_id;
+    if (!cardId) throw new Error('Feishu card entity returned no card_id');
+    return cardId;
+  }
+
+  /** Stream a full text value into one markdown element. */
+  async updateCardText(cardId, elementId, content, sequence, uuid = null) {
+    const response = await this.#cardKitClient().cardElement.content({
+      path: { card_id: cardId, element_id: elementId },
+      data: { content, sequence, uuid: uuid ?? randomUUID() },
+    });
+    assertApiSuccess('Feishu card text update', response);
+    return cardId;
+  }
+
+  /** Replace the whole card entity, e.g. to close streaming and add panels. */
+  async updateCard(cardId, card, sequence, uuid = null) {
+    const response = await this.#cardKitClient().card.update({
+      path: { card_id: cardId },
+      data: {
+        card: cardJsonBody(card),
+        sequence,
+        uuid: uuid ?? randomUUID(),
+      },
+    });
+    assertApiSuccess('Feishu card update', response);
+    return cardId;
+  }
+
   /** Post an already-created CardKit card by reference. */
-  async sendCardRef(chatId, cardId) {
+  async sendCardRef(chatId, cardId, uuid = null) {
     const response = assertApiSuccess('Feishu card message', await this.#client.im.v1.message.create({
       params: { receive_id_type: 'chat_id' },
       data: {
         receive_id: chatId,
         msg_type: 'interactive',
-        content: JSON.stringify({ type: 'card', data: { card_id: cardId } }),
+        content: cardRefContent(cardId),
+        ...(uuid ? { uuid } : {}),
       },
     }));
     const messageId = response?.data?.message_id;
     if (!messageId) throw new Error('Feishu card message returned no message_id');
     return messageId;
+  }
+
+  /** Post an already-created CardKit card as a thread reply. */
+  async replyCardRefInThread(messageId, cardId, uuid = null) {
+    const response = assertApiSuccess('Feishu threaded card message', await this.#client.im.v1.message.reply({
+      path: { message_id: messageId },
+      data: {
+        msg_type: 'interactive',
+        content: cardRefContent(cardId),
+        reply_in_thread: true,
+        ...(uuid ? { uuid } : {}),
+      },
+    }));
+    return { messageId: response?.data?.message_id ?? null, threadId: response?.data?.thread_id ?? null };
   }
 
   /** Replace an existing interactive card in place. */
