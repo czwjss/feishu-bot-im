@@ -349,6 +349,34 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
+// 9z) 菜单不提供已归档、空白、子会话或待迁移会话
+{
+  const { bot, harness, bridge } = makeBridge();
+  harness.models = [
+    { sessionId: 'sess-live', updatedAt: Date.now(), running: false, blank: false },
+    { sessionId: 'sess-archived', updatedAt: Date.now(), running: false, blank: false },
+    { sessionId: 'sess-blank', updatedAt: Date.now(), running: false, blank: true },
+    { sessionId: 'sess-child', updatedAt: Date.now(), running: false, blank: false, origin: 'subagent' },
+    { sessionId: 'sess-migrating', updatedAt: Date.now(), running: false, blank: false, formatStatus: 'migration-required' },
+  ];
+  harness.workspaceBaseline = async () => ({
+    items: [{
+      workspaceId: 'ws-1',
+      path: '/tmp/one',
+      title: 'one',
+      sessionIds: harness.models.map((item) => item.sessionId),
+    }],
+    archivedSessionIds: ['sess-archived'],
+  });
+  await bridge.handleMessage(message({ chat_id: 'oc_menu_filter', content: JSON.stringify({ text: '/menu' }) }));
+  const flat = JSON.stringify(bot.cards.at(-1)?.card ?? {});
+  assert.match(flat, /sess-live/, 'menu keeps a normal session');
+  for (const hidden of ['sess-archived', 'sess-blank', 'sess-child', 'sess-migrating']) {
+    assert.ok(!flat.includes(hidden), `menu hides ${hidden}`);
+  }
+  bridge.dispose();
+}
+
 // 10) 菜单卡：选会话 → 调整生效；新会话卡 → 取消撤回、创建解绑
 {
   const { bot, bridge } = makeBridge();
@@ -612,6 +640,34 @@ function message(overrides = {}) {
   assert.ok(stopped.bot.reactions.some((item) => item.emoji === 'DIZZY'), 'stopped reaction');
   bridge.dispose();
   stopped.bridge.dispose();
+}
+
+// 13h2) 同一 Session 绑定多个 chat 时，按来源消息结算表情
+{
+  const { bot, bridge } = makeBridge();
+  await state.bindSession('chat:oc_shared_group', 'sess-shared');
+  await state.bindSession('chat:oc_shared_p2p', 'sess-shared');
+  await bridge.handleMessage(message({
+    message_id: 'om_shared',
+    chat_id: 'oc_shared_p2p',
+    content: JSON.stringify({ text: '同一个会话的私聊消息' }),
+  }));
+  await bridge.onSessionEvent({ id: 'sess-shared' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: 'sess-shared' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+  assert.ok(
+    bot.reactions.some((item) => item.messageId === 'om_shared' && item.emoji === 'DONE'),
+    'shared-session message settles to DONE',
+  );
+  assert.equal(
+    bot.reactions.filter((item) => item.messageId === 'om_shared').at(-1)?.emoji,
+    'DONE',
+    'processing reaction is replaced, not left as the latest state',
+  );
+  assert.ok(
+    bot.removed.some((item) => item.messageId === 'om_shared' && item.reactionId === 'r1'),
+    'the processing reaction is removed',
+  );
+  bridge.dispose();
 }
 
 // 13i) 排队模式下多条消息各自结算表情
@@ -1494,4 +1550,4 @@ function message(overrides = {}) {
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 61 scenarios passed');
+console.log('bridge: 63 scenarios passed');

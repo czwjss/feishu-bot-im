@@ -117,6 +117,10 @@ export async function collectMenuData(services, chatKey) {
   };
   const visible = sessions
     .filter((item) => !archived.has(item.sessionId))
+    // Empty / child / incompatible sessions cannot be meaningfully switched to.
+    .filter((item) => item.blank !== true)
+    .filter((item) => item.origin !== 'subagent')
+    .filter((item) => item.formatStatus !== 'migration-required')
     .slice(0, 20)
     .map((item) => ({ ...item, label: label(item) }));
   const currentSession = sessions.find((item) => item.sessionId === sessionId) ?? null;

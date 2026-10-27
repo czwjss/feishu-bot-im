@@ -474,7 +474,6 @@ export class FeishuBridge {
     // 当前轮不是飞书发起的（绑定会话里 Web 正在跑）时，飞书消息只能排队，不能插入。
     const activeOrigin = sessionId ? this.#turnOrigin.get(sessionId) : null;
     const mode = wanted === 'steer' && activeOrigin !== 'feishu' ? 'queue' : wanted;
-    this.#trackReaction(chatKey, messageId, mode);
     // The context never travels inside the user's message: it is published to
     // the per-session system-prompt context instead, so the bubble stays clean.
     const scope = this.#contextScope(chatType);
@@ -525,11 +524,14 @@ export class FeishuBridge {
           this.#log('error', 'session create failed', error);
           if (reserved) this.#eavesdrop.rollback(chatKey, reserved.seq);
           await sendNotice(this.#bot, chatId, `创建会话失败：${error.message}`, '创建失败');
-          await this.#abortReaction(chatKey, messageId);
+          await this.#abortReaction(sessionId, messageId);
           return;
         }
       }
       try {
+        // A Session may be shared by several chats. Key reactions by Session,
+        // not chat, so turn/start and turn/end settle the originating message.
+        this.#trackReaction(sessionId, messageId, mode);
         // Set the per-session context before submitting so the first prompt
         // also sees the mention guidance; systemPrompt.context is read while
         // the Host builds the turn.
@@ -547,9 +549,10 @@ export class FeishuBridge {
           this.#log('error', 'prompt failed', error);
           if (reserved) this.#eavesdrop.rollback(chatKey, reserved.seq);
           await sendNotice(this.#bot, chatId, `提交失败：${error.message}`, '提交失败');
-          await this.#abortReaction(chatKey, messageId);
+          await this.#abortReaction(sessionId, messageId);
           return;
         }
+        this.#forgetReaction(sessionId, messageId);
         await this.#state.unbindSession(chatKey);
         this.#forgetSessionOrigin(sessionId);
         sessionId = null;
@@ -773,46 +776,52 @@ export class FeishuBridge {
 
   // ── turn events（实现在 turn.js） ──────────────────────────────────────────
 
-  /** Remember which inbound message a turn will settle. */
-  #trackReaction(chatKey, messageId, mode) {
-    if (!messageId) return;
-    const active = this.#reactionActive.get(chatKey);
+  /** Remember which inbound message a turn will settle, keyed by Session. */
+  #trackReaction(sessionId, messageId, mode) {
+    if (!sessionId || !messageId) return;
+    const active = this.#reactionActive.get(sessionId);
     if (mode === 'steer' && active && active.size > 0) {
       active.add(messageId);
       return;
     }
-    const queue = this.#reactionQueue.get(chatKey) ?? [];
+    const queue = this.#reactionQueue.get(sessionId) ?? [];
     queue.push(messageId);
-    this.#reactionQueue.set(chatKey, queue);
+    this.#reactionQueue.set(sessionId, queue);
   }
 
-  /** Prompt never became a turn: drop it from the queues and mark it stopped. */
-  async #abortReaction(chatKey, messageId) {
-    const queue = this.#reactionQueue.get(chatKey);
+  /** Drop a queued/active message without changing its reaction (retry path). */
+  #forgetReaction(sessionId, messageId) {
+    if (!sessionId || !messageId) return;
+    const queue = this.#reactionQueue.get(sessionId);
     if (queue) {
       const index = queue.indexOf(messageId);
       if (index >= 0) queue.splice(index, 1);
-      if (queue.length === 0) this.#reactionQueue.delete(chatKey);
+      if (queue.length === 0) this.#reactionQueue.delete(sessionId);
     }
-    this.#reactionActive.get(chatKey)?.delete(messageId);
+    this.#reactionActive.get(sessionId)?.delete(messageId);
+  }
+
+  /** Prompt never became a turn: drop it from the queues and mark it stopped. */
+  async #abortReaction(sessionId, messageId) {
+    this.#forgetReaction(sessionId, messageId);
     if (messageId) await this.#react(messageId, REACTION.stopped).catch(() => undefined);
   }
 
   /** A turn started: everything queued so far belongs to this turn. */
-  #startTurnReactions(chatKey) {
-    const queue = this.#reactionQueue.get(chatKey);
+  #startTurnReactions(sessionId) {
+    const queue = this.#reactionQueue.get(sessionId);
     if (!queue || queue.length === 0) return;
-    this.#reactionQueue.delete(chatKey);
-    const active = this.#reactionActive.get(chatKey) ?? new Set();
+    this.#reactionQueue.delete(sessionId);
+    const active = this.#reactionActive.get(sessionId) ?? new Set();
     for (const messageId of queue) active.add(messageId);
-    this.#reactionActive.set(chatKey, active);
+    this.#reactionActive.set(sessionId, active);
   }
 
   /** Settle every message that belonged to the finished turn. */
-  async #settleTurnReactions(chatKey, reason) {
-    const active = this.#reactionActive.get(chatKey);
+  async #settleTurnReactions(sessionId, reason) {
+    const active = this.#reactionActive.get(sessionId);
     if (!active || active.size === 0) return;
-    this.#reactionActive.delete(chatKey);
+    this.#reactionActive.delete(sessionId);
     const emoji = reason?.kind === 'completed' ? REACTION.done : REACTION.stopped;
     for (const messageId of active) await this.#react(messageId, emoji);
   }
@@ -827,13 +836,13 @@ export class FeishuBridge {
     if (event?.type === 'user/message' && event.data?.source?.kind === 'schedule') {
       await this.#seedScheduleMentions(session?.id, event.data?.content);
     }
-    const chatKey = this.#state.keyForSession?.(session?.id);
-    if (chatKey && event?.type === 'turn/start') this.#startTurnReactions(chatKey);
+    const sessionId = session?.id;
+    if (sessionId && event?.type === 'turn/start') this.#startTurnReactions(sessionId);
     const result = await this.#turns.onSessionEvent(session, event);
-    if (chatKey && event?.type === 'turn/end') {
-      this.#turnOrigin.delete(session?.id);
-      this.#externalAsk.delete(session?.id);
-      await this.#settleTurnReactions(chatKey, event?.data?.reason).catch(() => undefined);
+    if (sessionId && event?.type === 'turn/end') {
+      this.#turnOrigin.delete(sessionId);
+      this.#externalAsk.delete(sessionId);
+      await this.#settleTurnReactions(sessionId, event?.data?.reason).catch(() => undefined);
     }
     return result;
   }
