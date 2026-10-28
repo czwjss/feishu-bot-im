@@ -1247,7 +1247,9 @@ function message(overrides = {}) {
   assert.equal(content[0].text, '你好');
   const context = contextBySession.get('sess-1') ?? '';
   assert.ok(!context.includes('<feishu_bot_source_guidance>'), 'group scope is off, so no guidance is injected');
-  assert.match(context, /需要明确让某人收到消息或同步重要信息时才 @/, 'mention guidance is still present');
+  assert.match(context, /一律 @ 到该当事人/, 'mention guidance is still present');
+  assert.match(context, /纯信息同步/, 'guidance excludes pure sync/chat mentions');
+  assert.match(context, /不确定具体当事人时不要 @/, 'guidance skips uncertain targets');
   bridge.dispose();
 }
 

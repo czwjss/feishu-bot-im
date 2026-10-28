@@ -403,7 +403,7 @@ export class FeishuBridge {
   /** Fixed guidance appended to the Feishu session context. */
   #mentionHint() {
     return this.#config.mentions?.enabled !== false
-      ? '需要明确让某人收到消息或同步重要信息时才 @ 相关人，常规对话不需要 @。需要 @ 时直接输出 <at id=ou_xxx></at>，open_id 只能取自上下文里出现过的人（发送者或被 @ 的人）。'
+      ? '默认 @ 规则（必须遵守）：涉及需要某人做决策、批准、确认、选择或答复时，一律 @ 到该当事人；纯信息同步、状态汇报、闲聊、感谢等不需要对方行动时不要 @。需要 @ 时直接输出 <at id=ou_xxx></at>，open_id 只能取自本会话上下文中出现的人；不确定具体当事人时不要 @，不要猜 id。'
       : '';
   }
 

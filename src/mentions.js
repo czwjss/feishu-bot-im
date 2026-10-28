@@ -8,7 +8,8 @@
  *   - text: converts to `<at user_id="ou_xxx">name</at>`;
  *   - mentions off / unknown id / malformed tag / @all forbidden: erases it.
  *
- * The prompt only asks the model to use mentions on demand; the enforcement
+ * The prompt asks the model to mention the decision/confirmation owner;
+ * the enforcement
  * (and the @all ban) lives here.
  */
 

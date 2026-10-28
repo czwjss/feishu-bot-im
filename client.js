@@ -911,7 +911,7 @@ window.__ModuleLoader__.load({
                   }),
                 }))
               : null,
-            h(Field, { label: t('允许机器人 @ 人（默认开启）', 'Let the bot mention people (on by default)'), hint: t('只在需要明确让某人收到消息或同步重要信息时才 @；常规对话不需要。插件会校验 open_id，非法或未开启时擦除。', 'Mention only when someone must receive the message or important information must be synced; normal replies do not mention. The plugin validates open_ids and erases invalid or disabled mentions.') },
+            h(Field, { label: t('允许机器人 @ 人（默认开启）', 'Let the bot mention people (on by default)'), hint: t('涉及需要某人决策、批准、确认或选择时，一律 @ 到当事人；纯信息同步、状态汇报和闲聊不 @；不确定具体当事人时也不 @。插件会校验 open_id，非法或未开启时擦除。', 'When someone must decide, approve, confirm, or choose, always mention that person; do not mention for plain information sync, status updates, or chat, and do not guess when the person is unclear. The plugin validates open_ids and erases invalid or disabled mentions.') },
               h('label', { style: S.checkLabel },
                 h('input', {
                   type: 'checkbox',
