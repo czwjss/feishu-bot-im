@@ -1185,12 +1185,12 @@ function message(overrides = {}) {
     chat_id: 'oc_group', chat_type: 'group',
     mentions: [{ id: { open_id: 'ou_bot' } }], content: JSON.stringify({ text: '在吗' }),
   }));
-  const source = harness.prompts.at(-1).content[0].text;
-  assert.match(source, /研发群/, 'group name is injected');
+  const source = harness.prompts.at(-1).content.find((part) => String(part.text).startsWith('<feishu_bot_source>'));
+  assert.match(source.text, /研发群/, 'group name is injected');
   bridge.dispose();
 }
 
-// 14b) 只给自己创建的会话注入常驻指令，接管别人会话时不污染
+// 14b) guidance 和 @ 规则都只在当前 turn 的 prompt 里，不写 session context
 {
   const settings = {
     contextEnhancement: {
@@ -1200,17 +1200,23 @@ function message(overrides = {}) {
   };
   const own = makeBridge(settings);
   await own.bridge.handleMessage(message({ chat_id: 'oc_own' }));
-  assert.match(own.contextBySession.get('sess-1') ?? '', /你是我的秘书/, 'own session gets guidance');
+  assert.match(JSON.stringify(own.harness.prompts.at(-1).content), /你是我的秘书/, 'own prompt gets guidance');
+  assert.equal(own.contextBySession.get('sess-1') ?? '', '', 'guidance is not written to session context');
 
   const adopted = makeBridge(settings);
   await state.bindSession('chat:oc_adopt', 'sess-existing');
-  await adopted.bridge.handleMessage(message({ chat_id: 'oc_adopt' }));
-  assert.equal(adopted.contextBySession.get('sess-existing') ?? '', '', 'adopted session must stay clean');
+  await adopted.bridge.handleMessage(message({
+    chat_id: 'oc_adopt', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
+  }));
+  const adoptedPrompt = JSON.stringify(adopted.harness.prompts.at(-1).content);
+  assert.match(adoptedPrompt, /feishu_bot_mention_policy/, 'adopted group prompt gets the mention policy');
+  assert.ok(!adoptedPrompt.includes('你是我的秘书'), 'group scope does not inherit direct guidance');
+  assert.equal(adopted.contextBySession.get('sess-existing') ?? '', '', 'adopted session context stays empty');
   own.bridge.dispose();
   adopted.bridge.dispose();
 }
 
-// 15) 上下文增强（私聊维度）：source 作为前置 part，guidance 走 session 上下文
+// 15) 上下文增强（私聊维度）：guidance 作为本轮 prompt 的前置 part
 {
   const { harness, bridge, contextBySession } = makeBridge({
     contextEnhancement: {
@@ -1220,20 +1226,20 @@ function message(overrides = {}) {
   });
   await bridge.handleMessage(message({ chat_id: 'oc_ctx', create_time: '1760700000000', content: JSON.stringify({ text: '在吗' }) }));
   const content = harness.prompts.at(-1).content;
-  assert.equal(content.length, 2, 'source block + user text');
-  assert.match(content[0].text, /^<feishu_bot_source>/);
-  const source = JSON.parse(content[0].text.match(/<feishu_bot_source>(.*?)<\/feishu_bot_source>/s)[1]);
+  assert.equal(content.length, 3, 'guidance + source block + user text');
+  assert.match(content[0].text, /^<feishu_bot_source_guidance>/);
+  assert.match(content[0].text, /回答简短/);
+  assert.match(content[1].text, /^<feishu_bot_source>/);
+  const source = JSON.parse(content[1].text.match(/<feishu_bot_source>(.*?)<\/feishu_bot_source>/s)[1]);
 
   assert.equal(source.senderId, 'ou_user');
   assert.match(source.sentAt, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
-  assert.equal(content[1].text, '在吗', 'user text stays its own part');
-  const guidance = contextBySession.get('sess-1') ?? '';
-  assert.match(guidance, /<feishu_bot_source_guidance>/);
-  assert.match(guidance, /回答简短/);
+  assert.equal(content[2].text, '在吗', 'user text stays its own part');
+  assert.equal(contextBySession.get('sess-1') ?? '', '', 'guidance is not written to session context');
   bridge.dispose();
 }
 
-// 16) 上下文增强按维度隔离：群聊维度没有选字段时不注入
+// 16) 上下文增强按维度隔离：群聊维度没有 guidance 时只注入 @ 规则
 {
   const { harness, bridge, contextBySession } = makeBridge({
     contextEnhancement: {
@@ -1243,13 +1249,14 @@ function message(overrides = {}) {
   });
   await bridge.handleMessage(message({ chat_id: 'oc_g', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }] }));
   const content = harness.prompts.at(-1).content;
-  assert.equal(content.length, 1);
-  assert.equal(content[0].text, '你好');
-  const context = contextBySession.get('sess-1') ?? '';
-  assert.ok(!context.includes('<feishu_bot_source_guidance>'), 'group scope is off, so no guidance is injected');
-  assert.match(context, /一律 @ 到该当事人/, 'mention guidance is still present');
-  assert.match(context, /纯信息同步/, 'guidance excludes pure sync/chat mentions');
-  assert.match(context, /不确定具体当事人时不要 @/, 'guidance skips uncertain targets');
+  assert.equal(content.length, 2, 'mention policy + user text');
+  assert.match(content[0].text, /^<feishu_bot_mention_policy>/);
+  assert.match(content[0].text, /一律 @ 到该当事人/);
+  assert.match(content[0].text, /纯信息同步/);
+  assert.match(content[0].text, /不确定具体当事人时不要 @/);
+  assert.ok(!content[0].text.includes('<feishu_bot_source_guidance>'), 'group scope has no guidance');
+  assert.equal(content[1].text, '你好');
+  assert.equal(contextBySession.get('sess-1') ?? '', '', 'policy is not written to session context');
   bridge.dispose();
 }
 

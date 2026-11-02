@@ -50,7 +50,6 @@ export class FeishuBridge {
   #userNames = new Map();
   #eavesdrop = new EavesdropStore();
   #participants = new Map();
-  #onContext;
   #stats = { messagesReceived: 0, events: 0, lastEventAt: null, lastEventType: null };
   #saveWorkspace;
   #disposed = false;
@@ -62,7 +61,7 @@ export class FeishuBridge {
   #savePreset;
   #saveModel;
 
-  constructor({ bot, harness, config, state, logger, version, inboxDir, saveWorkspace, eventsPath, onContext, listPresets, savePreset, saveModel }) {
+  constructor({ bot, harness, config, state, logger, version, inboxDir, saveWorkspace, eventsPath, listPresets, savePreset, saveModel }) {
     this.#bot = bot;
     this.#harness = harness;
     this.#config = config;
@@ -72,7 +71,6 @@ export class FeishuBridge {
     this.#inbound = new InboundContent({ bot, inboxDir, logger: this.#logger });
     this.#saveWorkspace = saveWorkspace ?? (async () => this.#config);
     this.#eventsPath = eventsPath ?? null;
-    this.#onContext = typeof onContext === 'function' ? onContext : () => undefined;
     this.#listPresets = typeof listPresets === 'function' ? listPresets : async () => [];
     this.#savePreset = typeof savePreset === 'function' ? savePreset : async () => this.#config;
     this.#saveModel = typeof saveModel === 'function' ? saveModel : async () => this.#config;
@@ -400,11 +398,21 @@ export class FeishuBridge {
     });
   }
 
-  /** Fixed guidance appended to the Feishu session context. */
+  /** Fixed mention policy for the current turn. */
   #mentionHint() {
     return this.#config.mentions?.enabled !== false
       ? '默认 @ 规则（必须遵守）：涉及需要某人做决策、批准、确认、选择或答复时，一律 @ 到该当事人；纯信息同步、状态汇报、闲聊、感谢等不需要对方行动时不要 @。需要 @ 时直接输出 <at id=ou_xxx></at>，open_id 只能取自本会话上下文中出现的人；不确定具体当事人时不要 @，不要猜 id。'
       : '';
+  }
+
+  /** Per-turn guidance/policy prefix. Never written into Session context. */
+  #promptPrefix(chatType) {
+    const guidance = renderGuidanceBlock(this.#contextScope(chatType)) ?? '';
+    const mention = this.#mentionHint();
+    const mentionBlock = chatType === 'group' && mention
+      ? `<feishu_bot_mention_policy>\n${mention}\n</feishu_bot_mention_policy>`
+      : '';
+    return [guidance, mentionBlock].filter(Boolean).join('\n\n');
   }
 
   /** Resolve a bounded number of display names once, at injection time. */
@@ -489,7 +497,6 @@ export class FeishuBridge {
       conversationTitle,
       sentAt: createTime,
     });
-    const rawGuidance = renderGuidanceBlock(scope) ?? '';
     // 话题同步来的摘要属于"会话数据"，跟 source 一样作为消息前置块，而不是常驻指令。
     let syncBlock = null;
     if (chatKey.startsWith('chat:')) {
@@ -532,14 +539,9 @@ export class FeishuBridge {
         // A Session may be shared by several chats. Key reactions by Session,
         // not chat, so turn/start and turn/end settle the originating message.
         this.#trackReaction(sessionId, messageId, mode);
-        // Set the per-session context before submitting so the first prompt
-        // also sees the mention guidance; systemPrompt.context is read while
-        // the Host builds the turn.
-        const mentionHint = this.#mentionHint();
-        this.#onContext(sessionId, this.#state.originOf?.(sessionId) === 'feishu'
-          ? [rawGuidance, mentionHint].filter(Boolean).join('\n\n')
-          : '');
-        await this.#promptFeishu(sessionId, content, { mode, chatKey, chatId });
+        const prefix = this.#promptPrefix(chatType);
+        const promptContent = prefix ? [{ type: 'text', text: prefix }, ...content] : content;
+        await this.#promptFeishu(sessionId, promptContent, { mode, chatKey, chatId });
         if (reserved) this.#eavesdrop.commit(chatKey, reserved.seq);
         return;
       } catch (error) {
@@ -641,11 +643,12 @@ export class FeishuBridge {
       chatId, title: cleanTitle, brief: body.slice(0, 1000), sessionId, rootMessageId,
     });
     await this.#state.bindSession(`topic:${chatId}:${topic.topicId}`, sessionId);
-    const guidance = renderGuidanceBlock(this.#contextScope('group')) ?? '';
-    const contextText = [guidance, this.#mentionHint()].filter(Boolean).join('\n\n');
-    if (contextText) this.#onContext(sessionId, contextText);
     const topicKey = `topic:${chatId}:${topic.topicId}`;
-    await this.#promptFeishu(sessionId, [{ type: 'text', text: body || cleanTitle }], { mode: 'queue', chatKey: topicKey, chatId })
+    const prefix = this.#promptPrefix('group');
+    const topicContent = prefix
+      ? [{ type: 'text', text: prefix }, { type: 'text', text: body || cleanTitle }]
+      : [{ type: 'text', text: body || cleanTitle }];
+    await this.#promptFeishu(sessionId, topicContent, { mode: 'queue', chatKey: topicKey, chatId })
       .catch((error) => this.#log('warn', 'topic prompt failed', error));
     return topic;
   }
