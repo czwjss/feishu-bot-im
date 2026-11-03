@@ -401,7 +401,7 @@ export class FeishuBridge {
   /** Fixed mention policy for the current turn. */
   #mentionHint() {
     return this.#config.mentions?.enabled !== false
-      ? '默认 @ 规则（必须遵守）：涉及需要某人做决策、批准、确认、选择或答复时，一律 @ 到该当事人；纯信息同步、状态汇报、闲聊、感谢等不需要对方行动时不要 @。需要 @ 时直接输出 <at id=ou_xxx></at>，open_id 只能取自本会话上下文中出现的人；不确定具体当事人时不要 @，不要猜 id。'
+      ? '默认 @ 规则（必须遵守）：涉及需要某人做决策、批准、确认、选择或答复时，一律 @ 到该当事人；纯信息同步、状态汇报、闲聊、感谢等不需要对方行动时不要 @。需要 @ 时，直接输出 <at id=[open_id]></at>，并将 [open_id] 完整替换为上下文中该联系人的真实 open_id。open_id 是飞书联系人的唯一标识，以 ou_ 开头，只能取自本会话上下文中出现的人；禁止截断，禁止保留 [open_id] 占位符。不确定具体当事人时不要 @，不要猜 id。'
       : '';
   }
 
