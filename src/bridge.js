@@ -184,7 +184,7 @@ export class FeishuBridge {
       const nestedArg = String(nested?.[2] ?? '').trim().toLowerCase();
       if (nested && nested[1].toLowerCase() === 'topic' && nestedArg !== 'close') {
         // 话题里不能再嵌套开话题：要新话题请回群主会话 @ 机器人
-        const notice = '话题里不能再创建话题。需要新话题时，请在群里直接 @ 我并发 `/topic 标题`。';
+        const notice = '话题里不能再创建话题。需要新话题时，请在群里直接 at 我并发 `/topic 标题`。';
         try {
           if (typeof this.#bot.replyCardInThread === 'function') {
             await this.#bot.replyCardInThread(topic.rootMessageId, noticeCard(notice, '话题'));
@@ -401,7 +401,7 @@ export class FeishuBridge {
   /** Fixed mention policy for the current turn. */
   #mentionHint() {
     return this.#config.mentions?.enabled !== false
-      ? '默认 @ 规则（必须遵守）：涉及需要某人做决策、批准、确认、选择或答复时，一律 @ 到该当事人；纯信息同步、状态汇报、闲聊、感谢等不需要对方行动时不要 @。需要 @ 时，直接输出 <at id=[open_id]></at>，并将 [open_id] 完整替换为上下文中该联系人的真实 open_id。open_id 是飞书联系人的唯一标识，以 ou_ 开头，只能取自本会话上下文中出现的人；禁止截断，禁止保留 [open_id] 占位符。不确定具体当事人时不要 @，不要猜 id。'
+      ? '默认 at 规则（必须遵守）：涉及需要某人做决策、批准、确认、选择或答复时，一律用 at 提及该当事人；纯信息同步、状态汇报、闲聊、感谢等无需对方行动时不要 at。需要 at 时，直接输出 <at id=[open_id]></at>，并将 [open_id] 完整替换为上下文中该联系人的真实 open_id。open_id 是飞书联系人的唯一标识，以 ou_ 开头，只能取自本会话上下文中出现的人；禁止截断，禁止保留 [open_id] 占位符。不确定具体当事人时不要 at，不要猜 id。'
       : '';
   }
 
@@ -511,15 +511,17 @@ export class FeishuBridge {
     let peopleBlock = null;
     if (this.#config.mentions?.enabled !== false && people.length > 0) {
       const lines = people.map((person) => `${person.name || person.id}(${person.id})`);
-      peopleBlock = ['<feishu_bot_people>', `本条消息提到的人：${lines.join('、')}`, '</feishu_bot_people>'].join('\n');
+      peopleBlock = ['<feishu_bot_people>', `本条消息被 at 的人：${lines.join('、')}`, '</feishu_bot_people>'].join('\n');
     }
-    // The injected blocks ride the prompt as leading text parts; the Host-side
-    // pre-step rewrite turns each one into its own producer-owned row.
+    // The injected blocks ride the prompt as one leading text part separated by
+    // blank lines, so no reader ever sees two blocks (or a block and the user's
+    // own words) glued together. The Host-side pre-step rewrite still turns each
+    // block into its own producer-owned row.
+    const prefix = this.#promptPrefix(chatType);
+    // `people` sits last: it is the closest context to the user's own words.
+    const blocks = [prefix, sourceBlock, eavesdropBlock, syncBlock, peopleBlock].filter(Boolean);
     const content = [
-      ...(sourceBlock ? [{ type: 'text', text: sourceBlock }] : []),
-      ...(peopleBlock ? [{ type: 'text', text: peopleBlock }] : []),
-      ...(eavesdropBlock ? [{ type: 'text', text: eavesdropBlock }] : []),
-      ...(syncBlock ? [{ type: 'text', text: syncBlock }] : []),
+      ...(blocks.length > 0 ? [{ type: 'text', text: `${blocks.join('\n\n')}\n\n` }] : []),
       ...parts,
     ];
 
@@ -539,9 +541,7 @@ export class FeishuBridge {
         // A Session may be shared by several chats. Key reactions by Session,
         // not chat, so turn/start and turn/end settle the originating message.
         this.#trackReaction(sessionId, messageId, mode);
-        const prefix = this.#promptPrefix(chatType);
-        const promptContent = prefix ? [{ type: 'text', text: prefix }, ...content] : content;
-        await this.#promptFeishu(sessionId, promptContent, { mode, chatKey, chatId });
+        await this.#promptFeishu(sessionId, content, { mode, chatKey, chatId });
         if (reserved) this.#eavesdrop.commit(chatKey, reserved.seq);
         return;
       } catch (error) {
@@ -646,7 +646,7 @@ export class FeishuBridge {
     const topicKey = `topic:${chatId}:${topic.topicId}`;
     const prefix = this.#promptPrefix('group');
     const topicContent = prefix
-      ? [{ type: 'text', text: prefix }, { type: 'text', text: body || cleanTitle }]
+      ? [{ type: 'text', text: `${prefix}\n\n` }, { type: 'text', text: body || cleanTitle }]
       : [{ type: 'text', text: body || cleanTitle }];
     await this.#promptFeishu(sessionId, topicContent, { mode: 'queue', chatKey: topicKey, chatId })
       .catch((error) => this.#log('warn', 'topic prompt failed', error));

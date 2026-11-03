@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { splitLeadingInjectedContext, rewriteInjectedContextMessages } from '../src/injected-context.js';
 
-const SOURCE = '<feishu_bot_source>{"channel":"feishu","senderId":"ou_1"}</feishu_bot_source>';
+const SOURCE = '<feishu_bot_source>\nsenderId: ou_1\n</feishu_bot_source>';
 const GUIDANCE = '<feishu_bot_source_guidance>\n你是秘书\n</feishu_bot_source_guidance>';
 
 // 1) 拆分：两个块 + 正文
@@ -105,9 +105,9 @@ assert.equal(rewriteInjectedContextMessages(onlyBlock), null, 'empty body must k
   assert.equal(rewritten[1].content[0].text, '正文');
 }
 
-// 10) 本条消息提到的人：也拆成独立行
+// 10) 本条消息被 at 的人：也拆成独立行
 {
-  const PEOPLE = '<feishu_bot_people>\n本条消息提到的人：张三(ou_zhang)\n</feishu_bot_people>';
+  const PEOPLE = '<feishu_bot_people>\n本条消息被 at 的人：张三(ou_zhang)\n</feishu_bot_people>';
   const splitPeople = splitLeadingInjectedContext(`${PEOPLE}\n\n正文`);
   assert.equal(splitPeople.blocks.length, 1);
   assert.equal(splitPeople.blocks[0].form, 'people');

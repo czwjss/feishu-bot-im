@@ -56,7 +56,7 @@ export async function runCommand(services, name, argument, context) {
         }
         // Private chats have no thread semantics, so a topic could never be continued.
         if (context?.chatType === 'p2p') {
-          await notice('私聊不支持话题；需要并行任务时，请在群里 @我 并使用 `/topic 标题`。', '话题');
+          await notice('私聊不支持话题；需要并行任务时，请在群里 at 我 并使用 `/topic 标题`。', '话题');
           return true;
         }
         if (!arg || arg.toLowerCase() === 'list') {

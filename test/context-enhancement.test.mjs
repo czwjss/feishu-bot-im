@@ -14,8 +14,10 @@ const prefix = renderSourceBlock(
   { enabled: true, fields: ['senderId', 'senderName', 'sentAt'], guidance: '' },
   { senderId: 'ou_1', senderName: '张三', sentAt: '' },
 );
-const json = JSON.parse(prefix.match(/<feishu_bot_source>(.*?)<\/feishu_bot_source>/s)[1]);
-assert.deepEqual(json, { senderId: 'ou_1', senderName: '张三' }, 'missing fields are omitted, not guessed');
+const lines = prefix.match(/<feishu_bot_source>\n([\s\S]*?)\n<\/feishu_bot_source>/)[1];
+const fields = Object.fromEntries(lines.split('\n').map((line) => line.split(/:\s*/, 2)));
+assert.deepEqual(fields, { senderId: 'ou_1', senderName: '张三' }, 'missing fields are omitted, not guessed');
+assert.match(prefix, /^<feishu_bot_source>\n/, 'source block is multi-line');
 
 // 3) guidance 单独成块，并转义伪造的闭合标签
 const guidanceOnly = renderGuidanceBlock(

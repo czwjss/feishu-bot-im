@@ -891,7 +891,7 @@ window.__ModuleLoader__.load({
                   onChange: (event) => set({ respondBot: event.target.checked }),
                 }),
                 t('允许', 'Allow'))),
-            h(Field, { label: t('旁听群消息（默认开启）', 'Eavesdrop group messages (on by default)'), hint: t('只把未 @ 你的消息记为上下文，不会触发回复；图片/文件只记占位信息，模型需要时会请你 @ 它重发。需要 im:message.group_msg 权限；可用「补齐权限」扫码授权。', 'Only messages that do not mention the bot are kept as context; never triggers a reply; images/files become placeholders and the model asks you to mention it and resend them when needed. Requires im:message.group_msg; use "Grant permissions" to authorize.') },
+            h(Field, { label: t('旁听群消息（默认开启）', 'Eavesdrop group messages (on by default)'), hint: t('只把没有 at 你的消息记为上下文，不会触发回复；图片/文件只记占位信息，模型需要时会请你 at 它重发。需要 im:message.group_msg 权限；可用「补齐权限」扫码授权。', 'Only messages that do not mention the bot are kept as context; never triggers a reply; images/files become placeholders and the model asks you to mention it and resend them when needed. Requires im:message.group_msg; use "Grant permissions" to authorize.') },
               h('label', { style: S.checkLabel },
                 h('input', {
                   type: 'checkbox',
@@ -911,7 +911,7 @@ window.__ModuleLoader__.load({
                   }),
                 }))
               : null,
-            h(Field, { label: t('允许机器人 @ 人（默认开启）', 'Let the bot mention people (on by default)'), hint: t('涉及需要某人决策、批准、确认或选择时，一律 @ 到当事人；纯信息同步、状态汇报和闲聊不 @；不确定具体当事人时也不 @。插件会校验 open_id，非法或未开启时擦除。', 'When someone must decide, approve, confirm, or choose, always mention that person; do not mention for plain information sync, status updates, or chat, and do not guess when the person is unclear. The plugin validates open_ids and erases invalid or disabled mentions.') },
+            h(Field, { label: t('允许机器人 at 人（默认开启）', 'Let the bot mention people (on by default)'), hint: t('涉及需要某人决策、批准、确认或选择时，一律用 at 提及当事人；纯信息同步、状态汇报和闲聊不要 at；不确定具体当事人时也不要 at。插件会校验 open_id，非法或未开启时擦除。', 'When someone must decide, approve, confirm, or choose, always mention that person; do not mention for plain information sync, status updates, or chat, and do not guess when the person is unclear. The plugin validates open_ids and erases invalid or disabled mentions.') },
               h('label', { style: S.checkLabel },
                 h('input', {
                   type: 'checkbox',

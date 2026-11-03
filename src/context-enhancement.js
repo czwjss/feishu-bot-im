@@ -5,7 +5,10 @@
  * fields to publish plus an optional operator guidance. The prefix uses a fixed
  * tag grammar:
  *
- *   <feishu_bot_source>{"channel":"feishu",...}</feishu_bot_source>
+ *   <feishu_bot_source>
+ *   senderId: ou_xxx
+ *   senderName: 张三
+ *   </feishu_bot_source>
  *
  *   <feishu_bot_source_guidance>
  *   ...
@@ -29,6 +32,10 @@ export const CONTEXT_ENHANCEMENT_FIELDS = Object.freeze([
 ]);
 
 export const CONTEXT_GUIDANCE_MAX_LENGTH = 8_000;
+
+const SOURCE_FIELD_ORDER = Object.freeze([
+  'senderId', 'senderName', 'botId', 'sentAt', 'conversationTitle',
+]);
 
 const SOURCE_LIMITS = Object.freeze({
   senderId: 256, senderName: 256, botId: 128, sentAt: 32, conversationTitle: 128,
@@ -110,8 +117,8 @@ function formatTimestamp(value) {
     + ` ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-function escapeJson(json) {
-  return json.replace(/[<>&]/g, (character) => ({ '<': '\\u003c', '>': '\\u003e', '&': '\\u0026' })[character]);
+function escapeValue(value) {
+  return String(value).replace(/[<>&]/g, (character) => ({ '<': '\\u003c', '>': '\\u003e', '&': '\\u0026' })[character]);
 }
 
 function escapeGuidance(text) {
@@ -135,7 +142,15 @@ export function renderSourceBlock(scope, source = {}) {
     if (normalized !== undefined) projected[field] = normalized;
   }
   if (Object.keys(projected).length === 0) return null;
-  return `${INJECTED_CONTEXT_TAGS.sourceOpen}${escapeJson(JSON.stringify(projected))}${INJECTED_CONTEXT_TAGS.sourceClose}`;
+  // One `key: value` per line reads far better than a single-line JSON blob.
+  const lines = SOURCE_FIELD_ORDER
+    .filter((field) => projected[field] !== undefined)
+    .map((field) => `${field}: ${escapeValue(projected[field])}`);
+  return [
+    INJECTED_CONTEXT_TAGS.sourceOpen,
+    ...lines,
+    INJECTED_CONTEXT_TAGS.sourceClose,
+  ].join('\n');
 }
 
 export function renderGuidanceBlock(scope) {

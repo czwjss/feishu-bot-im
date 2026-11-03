@@ -84,8 +84,8 @@ assert.ok(block.includes(`[${stamp}] 张三(ou_zhang)：今晚发版吗`));
 assert.ok(block.includes(`[${stamp}] ou_x：[图片]`));
 assert.ok(!block.includes('时区'), 'timezone lives in each timestamp');
 assert.ok(!block.includes('本地时间'), 'no timezone description in the header');
-assert.match(block, /需要 @ 人时用 open_id/);
-assert.match(block, /请让用户 @ 你重发/);
+assert.match(block, /需要 at 人时用 open_id/);
+assert.match(block, /请让用户 at 你重发/);
 assert.ok(!block.includes(String(at)), 'raw epoch is not shown');
 assert.equal(renderEavesdropBlock([]), null);
 

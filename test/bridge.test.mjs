@@ -1185,12 +1185,12 @@ function message(overrides = {}) {
     chat_id: 'oc_group', chat_type: 'group',
     mentions: [{ id: { open_id: 'ou_bot' } }], content: JSON.stringify({ text: '在吗' }),
   }));
-  const source = harness.prompts.at(-1).content.find((part) => String(part.text).startsWith('<feishu_bot_source>'));
-  assert.match(source.text, /研发群/, 'group name is injected');
+  const blocks = harness.prompts.at(-1).content[0].text;
+  assert.match(blocks, /<feishu_bot_source>[\s\S]*研发群/, 'group name is injected');
   bridge.dispose();
 }
 
-// 14b) guidance 和 @ 规则都只在当前 turn 的 prompt 里，不写 session context
+// 14b) guidance 和 at 规则都只在当前 turn 的 prompt 里，不写 session context
 {
   const settings = {
     contextEnhancement: {
@@ -1226,20 +1226,20 @@ function message(overrides = {}) {
   });
   await bridge.handleMessage(message({ chat_id: 'oc_ctx', create_time: '1760700000000', content: JSON.stringify({ text: '在吗' }) }));
   const content = harness.prompts.at(-1).content;
-  assert.equal(content.length, 3, 'guidance + source block + user text');
+  assert.equal(content.length, 2, 'leading blocks + user text');
   assert.match(content[0].text, /^<feishu_bot_source_guidance>/);
   assert.match(content[0].text, /回答简短/);
-  assert.match(content[1].text, /^<feishu_bot_source>/);
-  const source = JSON.parse(content[1].text.match(/<feishu_bot_source>(.*?)<\/feishu_bot_source>/s)[1]);
+  assert.match(content[0].text, /\n\n<feishu_bot_source>/, 'blocks are separated by a blank line');
+  const source = content[0].text.match(/<feishu_bot_source>([\s\S]*?)<\/feishu_bot_source>/)[1];
 
-  assert.equal(source.senderId, 'ou_user');
-  assert.match(source.sentAt, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
-  assert.equal(content[2].text, '在吗', 'user text stays its own part');
+  assert.match(source, /\nsenderId: ou_user\n/);
+  assert.match(source, /\nsentAt: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\n/);
+  assert.equal(content[1].text, '在吗', 'user text stays its own part');
   assert.equal(contextBySession.get('sess-1') ?? '', '', 'guidance is not written to session context');
   bridge.dispose();
 }
 
-// 16) 上下文增强按维度隔离：群聊维度没有 guidance 时只注入 @ 规则
+// 16) 上下文增强按维度隔离：群聊维度没有 guidance 时只注入 at 规则
 {
   const { harness, bridge, contextBySession } = makeBridge({
     contextEnhancement: {
@@ -1251,9 +1251,11 @@ function message(overrides = {}) {
   const content = harness.prompts.at(-1).content;
   assert.equal(content.length, 2, 'mention policy + user text');
   assert.match(content[0].text, /^<feishu_bot_mention_policy>/);
-  assert.match(content[0].text, /一律 @ 到该当事人/);
+  assert.match(content[0].text, /一律用 at 提及该当事人/);
   assert.match(content[0].text, /纯信息同步/);
-  assert.match(content[0].text, /不确定具体当事人时不要 @/);
+  assert.match(content[0].text, /不确定具体当事人时不要 at/);
+  assert.match(content[0].text, /\n\n$/, 'blocks end with a blank line before the user text');
+  assert.ok(!content[0].text.includes('@'), 'prompt wording never uses the @ symbol');
   assert.ok(!content[0].text.includes('<feishu_bot_source_guidance>'), 'group scope has no guidance');
   assert.equal(content[1].text, '你好');
   assert.equal(contextBySession.get('sess-1') ?? '', '', 'policy is not written to session context');
