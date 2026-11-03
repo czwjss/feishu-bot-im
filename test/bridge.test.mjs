@@ -607,18 +607,17 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
-// 13g) 主会话下一条消息会带上话题同步摘要（作为消息前置块，不进 guidance）
+// 13g) 主会话下一条消息会带上话题同步摘要（放在 systemPrompt.context）
 {
   const { harness, contextBySession, bridge } = makeBridge();
   await state.bindSession('chat:oc_sync', 'sess-main2');
   await state.setSessionMeta('sess-main2', { origin: 'feishu' });
   await state.addSynced('oc_sync', { topicId: 7, title: '同步话题', summary: '结论要点', at: new Date().toISOString() });
   await bridge.handleMessage(message({ chat_id: 'oc_sync', content: JSON.stringify({ text: '总结一下' }) }));
-  const content = harness.prompts.at(-1).content;
-  const syncPart = content.find((part) => String(part.text).includes('<feishu_bot_topic_sync>'));
-  assert.ok(syncPart, 'sync block rides the prompt');
-  assert.match(syncPart.text, /话题 #7「同步话题」：结论要点/);
-  assert.equal(String(contextBySession.get('sess-main2') ?? '').includes('topic_sync'), false, 'guidance stays clean');
+  const context = contextBySession.get('sess-main2') ?? '';
+  assert.match(context, /<feishu_bot_topic_sync>/);
+  assert.match(context, /话题 #7「同步话题」：结论要点/);
+  assert.equal(harness.prompts.at(-1).content[0].text, '总结一下', 'user message stays clean');
   bridge.dispose();
 }
 
@@ -1173,9 +1172,9 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
-// 14c) 群聊注入群名称（conversationTitle）
+// 14c) 群聊注入群名称（conversationTitle），放进 context
 {
-  const { harness, bridge } = makeBridge({
+  const { harness, contextBySession, bridge } = makeBridge({
     contextEnhancement: {
       group: { enabled: true, fields: ['senderId', 'conversationTitle'], guidance: '' },
       direct: { enabled: true, fields: [], guidance: '' },
@@ -1185,12 +1184,13 @@ function message(overrides = {}) {
     chat_id: 'oc_group', chat_type: 'group',
     mentions: [{ id: { open_id: 'ou_bot' } }], content: JSON.stringify({ text: '在吗' }),
   }));
-  const blocks = harness.prompts.at(-1).content[0].text;
-  assert.match(blocks, /<feishu_bot_source>[\s\S]*研发群/, 'group name is injected');
+  const context = contextBySession.get('sess-1') ?? '';
+  assert.match(context, /<feishu_bot_source>[\s\S]*研发群/, 'group name is injected');
+  assert.equal(harness.prompts.at(-1).content[0].text, '在吗', 'user message stays clean');
   bridge.dispose();
 }
 
-// 14b) guidance 和 at 规则都只在当前 turn 的 prompt 里，不写 session context
+// 14b) guidance 和 at 规则都写进 systemPrompt.context，用户消息保持干净
 {
   const settings = {
     contextEnhancement: {
@@ -1200,23 +1200,23 @@ function message(overrides = {}) {
   };
   const own = makeBridge(settings);
   await own.bridge.handleMessage(message({ chat_id: 'oc_own' }));
-  assert.match(JSON.stringify(own.harness.prompts.at(-1).content), /你是我的秘书/, 'own prompt gets guidance');
-  assert.equal(own.contextBySession.get('sess-1') ?? '', '', 'guidance is not written to session context');
+  assert.match(own.contextBySession.get('sess-1') ?? '', /你是我的秘书/, 'own context gets guidance');
+  assert.equal(own.harness.prompts.at(-1).content[0].text, '你好', 'user message stays clean');
 
   const adopted = makeBridge(settings);
   await state.bindSession('chat:oc_adopt', 'sess-existing');
   await adopted.bridge.handleMessage(message({
     chat_id: 'oc_adopt', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
   }));
-  const adoptedPrompt = JSON.stringify(adopted.harness.prompts.at(-1).content);
-  assert.match(adoptedPrompt, /feishu_bot_mention_policy/, 'adopted group prompt gets the mention policy');
-  assert.ok(!adoptedPrompt.includes('你是我的秘书'), 'group scope does not inherit direct guidance');
-  assert.equal(adopted.contextBySession.get('sess-existing') ?? '', '', 'adopted session context stays empty');
+  const adoptedContext = adopted.contextBySession.get('sess-existing') ?? '';
+  assert.match(adoptedContext, /feishu_bot_mention_policy/, 'adopted group context gets the mention policy');
+  assert.ok(!adoptedContext.includes('你是我的秘书'), 'group scope does not inherit direct guidance');
+  assert.equal(adopted.harness.prompts.at(-1).content[0].text, '你好', 'user message stays clean');
   own.bridge.dispose();
   adopted.bridge.dispose();
 }
 
-// 15) 上下文增强（私聊维度）：guidance 作为本轮 prompt 的前置 part
+// 15) 上下文增强（私聊维度）：guidance/source 放进 context
 {
   const { harness, bridge, contextBySession } = makeBridge({
     contextEnhancement: {
@@ -1226,16 +1226,15 @@ function message(overrides = {}) {
   });
   await bridge.handleMessage(message({ chat_id: 'oc_ctx', create_time: '1760700000000', content: JSON.stringify({ text: '在吗' }) }));
   const content = harness.prompts.at(-1).content;
-  assert.equal(content.length, 2, 'leading blocks + user text');
-  assert.match(content[0].text, /^<feishu_bot_source_guidance>/);
-  assert.match(content[0].text, /回答简短/);
-  assert.match(content[0].text, /\n\n<feishu_bot_source>/, 'blocks are separated by a blank line');
-  const source = content[0].text.match(/<feishu_bot_source>([\s\S]*?)<\/feishu_bot_source>/)[1];
-
+  assert.equal(content.length, 1, 'only the user text');
+  assert.equal(content[0].text, '在吗');
+  const context = contextBySession.get('sess-1') ?? '';
+  assert.match(context, /^<feishu_bot_source_guidance>/);
+  assert.match(context, /回答简短/);
+  assert.match(context, /\n\n<feishu_bot_source>/, 'blocks are separated by a blank line');
+  const source = context.match(/<feishu_bot_source>([\s\S]*?)<\/feishu_bot_source>/)[1];
   assert.match(source, /\nsenderId: ou_user\n/);
   assert.match(source, /\nsentAt: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\n/);
-  assert.equal(content[1].text, '在吗', 'user text stays its own part');
-  assert.equal(contextBySession.get('sess-1') ?? '', '', 'guidance is not written to session context');
   bridge.dispose();
 }
 
@@ -1249,16 +1248,15 @@ function message(overrides = {}) {
   });
   await bridge.handleMessage(message({ chat_id: 'oc_g', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }] }));
   const content = harness.prompts.at(-1).content;
-  assert.equal(content.length, 2, 'mention policy + user text');
-  assert.match(content[0].text, /^<feishu_bot_mention_policy>/);
-  assert.match(content[0].text, /一律用 at 提及该当事人/);
-  assert.match(content[0].text, /纯信息同步/);
-  assert.match(content[0].text, /不确定具体当事人时不要 at/);
-  assert.match(content[0].text, /\n\n$/, 'blocks end with a blank line before the user text');
-  assert.ok(!content[0].text.includes('@'), 'prompt wording never uses the @ symbol');
-  assert.ok(!content[0].text.includes('<feishu_bot_source_guidance>'), 'group scope has no guidance');
-  assert.equal(content[1].text, '你好');
-  assert.equal(contextBySession.get('sess-1') ?? '', '', 'policy is not written to session context');
+  assert.equal(content.length, 1, 'only the user text');
+  assert.equal(content[0].text, '你好');
+  const context = contextBySession.get('sess-1') ?? '';
+  assert.match(context, /^<feishu_bot_mention_policy>/);
+  assert.match(context, /一律用 at 提及该当事人/);
+  assert.match(context, /纯信息同步/);
+  assert.match(context, /不确定具体当事人时不要 at/);
+  assert.ok(!context.includes('@'), 'prompt wording never uses the @ symbol');
+  assert.ok(!context.includes('<feishu_bot_source_guidance>'), 'group scope has no guidance');
   bridge.dispose();
 }
 
@@ -1346,17 +1344,18 @@ function message(overrides = {}) {
 
 // 20) 话题同步摘要全部随消息注入（全部保留，不按话题去重）
 {
-  const { harness, bridge } = makeBridge();
+  const { harness, contextBySession, bridge } = makeBridge();
   await state.bindSession('chat:oc_sync_latest', 'sess-sync-latest');
   await state.addSynced('oc_sync_latest', { topicId: 1, title: '旧标题', summary: '旧结论', at: new Date().toISOString() });
   await state.addSynced('oc_sync_latest', { topicId: 1, title: '新标题', summary: '新结论', at: new Date().toISOString() });
   await state.addSynced('oc_sync_latest', { topicId: 2, title: '第二个', summary: '二结论', at: new Date().toISOString() });
   await bridge.handleMessage(message({ chat_id: 'oc_sync_latest', content: JSON.stringify({ text: '继续' }) }));
-  const syncPart = harness.prompts.at(-1).content.find((part) => String(part.text).includes('<feishu_bot_topic_sync>'));
-  assert.ok(syncPart, 'sync block still rides the prompt');
-  assert.match(syncPart.text, /旧结论/, 'every synced summary is kept');
-  assert.match(syncPart.text, /新结论/);
-  assert.match(syncPart.text, /二结论/);
+  const syncContext = contextBySession.get('sess-sync-latest') ?? '';
+  assert.match(syncContext, /<feishu_bot_topic_sync>/);
+  assert.match(syncContext, /旧结论/, 'every synced summary is kept');
+  assert.match(syncContext, /新结论/);
+  assert.match(syncContext, /二结论/);
+  assert.equal(harness.prompts.at(-1).content[0].text, '继续', 'user message stays clean');
   bridge.dispose();
 }
 
@@ -1390,7 +1389,7 @@ function message(overrides = {}) {
 
 // 23) 旁听：未 @ 消息进入缓冲，下次 @ 时注入一次
 {
-  const { bot, harness, bridge } = makeBridge({ eavesdrop: { enabled: true, limit: 0 } });
+  const { bot, harness, contextBySession, bridge } = makeBridge({ eavesdrop: { enabled: true, limit: 0 } });
   await bridge.handleMessage(message({
     chat_id: 'oc_listen', chat_type: 'group', mentions: [],
     content: JSON.stringify({ text: '今晚发版吗' }),
@@ -1401,16 +1400,16 @@ function message(overrides = {}) {
     chat_id: 'oc_listen', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
     content: JSON.stringify({ text: '你们在聊什么' }),
   }));
-  const block = harness.prompts.at(-1).content.find((part) => String(part.text).includes('<feishu_bot_eavesdrop>'));
-  assert.ok(block, 'the buffer rides the next mention');
-  assert.match(block.text, /今晚发版吗/);
-  assert.match(block.text, /测试用户\(ou_user\)：今晚发版吗/, 'the record carries both name and open_id');
+  const block = contextBySession.get('sess-1') ?? '';
+  assert.match(block, /<feishu_bot_eavesdrop>/);
+  assert.match(block, /今晚发版吗/);
+  assert.match(block, /测试用户\(ou_user\)：今晚发版吗/, 'the record carries both name and open_id');
   await bridge.handleMessage(message({
     chat_id: 'oc_listen', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
     content: JSON.stringify({ text: '继续' }),
   }));
   assert.ok(
-    !harness.prompts.at(-1).content.some((part) => String(part.text).includes('今晚发版吗')),
+    !String(contextBySession.get('sess-1') ?? '').includes('今晚发版吗'),
     'already injected context is not repeated',
   );
   bridge.dispose();
@@ -1418,7 +1417,7 @@ function message(overrides = {}) {
 
 // 24) 旁听条数：limit=N 只保留最新 N 条
 {
-  const { harness, bridge } = makeBridge({ eavesdrop: { enabled: true, limit: 2 } });
+  const { harness, contextBySession, bridge } = makeBridge({ eavesdrop: { enabled: true, limit: 2 } });
   for (const text of ['m1', 'm2', 'm3']) {
     await bridge.handleMessage(message({
       chat_id: 'oc_listen_limit', chat_type: 'group', mentions: [],
@@ -1429,17 +1428,17 @@ function message(overrides = {}) {
     chat_id: 'oc_listen_limit', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
     content: JSON.stringify({ text: '总结' }),
   }));
-  const block = harness.prompts.at(-1).content.find((part) => String(part.text).includes('<feishu_bot_eavesdrop>'));
-  assert.ok(block);
-  assert.ok(!block.text.includes('m1'), 'the oldest message was rolled off');
-  assert.match(block.text, /m2/);
-  assert.match(block.text, /m3/);
+  const block = contextBySession.get('sess-1') ?? '';
+  assert.match(block, /<feishu_bot_eavesdrop>/);
+  assert.ok(!block.includes('m1'), 'the oldest message was rolled off');
+  assert.match(block, /m2/);
+  assert.match(block, /m3/);
   bridge.dispose();
 }
 
 // 25) 旁听按话题隔离：话题缓冲不会进主会话，主会话缓冲也不会进话题
 {
-  const { harness, bridge } = makeBridge({ eavesdrop: { enabled: true, limit: 0 } });
+  const { harness, contextBySession, bridge } = makeBridge({ eavesdrop: { enabled: true, limit: 0 } });
   const topic = await state.createTopic({
     chatId: 'oc_topic_listen', title: '旁听话题', brief: '', sessionId: 'sess-topic-listen', rootMessageId: 'om_topic_listen_root',
   });
@@ -1453,19 +1452,19 @@ function message(overrides = {}) {
     chat_id: 'oc_topic_listen', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
     content: JSON.stringify({ text: '主会话' }),
   }));
-  assert.ok(!JSON.stringify(harness.prompts.at(-1).content).includes('话题里的闲聊'), 'main chat has its own buffer');
+  assert.ok(!String(contextBySession.get('sess-1') ?? '').includes('话题里的闲聊'), 'main chat has its own buffer');
   await bridge.handleMessage(message({
     chat_id: 'oc_topic_listen', chat_type: 'group', parent_id: 'om_topic_listen_root', mentions: [{ id: { open_id: 'ou_bot' } }],
     content: JSON.stringify({ text: '话题里问' }),
   }));
-  const block = harness.prompts.at(-1).content.find((part) => String(part.text).includes('话题里的闲聊'));
-  assert.ok(block, 'topic buffer is scoped to the topic');
+  const topicContext = contextBySession.get('sess-topic-listen') ?? '';
+  assert.match(topicContext, /话题里的闲聊/);
   bridge.dispose();
 }
 
 // 26) 旁听图片：默认只记占位符，不下载
 {
-  const { harness, bridge } = makeBridge({ eavesdrop: { enabled: true, limit: 0 } });
+  const { harness, contextBySession, bridge } = makeBridge({ eavesdrop: { enabled: true, limit: 0 } });
   await bridge.handleMessage(message({
     chat_id: 'oc_listen_image', chat_type: 'group', mentions: [], message_type: 'image',
     content: JSON.stringify({ image_key: 'ik_listen' }),
@@ -1475,8 +1474,9 @@ function message(overrides = {}) {
     content: JSON.stringify({ text: '图里是什么' }),
   }));
   const content = harness.prompts.at(-1).content;
-  const block = content.find((part) => String(part.text).includes('<feishu_bot_eavesdrop>'));
-  assert.match(block.text, /\[图片\]/);
+  const block = contextBySession.get('sess-1') ?? '';
+  assert.match(block, /<feishu_bot_eavesdrop>/);
+  assert.match(block, /\[图片\]/);
   assert.ok(!content.some((part) => part.type === 'image'), 'media is not downloaded in placeholder mode');
   bridge.dispose();
 }
@@ -1506,7 +1506,7 @@ function message(overrides = {}) {
 
 // 28) @ 人：名单内保留，未知 id 与 @all 擦除；当前消息提到的人也会注入 open_id
 {
-  const { bot, harness, bridge } = makeBridge({ mentions: { enabled: true, allowAll: false } });
+  const { bot, harness, contextBySession, bridge } = makeBridge({ mentions: { enabled: true, allowAll: false } });
   // Bind an explicit id: FakeHarness numbers Sessions from 1 in every test.
   await state.bindSession('chat:oc_mention', 'sess-mention');
   await bridge.handleMessage(message({
@@ -1514,9 +1514,9 @@ function message(overrides = {}) {
     mentions: [{ id: { open_id: 'ou_bot' } }, { id: { open_id: 'ou_zhang' }, name: '张三' }],
     content: JSON.stringify({ text: '请通知一下' }),
   }));
-  const prompt = JSON.stringify(harness.prompts.at(-1).content);
-  assert.match(prompt, /<feishu_bot_people>/, 'mentioned people are injected');
-  assert.match(prompt, /张三\(ou_zhang\)/, 'the mentioned person carries name and open_id');
+  const context = contextBySession.get('sess-mention') ?? '';
+  assert.match(context, /<feishu_bot_people>/, 'mentioned people are injected');
+  assert.match(context, /张三\(ou_zhang\)/, 'the mentioned person carries name and open_id');
   const sessionId = 'sess-mention';
   const requestId = harness.prompts.at(-1).options.requestId;
   await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/start', data: { turn: 1 } });

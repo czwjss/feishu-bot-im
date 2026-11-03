@@ -50,6 +50,7 @@ export class FeishuBridge {
   #userNames = new Map();
   #eavesdrop = new EavesdropStore();
   #participants = new Map();
+  #onContext;
   #stats = { messagesReceived: 0, events: 0, lastEventAt: null, lastEventType: null };
   #saveWorkspace;
   #disposed = false;
@@ -61,7 +62,7 @@ export class FeishuBridge {
   #savePreset;
   #saveModel;
 
-  constructor({ bot, harness, config, state, logger, version, inboxDir, saveWorkspace, eventsPath, listPresets, savePreset, saveModel }) {
+  constructor({ bot, harness, config, state, logger, version, inboxDir, saveWorkspace, eventsPath, onContext, listPresets, savePreset, saveModel }) {
     this.#bot = bot;
     this.#harness = harness;
     this.#config = config;
@@ -70,6 +71,7 @@ export class FeishuBridge {
     this.#version = version ?? '0.0.0';
     this.#inbound = new InboundContent({ bot, inboxDir, logger: this.#logger });
     this.#saveWorkspace = saveWorkspace ?? (async () => this.#config);
+    this.#onContext = typeof onContext === 'function' ? onContext : () => undefined;
     this.#eventsPath = eventsPath ?? null;
     this.#listPresets = typeof listPresets === 'function' ? listPresets : async () => [];
     this.#savePreset = typeof savePreset === 'function' ? savePreset : async () => this.#config;
@@ -405,8 +407,8 @@ export class FeishuBridge {
       : '';
   }
 
-  /** Per-turn guidance/policy prefix. Never written into Session context. */
-  #promptPrefix(chatType) {
+  /** Guidance and mention policy stored in the plugin's systemPrompt.context. */
+  #promptContext(chatType) {
     const guidance = renderGuidanceBlock(this.#contextScope(chatType)) ?? '';
     const mention = this.#mentionHint();
     const mentionBlock = chatType === 'group' && mention
@@ -513,17 +515,11 @@ export class FeishuBridge {
       const lines = people.map((person) => `${person.name || person.id}(${person.id})`);
       peopleBlock = ['<feishu_bot_people>', `本条消息被 at 的人：${lines.join('、')}`, '</feishu_bot_people>'].join('\n');
     }
-    // The injected blocks ride the prompt as one leading text part separated by
-    // blank lines, so no reader ever sees two blocks (or a block and the user's
-    // own words) glued together. The Host-side pre-step rewrite still turns each
-    // block into its own producer-owned row.
-    const prefix = this.#promptPrefix(chatType);
-    // `people` sits last: it is the closest context to the user's own words.
-    const blocks = [prefix, sourceBlock, eavesdropBlock, syncBlock, peopleBlock].filter(Boolean);
-    const content = [
-      ...(blocks.length > 0 ? [{ type: 'text', text: `${blocks.join('\n\n')}\n\n` }] : []),
-      ...parts,
-    ];
+    // All injected context lives in the plugin's systemPrompt.context section;
+    // the user's own message keeps only what they actually sent.
+    const injected = [this.#promptContext(chatType), sourceBlock, eavesdropBlock, syncBlock, peopleBlock]
+      .filter(Boolean)
+      .join('\n\n');
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       if (!sessionId) {
@@ -541,7 +537,8 @@ export class FeishuBridge {
         // A Session may be shared by several chats. Key reactions by Session,
         // not chat, so turn/start and turn/end settle the originating message.
         this.#trackReaction(sessionId, messageId, mode);
-        await this.#promptFeishu(sessionId, content, { mode, chatKey, chatId });
+        this.#onContext(sessionId, injected);
+        await this.#promptFeishu(sessionId, parts, { mode, chatKey, chatId });
         if (reserved) this.#eavesdrop.commit(chatKey, reserved.seq);
         return;
       } catch (error) {
@@ -644,11 +641,8 @@ export class FeishuBridge {
     });
     await this.#state.bindSession(`topic:${chatId}:${topic.topicId}`, sessionId);
     const topicKey = `topic:${chatId}:${topic.topicId}`;
-    const prefix = this.#promptPrefix('group');
-    const topicContent = prefix
-      ? [{ type: 'text', text: `${prefix}\n\n` }, { type: 'text', text: body || cleanTitle }]
-      : [{ type: 'text', text: body || cleanTitle }];
-    await this.#promptFeishu(sessionId, topicContent, { mode: 'queue', chatKey: topicKey, chatId })
+    this.#onContext(sessionId, this.#promptContext('group'));
+    await this.#promptFeishu(sessionId, [{ type: 'text', text: body || cleanTitle }], { mode: 'queue', chatKey: topicKey, chatId })
       .catch((error) => this.#log('warn', 'topic prompt failed', error));
     return topic;
   }
