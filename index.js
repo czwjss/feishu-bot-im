@@ -10,7 +10,7 @@ import { ConfigStore, StateStore, configPaths } from './src/config.js';
 import { HarnessAdapter } from './src/harness.js';
 import { RuntimeManager } from './src/runtime.js';
 import { createRpcHandler, installRpc } from './src/rpc.js';
-import { createChatsTool, createDeliverTool, createPeopleTool, createReplyTool, createReturnFileTool } from './src/tool.js';
+import { createChatsTool, createPeopleTool, createSendTool } from './src/tool.js';
 import { rewriteInjectedContextMessages } from './src/injected-context.js';
 import { FEISHU_POLICY } from './src/policy.js';
 
@@ -104,20 +104,14 @@ export async function apply(ctx, config = {}) {
   }), 'feishu-bot: questions');
 
   ctx.inject(['tools'], (toolCtx) => {
-    toolCtx.tools.register(createReturnFileTool({
-      send: (input) => manager.sendFileForSession(input),
-    }));
-    toolCtx.tools.register(createDeliverTool({
-      send: (input) => manager.deliver(input),
+    toolCtx.tools.register(createSendTool({
+      send: (input) => manager.send(input),
     }));
     toolCtx.tools.register(createChatsTool({
       list: (input) => manager.listChats(input),
     }));
     toolCtx.tools.register(createPeopleTool({
       find: (input) => manager.findPeople(input),
-    }));
-    toolCtx.tools.register(createReplyTool({
-      arm: (input) => manager.armReply(input),
     }));
   });
 

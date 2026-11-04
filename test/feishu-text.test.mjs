@@ -5,6 +5,7 @@ import { FeishuBot } from '../src/feishu.js';
 const calls = [];
 let memberCalls = 0;
 let chatCalls = 0;
+let membershipCalls = 0;
 const client = {
   im: {
     v1: {
@@ -21,6 +22,10 @@ const client = {
         },
       },
       chatMembers: {
+        async isInChat({ path }) {
+          membershipCalls += 1;
+          return { code: 0, data: { is_in_chat: path.chat_id === 'oc_group' } };
+        },
         async get({ params }) {
           memberCalls += 1;
           if (!params.page_token) {
@@ -48,11 +53,6 @@ assert.equal(calls[0].data.msg_type, 'text');
 assert.equal(JSON.parse(calls[0].data.content).text, '你好');
 assert.match(calls[0].data.uuid, /^[0-9a-f-]{36}$/, 'text sends carry an idempotency uuid');
 
-assert.equal(await bot.sendTextToUser('ou_user', '私聊'), 'om_2');
-assert.equal(calls[1].params.receive_id_type, 'open_id');
-assert.equal(calls[1].data.receive_id, 'ou_user');
-assert.notEqual(calls[0].data.uuid, calls[1].data.uuid, 'each message gets its own uuid');
-
 // 群成员：自动翻页，缓存六小时，refresh 强制重拉
 const roster = await bot.getChatMembers('oc_group');
 assert.deepEqual(roster.map((person) => person.name), ['张三', '李四', '王五'], 'all pages are merged');
@@ -69,4 +69,11 @@ assert.equal(chatCalls, 1, 'group list is cached');
 await bot.getChats({ refresh: true });
 assert.equal(chatCalls, 2, 'group refresh bypasses the cache');
 
-console.log('feishu text: 18 assertions passed');
+assert.equal(await bot.isInChat('oc_group'), true);
+assert.equal(await bot.isInChat('oc_group'), true);
+assert.equal(membershipCalls, 1, 'positive membership is cached');
+assert.equal(await bot.isInChat('oc_missing'), false);
+assert.equal(await bot.isInChat('oc_group', { refresh: true }), true);
+assert.equal(membershipCalls, 3, 'refresh bypasses the membership cache');
+
+console.log('feishu text: 21 assertions passed');

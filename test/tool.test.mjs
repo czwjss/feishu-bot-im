@@ -1,36 +1,44 @@
 import assert from 'node:assert/strict';
-import { createReturnFileTool, TOOL_NAME, createDeliverTool, DELIVER_TOOL_NAME, createChatsTool, CHATS_TOOL_NAME, createPeopleTool, PEOPLE_TOOL_NAME, createReplyTool, REPLY_TOOL_NAME } from '../src/tool.js';
 
-const calls = [];
-const tool = createReturnFileTool({
-  send: async (input) => { calls.push(input); return { fileName: 'a.txt', bytes: 3, chatId: 'oc_1' }; },
-});
-assert.equal(tool.name, TOOL_NAME);
-assert.deepEqual(Object.keys(tool.parameters.properties), ['path', 'name']);
-const value = await tool.execute({ path: '/tmp/a.txt' }, { agent: { session: { id: 'sess-1' } }, signal: new AbortController().signal });
-assert.equal(value.fileName, 'a.txt');
-assert.equal(calls[0].sessionId, 'sess-1');
-assert.equal(calls[0].path, '/tmp/a.txt');
-const rendered = tool.output.render({ path: '/tmp/a.txt' }, value);
-assert.match(rendered[0].text, /已把「a.txt」/);
-await assert.rejects(() => tool.execute({ path: '  ' }, {}), /path/);
-// 投递工具
+import {
+  CHATS_TOOL_NAME,
+  createChatsTool,
+  createPeopleTool,
+  createSendTool,
+  PEOPLE_TOOL_NAME,
+  SEND_TOOL_NAME,
+} from '../src/tool.js';
+
+// 发送工具：文本和文件二选一
 {
-  const sent = [];
-  const deliver = createDeliverTool({
-    send: async (input) => { sent.push(input); return { targetId: 't1', sentAt: '2026-10-18T00:00:00.000Z' }; },
+  const calls = [];
+  const tool = createSendTool({
+    send: async (input) => {
+      calls.push(input);
+      return input.path
+        ? { kind: 'file', chatId: 'oc_daily', fileName: 'a.txt', bytes: 3 }
+        : { kind: 'card', chatId: 'oc_daily', sentAt: '2026-11-04T00:00:00.000Z' };
+    },
   });
-  assert.equal(deliver.name, DELIVER_TOOL_NAME);
-  assert.deepEqual(deliver.parameters.required, ['text']);
-  const out = await deliver.execute({ target: 'oc_daily', text: '早上好' }, { agent: { session: { id: 'sess-9' } } });
-  assert.equal(out.targetId, 't1');
-  assert.equal(sent[0].sessionId, 'sess-9');
-  assert.equal(sent[0].target, 'oc_daily');
-  const bound = await deliver.execute({ text: '用当前绑定' }, { agent: { session: { id: 'sess-9' } } });
-  assert.equal(bound.targetId, 't1');
-  assert.equal(sent[1].target, undefined, 'an omitted target is resolved by the runtime');
-  const rendered = deliver.output.render({}, out);
-  assert.match(rendered[0].text, /已投递到 t1/);
+  assert.equal(tool.name, SEND_TOOL_NAME);
+  assert.deepEqual(Object.keys(tool.parameters.properties), ['bot', 'chatId', 'title', 'text', 'path', 'name']);
+  const text = await tool.execute({ title: '问候', text: '早上好' }, { agent: { session: { id: 'sess-1' } } });
+  assert.equal(text.kind, 'card');
+  assert.equal(calls[0].sessionId, 'sess-1');
+  assert.equal(calls[0].text, '早上好');
+  assert.equal(calls[0].title, '问候');
+  assert.equal(calls[0].path, undefined);
+  assert.match(tool.output.render({}, text)[0].text, /已发送卡片到 oc_daily/);
+
+  const file = await tool.execute({ path: '/tmp/a.txt', name: '报告.txt' }, { agent: { session: { id: 'sess-1' } } });
+  assert.equal(file.kind, 'file');
+  assert.equal(calls[1].path, '/tmp/a.txt');
+  assert.equal(calls[1].name, '报告.txt');
+  assert.match(tool.output.render({}, file)[0].text, /已把「a.txt」/);
+
+  await assert.rejects(() => tool.execute({}, {}), /text 和 path/);
+  await assert.rejects(() => tool.execute({ text: 'x', path: '/tmp/a' }, {}), /text 和 path/);
+  await assert.rejects(() => tool.execute({ path: '/tmp/a', title: 'x' }, {}), /title 仅用于文本卡片/);
 }
 
 // 群发现工具
@@ -53,7 +61,7 @@ await assert.rejects(() => tool.execute({ path: '  ' }, {}), /path/);
   assert.equal(result.chats[0].chatId, 'oc_daily');
   assert.equal(result.chats[1].title, '');
   assert.match(chats.output.render({}, result)[0].text, /日报群（oc_daily，bot_default）/);
-  assert.match(chats.output.render({}, { chats: [] })[0].text, /没有绑定/);
+  assert.match(chats.output.render({}, { chats: [] })[0].text, /没有可用/);
 }
 
 // 人物模糊查询工具
@@ -77,20 +85,6 @@ await assert.rejects(() => tool.execute({ path: '  ' }, {}), /path/);
   assert.equal(result.people[0].openId, 'ou_chen');
   assert.match(people.output.render({}, result)[0].text, /陈志文（ou_chen）/);
   assert.match(people.output.render({}, { chatId: 'oc_daily', people: [] })[0].text, /没有找到/);
-}
-
-// 本轮回复绑定飞书
-{
-  const calls = [];
-  const reply = createReplyTool({
-    arm: async (input) => { calls.push(input); return { chatId: 'oc_target', armed: true, already: false }; },
-  });
-  assert.equal(reply.name, REPLY_TOOL_NAME);
-  const result = await reply.execute({ chatId: 'oc_target' }, { agent: { session: { id: 'sess-web' } } });
-  assert.equal(calls[0].sessionId, 'sess-web');
-  assert.equal(calls[0].chatId, 'oc_target');
-  assert.equal(result.armed, true);
-  assert.match(reply.output.render({}, result)[0].text, /已把本轮回复绑定到 oc_target/);
 }
 
 console.log('tool: 24 assertions passed');

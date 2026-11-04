@@ -1,105 +1,82 @@
 /**
- * `im_feishu_return_file` — send one file or image to the calling Feishu chat.
+ * Model-facing Feishu tools.
  *
- * The tool sends the file immediately through the chat bound to the calling
- * Session, so the model can describe it as sent once the call succeeds.
+ * `im_feishu_send` sends a standalone message/file. Feishu-origin replies are
+ * streamed by the bridge itself, so there is deliberately no agent-facing
+ * "reply with a card" tool.
  */
-export const TOOL_NAME = 'im_feishu_return_file';
+export const SEND_TOOL_NAME = 'im_feishu_send';
 
-export function createReturnFileTool({ send }) {
+export function createSendTool({ send }) {
   return Object.freeze({
-    name: TOOL_NAME,
-    description: 'Send one local file or image to the current Feishu chat as a native attachment. '
-      + 'Only meaningful in a Feishu conversation: the chat is resolved from the calling Session. '
-      + 'The file is uploaded and sent before this call returns, so report it as sent only when the result says so.',
-    parameters: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        path: {
-          type: 'string',
-          description: 'Absolute path, or a path relative to the bot workspace.',
-        },
-        name: {
-          type: 'string',
-          description: 'Optional display name for the attachment.',
-        },
-      },
-      required: ['path'],
-    },
-    output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          fileName: { type: 'string' },
-          bytes: { type: 'number' },
-          chatId: { type: 'string' },
-        },
-        required: ['fileName', 'bytes', 'chatId'],
-      },
-      render: (_args, value) => [{
-        type: 'text',
-        text: `已把「${value.fileName}」（${value.bytes} 字节）发送到飞书会话。`,
-      }],
-    },
-    async execute(args, exec) {
-      const path = typeof args?.path === 'string' ? args.path.trim() : '';
-      if (!path) throw new Error('path 不能为空');
-      return send({
-        sessionId: exec?.agent?.session?.id ?? null,
-        path,
-        name: typeof args?.name === 'string' ? args.name : undefined,
-        signal: exec?.signal,
-      });
-    },
-  });
-}
-
-
-export const DELIVER_TOOL_NAME = 'im_feishu_deliver';
-
-/** Proactive delivery: push text to a chat id or a user open_id. */
-export function createDeliverTool({ send }) {
-  return Object.freeze({
-    name: DELIVER_TOOL_NAME,
-    description: 'Push a plain-text message to one Feishu conversation. '
-      + 'Use im_feishu_chats to discover a chat id when the target is not the calling Session\'s bound chat. '
-      + 'Delivery is confirmed before this call returns.',
+    name: SEND_TOOL_NAME,
+    description: '立即发送一条独立卡片消息或文件到飞书群。'
+      + '飞书消息的回复会自动流式发送；不要用本工具重复回复当前飞书消息。',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         bot: {
           type: 'string',
-          description: 'Bot alias, name, or id. Set it when several bots are configured and the Session is not bound.',
+          description: '机器人别名、名称或 id；多机器人且当前会话未绑定时需要。',
         },
-        target: {
+        chatId: {
           type: 'string',
-          description: 'Exact chat_id (oc_…) or user open_id (ou_…). Omit to use the calling Session\'s bound chat.',
+          description: '群 chat_id（oc_…）；省略时使用当前会话绑定的群。',
         },
-        text: { type: 'string', description: 'Message text, at most 4000 characters.' },
+        title: {
+          type: 'string',
+          description: '卡片标题；仅文本卡片使用，可选，最多 100 字。',
+        },
+        text: {
+          type: 'string',
+          description: '卡片正文，Markdown；与 path 二选一，最多 4000 字。',
+        },
+        path: {
+          type: 'string',
+          description: '要发送的文件/图片路径；与 text 二选一。',
+        },
+        name: {
+          type: 'string',
+          description: '文件显示名称；仅 path 模式使用，可选。',
+        },
       },
-      required: ['text'],
     },
     output: {
       schema: {
         type: 'object',
         additionalProperties: false,
         properties: {
-          targetId: { type: 'string' },
+          kind: { type: 'string' },
+          chatId: { type: 'string' },
           sentAt: { type: 'string' },
+          fileName: { type: 'string' },
+          bytes: { type: 'number' },
         },
-        required: ['targetId', 'sentAt'],
+        required: ['kind', 'chatId'],
       },
-      render: (_args, value) => [{ type: 'text', text: `已投递到 ${value.targetId}（${value.sentAt}）` }],
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.kind === 'file'
+          ? `已把「${value.fileName}」（${value.bytes} 字节）发送到 ${value.chatId}。`
+          : `已发送卡片到 ${value.chatId}（${value.sentAt}）。`,
+      }],
     },
     async execute(args, context) {
+      const text = typeof args?.text === 'string' ? args.text.trim() : '';
+      const path = typeof args?.path === 'string' ? args.path.trim() : '';
+      const title = typeof args?.title === 'string' ? args.title.trim() : '';
+      if ((text && path) || (!text && !path)) throw new Error('text 和 path 必须且只能提供一个');
+      if (path && title) throw new Error('title 仅用于文本卡片');
       return send({
         sessionId: context?.agent?.session?.id,
-        bot: args.bot,
-        target: args.target,
-        text: args.text,
+        bot: args?.bot,
+        chatId: args?.chatId,
+        text: text || undefined,
+        title: title || undefined,
+        path: path || undefined,
+        name: typeof args?.name === 'string' ? args.name : undefined,
+        signal: context?.signal,
       });
     },
   });
@@ -108,22 +85,22 @@ export function createDeliverTool({ send }) {
 
 export const CHATS_TOOL_NAME = 'im_feishu_chats';
 
-/** Discover the chats already bound to this plugin so a Web agent can quote an exact id. */
+/** Discover the chats the bot belongs to, with bound Session markers. */
 export function createChatsTool({ list }) {
   return Object.freeze({
     name: CHATS_TOOL_NAME,
-    description: 'List Feishu chats the bot belongs to, marking bound Sessions. Use the returned chatId with im_feishu_deliver or im_feishu_reply.',
+    description: '列出机器人所在的飞书群，并标记已绑定的 Session。返回的 chatId 可用于发送。',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         bot: {
           type: 'string',
-          description: 'Bot alias, name, or id to filter by. Omit to list every configured bot.',
+          description: '按机器人别名、名称或 id 过滤；省略则列出全部机器人。',
         },
         refresh: {
           type: 'boolean',
-          description: 'Bypass the six-hour group-list cache and refetch from Feishu.',
+          description: '绕过 6 小时群列表缓存，重新从飞书拉取。',
         },
       },
     },
@@ -154,7 +131,7 @@ export function createChatsTool({ list }) {
       render: (_args, value) => [{
         type: 'text',
         text: value.chats.length === 0
-          ? '当前没有绑定任何飞书群聊。'
+          ? '当前没有可用的飞书群。'
           : value.chats.slice(0, 20).map((chat) => `${chat.title || chat.chatId}（${chat.chatId}，${chat.bot}）`).join('\n'),
       }],
     },
@@ -177,31 +154,31 @@ export function createChatsTool({ list }) {
 
 export const PEOPLE_TOOL_NAME = 'im_feishu_people';
 
-/** Resolve a person's or group member's exact open_id without dumping the roster. */
+/** Resolve a group member's exact open_id without dumping the roster. */
 export function createPeopleTool({ find }) {
   return Object.freeze({
     name: PEOPLE_TOOL_NAME,
-    description: 'Fuzzy-search the members of one Feishu chat and return exact open_ids. '
-      + 'Use it before writing an <at> tag. Members are cached for six hours; set refresh=true to refetch.',
+    description: '按姓名模糊查询指定飞书群的成员，返回完整 open_id；写 <at> 标签前先调用。'
+      + '成员缓存 6 小时。',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         bot: {
           type: 'string',
-          description: 'Bot alias, name, or id. Set it when several bots are configured and the Session is not bound.',
+          description: '机器人别名、名称或 id；多机器人且当前会话未绑定时需要。',
         },
         chatId: {
           type: 'string',
-          description: 'Chat id (oc_…). Omit to use the calling Session\'s bound chat.',
+          description: '群 chat_id（oc_…）；省略时使用当前会话绑定的群。',
         },
         query: {
           type: 'string',
-          description: 'Name fragment or exact open_id, for example "志文". Case and spaces are ignored.',
+          description: '姓名片段或完整 open_id，例如“志文”；忽略大小写和空格。',
         },
         refresh: {
           type: 'boolean',
-          description: 'Bypass the six-hour cache and refetch the group roster.',
+          description: '绕过 6 小时缓存，重新拉取群成员。',
         },
       },
       required: ['query'],
@@ -241,56 +218,6 @@ export function createPeopleTool({ find }) {
         chatId: args?.chatId,
         query: args?.query,
         refresh: args?.refresh === true,
-      });
-    },
-  });
-}
-
-
-export const REPLY_TOOL_NAME = 'im_feishu_reply';
-
-/** Bind the current turn's answer to a Feishu chat and stream it as a card. */
-export function createReplyTool({ arm }) {
-  return Object.freeze({
-    name: REPLY_TOOL_NAME,
-    description: 'Mirror this turn\'s answer to a Feishu chat as a streaming card. '
-      + 'Call it before composing the final answer when the user asks to send or reply to Feishu. '
-      + 'For a standalone message instead, use im_feishu_deliver.',
-    parameters: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        bot: {
-          type: 'string',
-          description: 'Bot alias, name, or id. Set it when several bots are configured and the Session is not bound.',
-        },
-        chatId: {
-          type: 'string',
-          description: 'Any chat id (oc_…) the bot can send to. Omit to use the calling Session\'s bound chat.',
-        },
-      },
-    },
-    output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          chatId: { type: 'string' },
-          armed: { type: 'boolean' },
-          already: { type: 'boolean' },
-        },
-        required: ['chatId', 'armed', 'already'],
-      },
-      render: (_args, value) => [{
-        type: 'text',
-        text: `已把本轮回复绑定到 ${value.chatId}，请继续输出回答。`,
-      }],
-    },
-    async execute(args, context) {
-      return arm({
-        sessionId: context?.agent?.session?.id,
-        bot: args?.bot,
-        chatId: args?.chatId,
       });
     },
   });

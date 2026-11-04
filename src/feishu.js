@@ -14,6 +14,8 @@ import { DELIVERY_RETRY_MS, isRetryableDeliveryError, sleep } from './feishu-err
 
 const OPEN_ORIGIN = 'https://open.feishu.cn';
 const CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
+const MEMBERSHIP_TTL_MS = 5 * 60 * 1_000;
+const MEMBERSHIP_MISS_TTL_MS = 30 * 1_000;
 
 function assertApiSuccess(operation, response) {
   if (response && typeof response === 'object' && typeof response.code === 'number' && response.code !== 0) {
@@ -86,6 +88,7 @@ export class FeishuBot {
   #token = null;
   #memberCache = new Map();
   #chatCache = new Map();
+  #membershipCache = new Map();
 
   constructor({ appId, appSecret, client }) {
     this.#appId = appId;
@@ -119,6 +122,21 @@ export class FeishuBot {
     } catch {
       return null;
     }
+  }
+
+  /** Whether this bot is currently a member of the chat. */
+  async isInChat(chatId, { refresh = false } = {}) {
+    if (!chatId) return false;
+    const cached = this.#membershipCache.get(chatId);
+    if (!refresh && cached && Date.now() - cached.at < (cached.value ? MEMBERSHIP_TTL_MS : MEMBERSHIP_MISS_TTL_MS)) {
+      return cached.value;
+    }
+    const response = assertApiSuccess('Feishu chat membership', await this.#client.im.v1.chatMembers.isInChat({
+      path: { chat_id: chatId },
+    }));
+    const value = response?.data?.is_in_chat === true;
+    this.#membershipCache.set(chatId, { at: Date.now(), value });
+    return value;
   }
 
   /** Groups the bot belongs to, cached for six hours. */
@@ -186,7 +204,7 @@ export class FeishuBot {
   }
 
   /** Send one text body, retrying the same idempotency uuid on transient failures. */
-  async #sendText(receiveId, receiveIdType, text) {
+  async sendText(chatId, text) {
     const parts = splitText(text);
     const sent = [];
     for (const part of parts) {
@@ -195,8 +213,8 @@ export class FeishuBot {
       for (let attempt = 0; ; attempt += 1) {
         try {
           response = assertApiSuccess('Feishu message send', await this.#client.im.v1.message.create({
-            params: { receive_id_type: receiveIdType },
-            data: { receive_id: receiveId, msg_type: 'text', content: JSON.stringify({ text: part }), uuid },
+            params: { receive_id_type: 'chat_id' },
+            data: { receive_id: chatId, msg_type: 'text', content: JSON.stringify({ text: part }), uuid },
           }));
           break;
         } catch (error) {
@@ -208,28 +226,6 @@ export class FeishuBot {
       if (messageId) sent.push(messageId);
     }
     return sent.at(-1) ?? null;
-  }
-
-  /** Send directly to one user by open_id (proactive delivery). */
-  async sendTextToUser(openId, text) {
-    return this.#sendText(openId, 'open_id', text);
-  }
-
-  async sendText(chatId, text) {
-    return this.#sendText(chatId, 'chat_id', text);
-  }
-
-  async replyTextInThread(messageId, text) {
-    const parts = splitText(text);
-    let last = null;
-    for (const part of parts) {
-      const response = assertApiSuccess('Feishu threaded text reply', await this.#client.im.v1.message.reply({
-        path: { message_id: messageId },
-        data: { msg_type: 'text', content: JSON.stringify({ text: part }), reply_in_thread: true },
-      }));
-      last = response?.data?.message_id ?? last;
-    }
-    return last;
   }
 
   /** Add one emoji reaction; returns its reaction_id (null when unavailable). */
@@ -263,19 +259,6 @@ export class FeishuBot {
       data: { msg_type: 'interactive', content: JSON.stringify(card), reply_in_thread: true },
     }));
     return { messageId: response?.data?.message_id ?? null, threadId: response?.data?.thread_id ?? null };
-  }
-
-  async replyText(messageId, text) {
-    const parts = splitText(text);
-    let last = null;
-    for (const part of parts) {
-      const response = assertApiSuccess('Feishu message reply', await this.#client.im.v1.message.reply({
-        path: { message_id: messageId },
-        data: { msg_type: 'text', content: JSON.stringify({ text: part }) },
-      }));
-      last = response?.data?.message_id ?? last;
-    }
-    return last;
   }
 
   /** Edit an existing text message (used for the live progress bubble). */
@@ -407,10 +390,20 @@ export class FeishuBot {
 
   /** Send one interactive card; returns its message id. */
   async sendCard(chatId, card) {
-    const response = assertApiSuccess('Feishu card send', await this.#client.im.v1.message.create({
-      params: { receive_id_type: 'chat_id' },
-      data: { receive_id: chatId, msg_type: 'interactive', content: JSON.stringify(card) },
-    }));
+    const uuid = randomUUID();
+    let response;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        response = assertApiSuccess('Feishu card send', await this.#client.im.v1.message.create({
+          params: { receive_id_type: 'chat_id' },
+          data: { receive_id: chatId, msg_type: 'interactive', content: JSON.stringify(card), uuid },
+        }));
+        break;
+      } catch (error) {
+        if (attempt >= DELIVERY_RETRY_MS.length || !isRetryableDeliveryError(error)) throw error;
+        await sleep(DELIVERY_RETRY_MS[attempt]);
+      }
+    }
     const messageId = response?.data?.message_id;
     if (!messageId) throw new Error('Feishu card send returned no message_id');
     return messageId;

@@ -44,6 +44,9 @@ function recordingClient({ resourceBytes = null, cardKit = false } = {}) {
             };
           },
         },
+        chatMembers: {
+          isInChat: async ({ path }) => { calls.push({ api: 'chatMembers.isInChat', path }); return ok({ is_in_chat: true }); },
+        },
         image: { create: async ({ data }) => { calls.push({ api: 'image.create', bytes: data.image?.length }); return ok({ image_key: 'img_key' }); } },
         file: { create: async ({ data }) => { calls.push({ api: 'file.create', name: data.file_name, bytes: data.file?.length }); return ok({ file_key: 'file_key' }); } },
       },
@@ -250,7 +253,7 @@ function inbound(text, extra = {}) {
   const { writeFile } = await import('node:fs/promises');
   const file = join(dir, '报告.txt');
   await writeFile(file, 'hello');
-  const result = await botRuntime.sendFileForSession({ sessionId: 'sess-1', path: file });
+  const result = await botRuntime.sendFileToChat('oc_e2e', file);
   assert.equal(result.fileName, '报告.txt');
   const upload = client.calls.find((c) => c.api === 'file.create');
   assert.equal(upload.name, '报告.txt');

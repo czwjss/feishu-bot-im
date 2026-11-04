@@ -9,12 +9,10 @@ import { FeishuBridge } from '../src/bridge.js';
 let seq = 0;
 class FakeBot {
   text = [];
-  replies = [];
   updates = [];
   cards = [];
   patches = [];
   async sendText(chatId, text) { const id = `m${++seq}`; this.text.push({ chatId, text, id }); return id; }
-  async replyText(messageId, text) { this.replies.push({ messageId, text }); return `m${++seq}`; }
   async updateText(id, text) { this.updates.push({ id, text }); return id; }
   async sendCard(chatId, card) { const id = `m${++seq}`; this.cards.push({ chatId, card, id }); return id; }
   cardKit = false;
@@ -1551,30 +1549,5 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
-// 29) Web 显式绑定飞书群：复用同一条 CardKit 流式卡片管线
-{
-  const { bot, bridge } = makeBridge();
-  bot.cardKit = true;
-  await state.bindSession('chat:oc_web_bound', 'sess-web-card');
-  await bridge.onSessionEvent({ id: 'sess-web-card' }, { type: 'turn/start', data: { turn: 1 } });
-  await bridge.onSessionEvent({ id: 'sess-web-card' }, {
-    type: 'user/message',
-    data: { source: { kind: 'user', rpcId: 'web-rpc-1' } },
-  });
-  assert.equal(bot.cardRefs.length, 0, 'ordinary Web turns stay silent');
-  const armed = await bridge.armFeishuReply('sess-web-card', 'oc_other_group');
-  assert.equal(armed.armed, true);
-  assert.equal(bot.cardEntities.length, 1, 'arming opens the streaming card');
-  assert.equal(bot.cardRefs[0].chatId, 'oc_other_group', 'any chat id is allowed, not only the bound chat');
-  await bridge.onSessionEvent({ id: 'sess-web-card' }, {
-    type: 'assistant/message',
-    data: { turn: 1, message: { content: [{ type: 'text', text: 'Web 发起的飞书卡片回答' }] } },
-  });
-  await bridge.onSessionEvent({ id: 'sess-web-card' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
-  assert.equal(bot.cardUpdates.length, 1, 'the same final-card path is used');
-  assert.match(JSON.stringify(bot.cardUpdates[0].card), /Web 发起的飞书卡片回答/);
-  bridge.dispose();
-}
-
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 64 scenarios passed');
+console.log('bridge: 63 scenarios passed');

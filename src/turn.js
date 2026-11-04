@@ -76,25 +76,6 @@ export class TurnRunner {
     this.#contextWindows.clear();
   }
 
-  /**
-   * Mirror the current Web turn to Feishu: bind its target and open the same
-   * streaming card used by Feishu-origin turns. Must run before the final answer.
-   */
-  async armFeishuReply(sessionId, { chatId, chatKey } = {}) {
-    if (typeof sessionId !== 'string' || !chatId) throw new Error('缺少飞书群 chatId');
-    const turn = this.#activeTurnFor(sessionId);
-    if (!turn) throw new Error('当前没有进行中的回复，无法绑定飞书群');
-    if (turn.originKind === 'feishu' || turn.cardMessageId) {
-      return { chatId: turn.chatId, armed: true, already: true };
-    }
-    turn.chatId = chatId;
-    turn.chatKey = chatKey || `chat:${chatId}`;
-    turn.topic = null;
-    turn.silent = false;
-    await this.#flushTurn(turn, turn.streamText || '⏳ 已绑定飞书回复，正在处理…');
-    return { chatId, armed: true, already: false };
-  }
-
   onAssistantStream(agent, frame) {
     const sessionId = agent?.session?.id;
     if (typeof sessionId !== 'string' || !frame) return;

@@ -377,14 +377,6 @@ export class FeishuBridge {
     people.set(openId, name || current || null);
   }
 
-  /** Mirror a Web turn to a Feishu chat through the normal card pipeline. */
-  async armFeishuReply(sessionId, chatId) {
-    if (typeof sessionId !== 'string' || !chatId) throw new Error('缺少 Session 或 chatId');
-    const bound = this.#state.keyForSession(sessionId);
-    const chatKey = bound && chatIdOfKey(bound) === chatId ? bound : `chat:${chatId}`;
-    return this.#turns.armFeishuReply(sessionId, { chatId, chatKey });
-  }
-
   /** Publish a roster learned through the people tool to this chat and its topics. */
   rememberPeople(chatId, people) {
     if (!chatId || !Array.isArray(people)) return;

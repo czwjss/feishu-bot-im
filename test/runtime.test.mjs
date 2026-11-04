@@ -24,7 +24,7 @@ class FakeBot {
   async stop() {}
   connectionStatus() { return { state: 'connected' }; }
   async sendText(chatId, text) { calls.push({ kind: 'text', chatId, text }); }
-  async sendTextToUser(openId, text) { calls.push({ kind: 'user', openId, text }); }
+  async sendCard(chatId, card) { calls.push({ kind: 'card', chatId, card }); return 'mid'; }
   async uploadFile(bytes, name) { calls.push({ kind: 'file', name }); return 'fk'; }
   async uploadImage() { calls.push({ kind: 'image' }); return 'ik'; }
   async sendFile(chatId, key, name) { calls.push({ kind: 'file-msg', chatId, name }); }
@@ -38,6 +38,7 @@ class FakeBot {
       { chatId: 'oc_unbound', name: '未绑定群' },
     ];
   }
+  async isInChat(chatId) { return !this.notInChat?.has(chatId); }
   async getChatMembers(chatId) {
     calls.push({ kind: 'members', chatId });
     return [
@@ -48,6 +49,7 @@ class FakeBot {
 }
 
 const states = new Map();
+const notInChat = new Set();
 const manager = new RuntimeManager({
   ctx: { credentials },
   configStore,
@@ -63,7 +65,7 @@ const manager = new RuntimeManager({
     return states.get(botId);
   },
   verify: async ({ appId }) => ({ name: `bot-${appId.slice(-4)}`, openId: `ou_${appId.slice(-4)}` }),
-  createBot: (options) => new FakeBot(options),
+  createBot: (options) => Object.assign(new FakeBot(options), { notInChat: notInChat }),
 });
 
 // 1) 空配置启动
@@ -107,51 +109,43 @@ assert.deepEqual(calls.filter((c) => c.kind === 'text').map((c) => c.chatId), ['
 // 7) 文件回传
 const file = join(dir, 'a.txt');
 await writeFile(file, 'hi');
-const sent = await manager.sendFileForSession({ sessionId: 'sess-2', path: file });
+const sent = await manager.send({ sessionId: 'sess-2', path: file });
+assert.equal(sent.kind, 'file');
 assert.equal(sent.fileName, 'a.txt');
 assert.equal(calls.at(-1).kind, 'file-msg');
 
 // 7b) 话题会话回传文件也发到群 chat id
 {
   await s1.bindSession('topic:oc_3:1', 'sess-3');
-  const topicSent = await manager.sendFileForSession({ sessionId: 'sess-3', path: file });
+  const topicSent = await manager.send({ sessionId: 'sess-3', path: file });
   assert.equal(topicSent.chatId, 'oc_3', 'topic binding resolves to the chat id');
   assert.equal(calls.at(-1).chatId, 'oc_3');
-}
-
-// 8) 投递：按路由直发（不再有目标清单）
-{
-  await r1.deliver('oc_daily', '测试消息');
-  assert.equal(calls.at(-1).kind, 'text');
-  assert.equal(calls.at(-1).chatId, 'oc_daily');
-  await r1.deliver('ou_me', '测试消息');
-  assert.equal(calls.at(-1).kind, 'user');
-  assert.equal(calls.at(-1).openId, 'ou_me');
-  await assert.rejects(() => r1.deliver('日报群', 'x'), /必须是 oc_/);
-  await assert.rejects(() => r1.deliver('oc_daily', '   '), /内容不能为空/);
 }
 
 // 9) 任意会话投递：按机器人别名指定（Web 定时任务场景）
 {
   await second.catch?.(() => undefined);
   const alias = '二号机';
-  const result = await manager.deliver({ sessionId: 'sess-web', bot: alias, target: 'oc_daily', text: '来自 Web 定时任务' });
-  assert.equal(result.targetId, 'oc_daily');
+  const result = await manager.send({ sessionId: 'sess-web', bot: alias, chatId: 'oc_daily', title: '定时通知', text: '来自 Web 定时任务' });
+  assert.equal(result.chatId, 'oc_daily');
+  assert.equal(result.kind, 'card');
+  assert.equal(calls.at(-1).kind, 'card');
   assert.equal(calls.at(-1).chatId, 'oc_daily');
+  assert.equal(calls.at(-1).card.header.title.content, '定时通知');
   await assert.rejects(
-    () => manager.deliver({ sessionId: 'sess-web', bot: '不存在的机器人', target: 'oc_daily', text: 'x' }),
+    () => manager.send({ sessionId: 'sess-web', bot: '不存在的机器人', chatId: 'oc_daily', text: 'x' }),
     /没有这个机器人/,
   );
 }
 
 // 9b) 省略 target：发到当前 Session 绑定的群
 {
-  const bound = await manager.deliver({ sessionId: 'sess-1', text: '发到绑定群' });
-  assert.equal(bound.targetId, 'oc_1');
+  const bound = await manager.send({ sessionId: 'sess-1', text: '发到绑定群' });
+  assert.equal(bound.chatId, 'oc_1');
   assert.equal(calls.at(-1).chatId, 'oc_1');
   await assert.rejects(
-    () => manager.deliver({ sessionId: 'sess-web', bot: '二号机', text: '没有绑定' }),
-    /没有绑定飞书聊天/,
+    () => manager.send({ sessionId: 'sess-web', bot: '二号机', text: '没有绑定' }),
+    /没有 chatId/,
   );
 }
 
@@ -177,12 +171,18 @@ assert.equal(calls.at(-1).kind, 'file-msg');
   await assert.rejects(() => manager.findPeople({ sessionId: 'sess-web', bot: '二号机', chatId: 'oc_2', query: '' }), /关键词/);
 }
 
-// 9e) Web 轮次绑定飞书回复：没有绑定群时必须显式给 chatId
+// 9e) 发送工具：text/path 二选一，并校验 bot 在群
 {
   await assert.rejects(
-    () => manager.armReply({ sessionId: 'sess-web', bot: '二号机' }),
-    /没有 chatId/,
+    () => manager.send({ sessionId: 'sess-web', bot: '二号机', text: 'x', path: file }),
+    /text 和 path/,
   );
+  notInChat.add('oc_2');
+  await assert.rejects(
+    () => manager.send({ sessionId: 'sess-web', bot: '二号机', chatId: 'oc_2', text: 'x' }),
+    /不在群/,
+  );
+  notInChat.clear();
 }
 
 // 10) 移除机器人：只清它自己的密钥、配置与落盘数据
@@ -204,4 +204,4 @@ assert.equal(await exists(join(dir, 'inbox', first.id)), false, 'inbox removed')
 assert.equal(await exists(join(dir, `state-${second.id}.json`)), true, 'other bot untouched');
 
 await rm(dir, { recursive: true, force: true });
-console.log('runtime (multi-bot): 20 scenarios passed');
+console.log('runtime (multi-bot): 21 scenarios passed');

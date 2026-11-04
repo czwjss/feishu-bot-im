@@ -12,6 +12,7 @@ import { secretRefFor } from './config.js';
 import { chatIdOfKey } from './message-text.js';
 import { FeishuBot, verifyCredentials } from './feishu.js';
 import { FeishuBridge } from './bridge.js';
+import { noticeCard } from './cards.js';
 import { RegistrationManager } from './registration.js';
 import { syncSlashCommands } from './slash-commands.js';
 
@@ -344,18 +345,49 @@ export class BotRuntime {
   }
 
 
-  /** Send plain text to a chat_id (oc_…) or open_id (ou_…). */
-  async deliver(target, text) {
+  /** Fail early when the selected bot cannot send to a group. */
+  async #assertInChat(chatId) {
+    if (!String(chatId).startsWith('oc_')) return;
+    const label = this.config?.alias ?? this.config?.botName ?? this.botId;
+    const inChat = await this.#bot.isInChat(chatId);
+    if (!inChat) throw new Error(`机器人 ${label} 不在群 ${chatId}；请换 bot 或先把机器人拉进群`);
+  }
+
+  /** Send a standalone interactive card with Markdown text. */
+  async sendCardText(chatId, text, title = null) {
     if (!this.#bot) throw new Error('机器人尚未连接');
-    const route = typeof target === 'string' ? target.trim() : '';
+    if (!chatId) throw new Error('缺少飞书群 chatId');
     const body = typeof text === 'string' ? text.trim().slice(0, 4000) : '';
-    if (!body) throw new Error('投递内容不能为空');
-    if (!/^(oc|ou)_[A-Za-z0-9_-]+$/.test(route)) {
-      throw new Error('投递目标必须是 oc_…（群聊）或 ou_…（用户）');
+    if (!body) throw new Error('卡片正文不能为空');
+    const heading = typeof title === 'string' ? title.trim().slice(0, 100) : '';
+    await this.#assertInChat(chatId);
+    await this.#bot.sendCard(chatId, noticeCard(body, heading || null));
+    return { sentAt: new Date().toISOString() };
+  }
+
+  /** Upload and send one file/image to a chat. */
+  async sendFileToChat(chatId, path, name, signal) {
+    if (!this.#bot) throw new Error('机器人尚未连接');
+    if (!chatId) throw new Error('缺少飞书群 chatId');
+    await this.#assertInChat(chatId);
+    const base = this.config?.workspace ?? process.cwd();
+    const absolute = isAbsolute(path) ? path : resolve(base, path);
+    signal?.throwIfAborted?.();
+    const info = await stat(absolute).catch(() => null);
+    if (!info?.isFile()) throw new Error(`文件不存在或不是普通文件：${absolute}`);
+    const LIMIT = 30 * 1024 * 1024;
+    if (info.size > LIMIT) throw new Error(`文件超过飞书 30MB 上限：${info.size} 字节`);
+    const bytes = await readFile(absolute);
+    const fileName = (typeof name === 'string' && name.trim() ? name.trim() : basename(absolute)).slice(0, 120);
+    signal?.throwIfAborted?.();
+    if (/\.(png|jpe?g|webp|gif)$/i.test(fileName)) {
+      const imageKey = await this.#bot.uploadImage(bytes);
+      await this.#bot.sendImage(chatId, imageKey);
+    } else {
+      const fileKey = await this.#bot.uploadFile(bytes, fileName);
+      await this.#bot.sendFile(chatId, fileKey, fileName);
     }
-    if (route.startsWith('ou_')) await this.#bot.sendTextToUser(route, body);
-    else await this.#bot.sendText(route, body);
-    return { targetId: route, sentAt: new Date().toISOString() };
+    return { fileName, bytes: bytes.length, chatId };
   }
 
   /** Groups the bot belongs to, with the bound Session when one exists. */
@@ -410,11 +442,6 @@ export class BotRuntime {
     return { chatId, people: ranked.slice(0, 10).map(({ name, openId }) => ({ name, openId })) };
   }
 
-  armFeishuReply(sessionId, chatId) {
-    if (!this.#bridge) throw new Error('机器人尚未连接');
-    return this.#bridge.armFeishuReply(sessionId, chatId);
-  }
-
   async syncSlashCommands() {
     if (!this.#bot) throw new Error('机器人尚未连接');
     return syncSlashCommands(this.#bot, { logger: this.#logger });
@@ -427,32 +454,6 @@ export class BotRuntime {
     if (!chatId) throw new Error('还没有可测试的会话：先在飞书里给这个机器人发一条消息');
     await this.#bot.sendText(chatId, 'DeepSeek Harness 连接测试成功 ✅');
     return true;
-  }
-
-  async sendFileForSession({ sessionId, path, name, signal }) {
-    if (!this.#bot) throw new Error('机器人尚未连接');
-    const chatKey = (sessionId ? this.#stateStore.keyForSession(sessionId) : null)
-      ?? Object.keys(this.#stateStore.value.sessions ?? {})[0];
-    const chatId = chatIdOfKey(chatKey);
-    if (!chatId) throw new Error('还没有可用的飞书会话：先在飞书里给机器人发一条消息');
-    const base = this.config?.workspace ?? process.cwd();
-    const absolute = isAbsolute(path) ? path : resolve(base, path);
-    signal?.throwIfAborted?.();
-    const info = await stat(absolute).catch(() => null);
-    if (!info?.isFile()) throw new Error(`文件不存在或不是普通文件：${absolute}`);
-    const LIMIT = 30 * 1024 * 1024;
-    if (info.size > LIMIT) throw new Error(`文件超过飞书 30MB 上限：${info.size} 字节`);
-    const bytes = await readFile(absolute);
-    const fileName = (typeof name === 'string' && name.trim() ? name.trim() : basename(absolute)).slice(0, 120);
-    signal?.throwIfAborted?.();
-    if (/\.(png|jpe?g|webp|gif)$/i.test(fileName)) {
-      const imageKey = await this.#bot.uploadImage(bytes);
-      await this.#bot.sendImage(chatId, imageKey);
-    } else {
-      const fileKey = await this.#bot.uploadFile(bytes, fileName);
-      await this.#bot.sendFile(chatId, fileKey, fileName);
-    }
-    return { fileName, bytes: bytes.length, chatId };
   }
 
   onSessionEvent(session, event) {
@@ -768,9 +769,18 @@ export class RuntimeManager {
     return { runtime, target };
   }
 
-  async deliver({ sessionId, bot, target, text }) {
-    const resolved = this.#deliveryTarget({ sessionId, bot, chatId: target, label: 'target' });
-    return resolved.runtime.deliver(resolved.target, text);
+  async send({ sessionId, bot, chatId, text, title, path, name, signal }) {
+    const hasText = typeof text === 'string' && text.trim().length > 0;
+    const hasFile = typeof path === 'string' && path.trim().length > 0;
+    if (hasText === hasFile) throw new Error('text 和 path 必须且只能提供一个');
+    if (hasFile && title) throw new Error('title 仅用于文本卡片');
+    const resolved = this.#deliveryTarget({ sessionId, bot, chatId });
+    if (hasText) {
+      const result = await resolved.runtime.sendCardText(resolved.target, text, title);
+      return { kind: 'card', chatId: resolved.target, sentAt: result.sentAt };
+    }
+    const result = await resolved.runtime.sendFileToChat(resolved.target, path, name, signal);
+    return { ...result, kind: 'file' };
   }
 
   async listChats({ bot, refresh = false } = {}) {
@@ -783,21 +793,9 @@ export class RuntimeManager {
     return rows;
   }
 
-  async armReply({ sessionId, bot, chatId }) {
-    const resolved = this.#deliveryTarget({ sessionId, bot, chatId });
-    return resolved.runtime.armFeishuReply(sessionId, resolved.target);
-  }
-
   async findPeople({ sessionId, bot, chatId, query, refresh = false }) {
     const resolved = this.#deliveryTarget({ sessionId, bot, chatId });
     return resolved.runtime.findPeople(resolved.target, query, { refresh: refresh === true });
-  }
-
-  async sendFileForSession(input) {
-    const sessionId = input?.sessionId;
-    const runtime = sessionId ? this.#runtimeForSession(sessionId) : null;
-    if (!runtime) throw new Error('这个会话没有绑定飞书机器人');
-    return runtime.sendFileForSession(input);
   }
 
   dispose() {
