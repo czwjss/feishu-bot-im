@@ -12,6 +12,8 @@
  * resend it.
  */
 
+export const DEFAULT_EAVESDROP_LIMIT = 20;
+
 const EAVESDROP_TAGS = Object.freeze({
   open: '<feishu_bot_eavesdrop>',
   close: '</feishu_bot_eavesdrop>',
@@ -21,7 +23,9 @@ const EAVESDROP_TAGS = Object.freeze({
 export function normalizeEavesdropConfig(value) {
   const source = value && typeof value === 'object' ? value : {};
   const rawLimit = Number(source.limit);
-  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 0;
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0
+    ? Math.min(Math.floor(rawLimit), 500)
+    : DEFAULT_EAVESDROP_LIMIT;
   return Object.freeze({
     // Eavesdropping is on by default; only an explicit `false` turns it off.
     enabled: source.enabled !== false,
@@ -31,7 +35,7 @@ export function normalizeEavesdropConfig(value) {
 
 function parseContent(message) {
   try {
-    const parsed = JSON.parse(message?.content ?? '{}');
+    const parsed = JSON.parse(message?.content ?? message?.body?.content ?? '{}');
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch {
     return {};
@@ -80,7 +84,7 @@ function joinPlaceholders(text, { images = 0, file = null } = {}) {
  */
 export function describeMessageForEavesdrop(message) {
   const content = parseContent(message);
-  const type = String(message?.message_type ?? '');
+  const type = String(message?.message_type ?? message?.msg_type ?? '');
   let text = '';
 
   if (type === 'text') {

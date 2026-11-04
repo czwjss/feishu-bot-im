@@ -10,7 +10,7 @@ import { ConfigStore, StateStore, configPaths } from './src/config.js';
 import { HarnessAdapter } from './src/harness.js';
 import { RuntimeManager } from './src/runtime.js';
 import { createRpcHandler, installRpc } from './src/rpc.js';
-import { createChatsTool, createPeopleTool, createSendTool } from './src/tool.js';
+import { createChatsTool, createMessagesTool, createPeopleTool, createSendTool } from './src/tool.js';
 import { rewriteInjectedContextMessages } from './src/injected-context.js';
 import { FEISHU_POLICY } from './src/policy.js';
 
@@ -106,6 +106,9 @@ export async function apply(ctx, config = {}) {
   ctx.inject(['tools'], (toolCtx) => {
     toolCtx.tools.register(createSendTool({
       send: (input) => manager.send(input),
+    }));
+    toolCtx.tools.register(createMessagesTool({
+      list: (input) => manager.listMessages(input),
     }));
     toolCtx.tools.register(createChatsTool({
       list: (input) => manager.listChats(input),

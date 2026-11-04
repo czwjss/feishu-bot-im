@@ -14,6 +14,10 @@ const client = {
           calls.push(request);
           return { code: 0, data: { message_id: `om_${calls.length}` } };
         },
+        async list({ params }) {
+          calls.push({ list: params });
+          return { code: 0, data: { items: [{ message_id: 'om_history' }], has_more: true, page_token: 'next_page' } };
+        },
       },
       chat: {
         async list() {
@@ -76,4 +80,21 @@ assert.equal(await bot.isInChat('oc_missing'), false);
 assert.equal(await bot.isInChat('oc_group', { refresh: true }), true);
 assert.equal(membershipCalls, 3, 'refresh bypasses the membership cache');
 
-console.log('feishu text: 21 assertions passed');
+const start = Date.parse('2026-11-05T00:00:00Z');
+const end = Date.parse('2026-11-06T00:00:00Z');
+const history = await bot.listMessages('oc_group', {
+  startTime: start, endTime: end, pageSize: 10, pageToken: 'pt', order: 'oldest',
+});
+const historyRequest = calls.find((call) => call.list)?.list;
+assert.equal(historyRequest.container_id_type, 'chat');
+assert.equal(historyRequest.container_id, 'oc_group');
+assert.equal(historyRequest.start_time, String(Math.floor(start / 1000)));
+assert.equal(historyRequest.end_time, String(Math.floor(end / 1000)));
+assert.equal(historyRequest.sort_type, 'ByCreateTimeAsc');
+assert.equal(historyRequest.with_sender_name, true);
+assert.equal(historyRequest.page_token, 'pt');
+assert.equal(history.items[0].message_id, 'om_history');
+assert.equal(history.hasMore, true);
+assert.equal(history.pageToken, 'next_page');
+
+console.log('feishu text: 29 assertions passed');

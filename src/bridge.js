@@ -9,7 +9,7 @@ import { chatIdOfKey, scopedValue, textOfContentOrPost } from './message-text.js
 import { approvalCard, questionCard, resolvedApprovalText, newSessionCard, adjustCard, noticeCard } from './cards.js';
 import { isAddressed, isAllowed, senderOpenId } from './access.js';
 import { buildMenuCard, collectMenuData, currentMenuValue, menuOptionLabel, runCommand } from './commands.js';
-import { EavesdropStore, describeMessageForEavesdrop, renderEavesdropBlock } from './eavesdrop.js';
+import { DEFAULT_EAVESDROP_LIMIT, EavesdropStore, describeMessageForEavesdrop, renderEavesdropBlock } from './eavesdrop.js';
 import { extractMentionIds, renderMentions } from './mentions.js';
 import { InboundContent } from './inbound.js';
 import { renderGuidanceBlock, renderSourceBlock } from './context-enhancement.js';
@@ -362,7 +362,7 @@ export class FeishuBridge {
       senderName: senderName ?? null,
       at: Number(message.create_time) || Date.now(),
       text: described.text,
-    }, this.#config.eavesdrop.limit ?? 0);
+    }, this.#config.eavesdrop.limit || DEFAULT_EAVESDROP_LIMIT);
   }
 
   /** Keep the people seen in this chat/topic so mentions can be validated. */

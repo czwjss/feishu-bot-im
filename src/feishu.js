@@ -191,6 +191,35 @@ export class FeishuBot {
     return members;
   }
 
+  /** Read one page of chat/thread history; times are epoch milliseconds. */
+  async listMessages(chatId, {
+    threadId = null,
+    startTime = null,
+    endTime = null,
+    pageSize = 20,
+    pageToken = null,
+    order = 'newest',
+    withSenderName = true,
+  } = {}) {
+    if (!threadId && !chatId) throw new Error('缺少 chatId 或 threadId');
+    const params = {
+      container_id_type: threadId ? 'thread' : 'chat',
+      container_id: threadId || chatId,
+      page_size: Math.min(50, Math.max(1, Number(pageSize) || 20)),
+      sort_type: order === 'oldest' ? 'ByCreateTimeAsc' : 'ByCreateTimeDesc',
+      with_sender_name: withSenderName === true,
+    };
+    if (startTime) params.start_time = String(Math.floor(Number(startTime) / 1000));
+    if (endTime) params.end_time = String(Math.floor(Number(endTime) / 1000));
+    if (pageToken) params.page_token = pageToken;
+    const response = assertApiSuccess('Feishu message history', await this.#client.im.v1.message.list({ params }));
+    return {
+      items: Array.isArray(response?.data?.items) ? response.data.items : [],
+      hasMore: response?.data?.has_more === true,
+      pageToken: response?.data?.page_token ?? null,
+    };
+  }
+
   /** Read one message (used to recognise replies to the bot). */
   async getMessage(messageId) {
     if (!messageId) return null;

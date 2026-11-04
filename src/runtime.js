@@ -13,6 +13,7 @@ import { chatIdOfKey } from './message-text.js';
 import { FeishuBot, verifyCredentials } from './feishu.js';
 import { FeishuBridge } from './bridge.js';
 import { normalizeCardColor, noticeCard } from './cards.js';
+import { describeMessageForEavesdrop } from './eavesdrop.js';
 import { RegistrationManager } from './registration.js';
 import { syncSlashCommands } from './slash-commands.js';
 
@@ -20,6 +21,7 @@ import { syncSlashCommands } from './slash-commands.js';
 export const REQUIRED_SCOPES = Object.freeze([
   'im:message.p2p_msg:readonly',
   'im:message.group_at_msg:readonly',
+  'im:message.group_msg',
   'im:message:send_as_bot',
   'im:resource',
   'contact:user.base:readonly',
@@ -29,8 +31,6 @@ export const REQUIRED_SCOPES = Object.freeze([
 ]);
 export const REQUIRED_EVENTS = Object.freeze(['im.message.receive_v1']);
 
-/** Extra scope needed to receive messages the bot was not mentioned in. */
-export const EAVESDROP_SCOPES = Object.freeze(['im:message.group_msg']);
 
 const STATES = Object.freeze({
   IDLE: 'idle',
@@ -423,6 +423,64 @@ export class BotRuntime {
     return rows.sort((left, right) => String(left.title || left.chatId).localeCompare(String(right.title || right.chatId)));
   }
 
+  /** Read history messages from this chat or one thread. */
+  async listMessages({
+    chatId, threadId = null, startTime = null, endTime = null,
+    limit = 20, scanLimit = 200, pageToken = null, order = 'newest', query = '',
+  }) {
+    if (!this.#bot) throw new Error('机器人尚未连接');
+    if (!chatId) throw new Error('缺少 chatId');
+    await this.#assertInChat(chatId);
+    const startMs = startTime ? Date.parse(startTime) : null;
+    const endMs = endTime ? Date.parse(endTime) : null;
+    if (startTime && !Number.isFinite(startMs)) throw new Error('startTime 必须是 ISO 时间');
+    if (endTime && !Number.isFinite(endMs)) throw new Error('endTime 必须是 ISO 时间');
+    if (startMs && endMs && startMs >= endMs) throw new Error('startTime 必须早于 endTime');
+    const pageLimit = Math.min(50, Math.max(1, Math.floor(Number(limit) || 20)));
+    const scanCap = Math.min(500, Math.max(pageLimit, Math.floor(Number(scanLimit) || 200)));
+    const needle = String(query ?? '').normalize('NFKC').toLowerCase().trim();
+    const map = (item) => {
+      const at = Number(item?.create_time) || 0;
+      const sender = item?.sender ?? {};
+      return {
+        messageId: String(item?.message_id ?? ''),
+        at,
+        time: at ? new Date(at).toISOString() : '',
+        senderId: sender.id_type === 'open_id' ? String(sender.id ?? '') : String(sender.open_bot_id ?? sender.id ?? ''),
+        senderName: String(sender.sender_name ?? '').trim(),
+        type: String(item?.msg_type ?? ''),
+        text: describeMessageForEavesdrop(item).text.slice(0, 2000),
+        threadId: String(item?.thread_id ?? ''),
+      };
+    };
+    let token = pageToken || null;
+    let scanned = 0;
+    const matched = [];
+    let hasMore = false;
+    let hitLimit = false;
+    for (let page = 0; page < 10; page += 1) {
+      const result = await this.#bot.listMessages(chatId, {
+        threadId, startTime: startMs, endTime: endMs,
+        pageSize: needle ? Math.min(50, scanCap - scanned) : pageLimit,
+        pageToken: token, order,
+      });
+      for (const item of result.items) {
+        scanned += 1;
+        const row = map(item);
+        if (!needle || row.text.normalize('NFKC').toLowerCase().includes(needle)) matched.push(row);
+        if (matched.length >= pageLimit) { hitLimit = true; break; }
+      }
+      hasMore = result.hasMore;
+      token = result.pageToken;
+      if (!hasMore || !token || scanned >= scanCap || matched.length >= pageLimit) break;
+    }
+    return {
+      chatId, threadId: threadId || '', query: needle, messages: matched.slice(0, pageLimit),
+      scanned, matched: matched.length, hasMore: hasMore || matched.length > pageLimit,
+      pageToken: token || '',
+    };
+  }
+
   /** Fuzzy lookup in the cached group roster; refreshes only when asked. */
   async findPeople(chatId, query, { refresh = false } = {}) {
     if (!this.#bot) throw new Error('机器人尚未连接');
@@ -635,7 +693,7 @@ export class RuntimeManager {
         createOnly: false,
         appId: bot.appId,
         addons: {
-          scopes: { tenant: bot.eavesdrop?.enabled ? [...REQUIRED_SCOPES, ...EAVESDROP_SCOPES] : REQUIRED_SCOPES },
+          scopes: { tenant: REQUIRED_SCOPES },
           events: { items: { tenant: REQUIRED_EVENTS } },
         },
       };
@@ -781,6 +839,11 @@ export class RuntimeManager {
     }
     const result = await resolved.runtime.sendFileToChat(resolved.target, path, name, signal);
     return { ...result, kind: 'file' };
+  }
+
+  async listMessages({ sessionId, bot, chatId, ...options }) {
+    const resolved = this.#deliveryTarget({ sessionId, bot, chatId });
+    return resolved.runtime.listMessages({ chatId: resolved.target, ...options });
   }
 
   async listChats({ bot, refresh = false } = {}) {

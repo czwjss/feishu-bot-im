@@ -583,7 +583,8 @@ window.__ModuleLoader__.load({
           permissionPreset: source.permissionPreset ?? '',
           eavesdrop: {
             enabled: source.eavesdrop?.enabled !== false,
-            limit: Number.isFinite(Number(source.eavesdrop?.limit)) ? Number(source.eavesdrop.limit) : 0,
+            limit: Number.isFinite(Number(source.eavesdrop?.limit)) && Number(source.eavesdrop?.limit) > 0
+              ? Math.min(500, Number(source.eavesdrop.limit)) : 20,
           },
           mentions: {
             enabled: source.mentions?.enabled !== false,
@@ -900,13 +901,13 @@ window.__ModuleLoader__.load({
                 }),
                 t('允许', 'Allow'))),
             draft.eavesdrop.enabled
-              ? h(Field, { label: t('滚动保留条数', 'Rolling buffer size'), hint: t('0 表示不限制；超过后丢弃最旧的旁听消息。', '0 means unlimited; older messages are dropped past this limit.') },
+              ? h(Field, { label: t('滚动保留条数', 'Rolling buffer size'), hint: t('默认保留最近 20 条；超过后丢弃最旧的旁听消息，最多 500 条。', 'Keeps the latest 20 messages by default; older messages are dropped past this limit, up to 500.') },
                 h('input', {
-                  type: 'number', min: 0, style: S.input, value: draft.eavesdrop.limit,
+                  type: 'number', min: 1, max: 500, style: S.input, value: draft.eavesdrop.limit,
                   onChange: (event) => set({
                     eavesdrop: {
                       ...draft.eavesdrop,
-                      limit: Math.max(0, Number.parseInt(event.target.value, 10) || 0),
+                      limit: Math.min(500, Math.max(1, Number.parseInt(event.target.value, 10) || 20)),
                     },
                   }),
                 }))

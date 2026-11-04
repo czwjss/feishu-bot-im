@@ -39,6 +39,17 @@ class FakeBot {
     ];
   }
   async isInChat(chatId) { return !this.notInChat?.has(chatId); }
+  async listMessages(chatId) {
+    calls.push({ kind: 'history', chatId });
+    return {
+      items: [
+        { message_id: 'om_1', create_time: String(Date.UTC(2026, 10, 4, 10, 0, 0)), msg_type: 'text', content: JSON.stringify({ text: '今晚上线' }), sender: { id: 'ou_chen', id_type: 'open_id', sender_name: '陈志文' } },
+        { message_id: 'om_2', create_time: String(Date.UTC(2026, 10, 4, 10, 1, 0)), msg_type: 'text', content: JSON.stringify({ text: '无关消息' }), sender: { id: 'ou_other', id_type: 'open_id', sender_name: '其他人' } },
+      ],
+      hasMore: false,
+      pageToken: null,
+    };
+  }
   async getChatMembers(chatId) {
     calls.push({ kind: 'members', chatId });
     return [
@@ -120,6 +131,17 @@ assert.equal(calls.at(-1).kind, 'file-msg');
   const topicSent = await manager.send({ sessionId: 'sess-3', path: file });
   assert.equal(topicSent.chatId, 'oc_3', 'topic binding resolves to the chat id');
   assert.equal(calls.at(-1).chatId, 'oc_3');
+}
+
+// 8b) 历史消息：本地关键词过滤
+{
+  const history = await manager.listMessages({ sessionId: 'sess-1', query: '上线', limit: 5, scanLimit: 10 });
+  assert.equal(history.chatId, 'oc_1');
+  assert.equal(history.scanned, 2);
+  assert.equal(history.matched, 1);
+  assert.equal(history.messages[0].messageId, 'om_1');
+  assert.equal(history.messages[0].senderName, '陈志文');
+  assert.equal(history.messages[0].text, '今晚上线');
 }
 
 // 9) 任意会话投递：按机器人别名指定（Web 定时任务场景）
@@ -205,4 +227,4 @@ assert.equal(await exists(join(dir, 'inbox', first.id)), false, 'inbox removed')
 assert.equal(await exists(join(dir, `state-${second.id}.json`)), true, 'other bot untouched');
 
 await rm(dir, { recursive: true, force: true });
-console.log('runtime (multi-bot): 21 scenarios passed');
+console.log('runtime (multi-bot): 22 scenarios passed');

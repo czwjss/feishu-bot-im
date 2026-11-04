@@ -1,4 +1,5 @@
 import { normalizeCardColor } from './cards.js';
+import { formatEavesdropTime } from './eavesdrop.js';
 
 /**
  * Model-facing Feishu tools.
@@ -85,6 +86,121 @@ export function createSendTool({ send }) {
         path: path || undefined,
         name: typeof args?.name === 'string' ? args.name : undefined,
         signal: context?.signal,
+      });
+    },
+  });
+}
+
+
+export const MESSAGES_TOOL_NAME = 'im_feishu_messages';
+
+export function createMessagesTool({ list }) {
+  return Object.freeze({
+    name: MESSAGES_TOOL_NAME,
+    description: '读取飞书群历史消息，支持时间范围、分页和本次拉取范围内的本地关键词筛选；不是飞书全文搜索。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        bot: {
+          type: 'string',
+          description: '机器人别名、名称或 id；多机器人且当前会话未绑定时需要。',
+        },
+        chatId: {
+          type: 'string',
+          description: '群 chat_id（oc_…）；省略时使用当前会话绑定的群。',
+        },
+        threadId: {
+          type: 'string',
+          description: '话题 thread_id；指定后读取该话题回复，仍需要 chatId 做群校验。',
+        },
+        startTime: {
+          type: 'string',
+          description: '开始时间，ISO 8601，例如 2026-11-05T00:00:00+08:00。',
+        },
+        endTime: {
+          type: 'string',
+          description: '结束时间，ISO 8601，例如 2026-11-06T00:00:00+08:00。',
+        },
+        limit: {
+          type: 'number',
+          description: '返回条数，1-50，默认 20。',
+        },
+        scanLimit: {
+          type: 'number',
+          description: '有 query 时最多扫描多少条，默认 200，最大 500。',
+        },
+        pageToken: {
+          type: 'string',
+          description: '上一页返回的 pageToken，用于继续翻页。',
+        },
+        order: {
+          type: 'string',
+          description: 'newest（默认）或 oldest。',
+        },
+        query: {
+          type: 'string',
+          description: '可选关键词；只在本次拉取范围内做本地包含匹配。',
+        },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          chatId: { type: 'string' },
+          threadId: { type: 'string' },
+          query: { type: 'string' },
+          scanned: { type: 'number' },
+          matched: { type: 'number' },
+          hasMore: { type: 'boolean' },
+          pageToken: { type: 'string' },
+          messages: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                messageId: { type: 'string' },
+                time: { type: 'string' },
+                senderId: { type: 'string' },
+                senderName: { type: 'string' },
+                type: { type: 'string' },
+                text: { type: 'string' },
+                threadId: { type: 'string' },
+              },
+              required: ['messageId', 'time', 'senderId', 'senderName', 'type', 'text', 'threadId'],
+            },
+          },
+        },
+        required: ['chatId', 'threadId', 'query', 'scanned', 'matched', 'hasMore', 'pageToken', 'messages'],
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: [
+          `匹配 ${value.matched} 条，扫描 ${value.scanned} 条${value.query ? `（关键词：${value.query}）` : ''}${value.hasMore ? '，还有更多' : ''}`,
+          ...value.messages.slice(0, 20).map((row) => {
+            const when = row.time ? formatEavesdropTime(Date.parse(row.time)) : '-';
+            const text = String(row.text ?? '').replace(/\s+/g, ' ').slice(0, 300);
+            return `${when} ${row.senderName || row.senderId || '未知'}：${text}`;
+          }),
+        ].join('\n'),
+      }],
+    },
+    async execute(args, context) {
+      return list({
+        sessionId: context?.agent?.session?.id,
+        bot: args?.bot,
+        chatId: args?.chatId,
+        threadId: args?.threadId,
+        startTime: args?.startTime,
+        endTime: args?.endTime,
+        limit: args?.limit,
+        scanLimit: args?.scanLimit,
+        pageToken: args?.pageToken,
+        order: args?.order,
+        query: args?.query,
       });
     },
   });

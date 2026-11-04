@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   CHATS_TOOL_NAME,
   createChatsTool,
+  createMessagesTool,
+  MESSAGES_TOOL_NAME,
   createPeopleTool,
   createSendTool,
   PEOPLE_TOOL_NAME,
@@ -51,6 +53,36 @@ import {
   assert.equal(calls.at(-1).color, 'grey');
 }
 
+// 历史消息工具
+{
+  const calls = [];
+  const tool = createMessagesTool({
+    list: async (input) => {
+      calls.push(input);
+      return {
+        chatId: 'oc_daily', threadId: '', query: '上线', scanned: 80, matched: 1,
+        hasMore: true, pageToken: 'pt_2',
+        messages: [{
+          messageId: 'om_1', time: '2026-11-04T10:00:00.000Z', senderId: 'ou_chen',
+          senderName: '陈志文', type: 'text', text: '今晚上线', threadId: '',
+        }],
+      };
+    },
+  });
+  assert.equal(tool.name, MESSAGES_TOOL_NAME);
+  const result = await tool.execute(
+    { chatId: 'oc_daily', query: '上线', limit: 10, scanLimit: 80, order: 'newest' },
+    { agent: { session: { id: 'sess-1' } } },
+  );
+  assert.equal(calls[0].sessionId, 'sess-1');
+  assert.equal(calls[0].query, '上线');
+  assert.equal(calls[0].scanLimit, 80);
+  assert.equal(result.matched, 1);
+  assert.match(tool.output.render({}, result)[0].text, /匹配 1 条，扫描 80 条/);
+  assert.match(tool.output.render({}, result)[0].text, /陈志文：今晚上线/);
+  assert.match(tool.output.render({}, result)[0].text, /还有更多/);
+}
+
 // 群发现工具
 {
   const list = [];
@@ -97,4 +129,4 @@ import {
   assert.match(people.output.render({}, { chatId: 'oc_daily', people: [] })[0].text, /没有找到/);
 }
 
-console.log('tool: 33 assertions passed');
+console.log('tool: 38 assertions passed');

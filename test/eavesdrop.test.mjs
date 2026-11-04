@@ -8,10 +8,10 @@ import {
   formatEavesdropTime,
 } from '../src/eavesdrop.js';
 
-// 1) 默认开启、不限条数；只有显式 false 才关闭
-assert.deepEqual(normalizeEavesdropConfig(undefined), { enabled: true, limit: 0 });
-assert.deepEqual(normalizeEavesdropConfig({ enabled: false }), { enabled: false, limit: 0 });
-assert.deepEqual(normalizeEavesdropConfig({ enabled: true, limit: -5 }), { enabled: true, limit: 0 });
+// 1) 默认开启、保留最近 20 条；只有显式 false 才关闭
+assert.deepEqual(normalizeEavesdropConfig(undefined), { enabled: true, limit: 20 });
+assert.deepEqual(normalizeEavesdropConfig({ enabled: false }), { enabled: false, limit: 20 });
+assert.deepEqual(normalizeEavesdropConfig({ enabled: true, limit: -5 }), { enabled: true, limit: 20 });
 assert.deepEqual(normalizeEavesdropConfig({ enabled: true, limit: '12' }), { enabled: true, limit: 12 });
 
 // 2) 文本消息：@ 占位符替换成事件里的名字
@@ -46,7 +46,7 @@ assert.equal(describeMessageForEavesdrop({ message_type: 'audio', content: '{}' 
 assert.equal(describeMessageForEavesdrop({ message_type: 'media', content: '{}' }).text, '[视频]');
 assert.equal(describeMessageForEavesdrop({ message_type: 'sticker', content: '{}' }).text, '[表情]');
 
-// 5) 滚动缓冲：0 = 不限制，N = 保留最新 N 条
+// 5) 滚动缓冲：0 = 不限制（底层），N = 保留最新 N 条
 const store = new EavesdropStore();
 for (let index = 1; index <= 3; index += 1) store.record('chat:oc_1', { text: `m${index}` }, 0);
 assert.equal(store.size('chat:oc_1'), 3);
