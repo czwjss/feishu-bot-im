@@ -417,7 +417,7 @@ export class FeishuBridge {
   }
 
   /** Guidance stored in the plugin's systemPrompt.context. */
-  #promptContext(chatType) {
+  #guidanceContext(chatType) {
     return renderGuidanceBlock(this.#contextScope(chatType)) ?? '';
   }
 
@@ -466,7 +466,6 @@ export class FeishuBridge {
         workspace: workspace || null,
         preset: preset ?? null,
         model: override.model ?? this.#config.model ?? null,
-        origin: 'feishu',
       });
       const model = override.model ?? this.#config.model;
       if (model) {
@@ -514,7 +513,7 @@ export class FeishuBridge {
     }
     // All injected context lives in the plugin's systemPrompt.context section;
     // the user's own message keeps only what they actually sent.
-    const injected = [this.#promptContext(chatType), sourceBlock, eavesdropBlock, syncBlock]
+    const injected = [this.#guidanceContext(chatType), sourceBlock, eavesdropBlock, syncBlock]
       .filter(Boolean)
       .join('\n\n');
 
@@ -628,7 +627,7 @@ export class FeishuBridge {
       ? { workspaceId, agentPreset: preset }
       : { cwd: workspace, agentPreset: preset });
     await this.#state.setSessionMeta?.(sessionId, {
-      workspace: workspace || null, preset: preset ?? null, model, origin: 'feishu',
+      workspace: workspace || null, preset: preset ?? null, model,
     });
     if (model) await this.#harness.selectModel(sessionId, model).catch(() => undefined);
     await this.#applyPermission(sessionId, chatId);
@@ -638,7 +637,7 @@ export class FeishuBridge {
     });
     await this.#state.bindSession(`topic:${chatId}:${topic.topicId}`, sessionId);
     const topicKey = `topic:${chatId}:${topic.topicId}`;
-    this.#onContext(sessionId, this.#promptContext('group'));
+    this.#onContext(sessionId, this.#guidanceContext('group'));
     await this.#promptFeishu(sessionId, [{ type: 'text', text: body || cleanTitle }], { mode: 'queue', chatKey: topicKey, chatId })
       .catch((error) => this.#log('warn', 'topic prompt failed', error));
     return topic;

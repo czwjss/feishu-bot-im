@@ -757,15 +757,20 @@ export class RuntimeManager {
     throw new Error('有多个机器人，请用 bot 参数指定（别名或机器人名）');
   }
 
-  async deliver({ sessionId, bot, target, text }) {
+  /** Resolve the runtime and an explicit-or-bound chat target. */
+  #deliveryTarget({ sessionId, bot, chatId, label = 'chatId' }) {
     const runtime = this.#runtimeForDelivery({ sessionId, bot });
-    const explicit = typeof target === 'string' ? target.trim() : '';
     const bound = sessionId ? chatIdOfKey(runtime.chatKeyForSession(sessionId)) : null;
-    const route = explicit || bound;
-    if (!route) {
-      throw new Error('没有 target，且当前 Session 没有绑定飞书聊天；请先用 im_feishu_chats 查询 chat id');
+    const target = String(chatId ?? '').trim() || bound;
+    if (!target) {
+      throw new Error(`没有 ${label}，且当前 Session 没有绑定飞书聊天；请先用 im_feishu_chats 查询`);
     }
-    return runtime.deliver(route, text);
+    return { runtime, target };
+  }
+
+  async deliver({ sessionId, bot, target, text }) {
+    const resolved = this.#deliveryTarget({ sessionId, bot, chatId: target, label: 'target' });
+    return resolved.runtime.deliver(resolved.target, text);
   }
 
   async listChats({ bot, refresh = false } = {}) {
@@ -779,23 +784,13 @@ export class RuntimeManager {
   }
 
   async armReply({ sessionId, bot, chatId }) {
-    const runtime = this.#runtimeForDelivery({ sessionId, bot });
-    const bound = sessionId ? chatIdOfKey(runtime.chatKeyForSession(sessionId)) : null;
-    const target = String(chatId ?? '').trim() || bound;
-    if (!target) {
-      throw new Error('没有 chatId，且当前 Session 没有绑定飞书聊天；请先用 im_feishu_chats 查询');
-    }
-    return runtime.armFeishuReply(sessionId, target);
+    const resolved = this.#deliveryTarget({ sessionId, bot, chatId });
+    return resolved.runtime.armFeishuReply(sessionId, resolved.target);
   }
 
   async findPeople({ sessionId, bot, chatId, query, refresh = false }) {
-    const runtime = this.#runtimeForDelivery({ sessionId, bot });
-    const bound = sessionId ? chatIdOfKey(runtime.chatKeyForSession(sessionId)) : null;
-    const target = String(chatId ?? '').trim() || bound;
-    if (!target) {
-      throw new Error('没有 chatId，且当前 Session 没有绑定飞书聊天；请先用 im_feishu_chats 查询');
-    }
-    return runtime.findPeople(target, query, { refresh: refresh === true });
+    const resolved = this.#deliveryTarget({ sessionId, bot, chatId });
+    return resolved.runtime.findPeople(resolved.target, query, { refresh: refresh === true });
   }
 
   async sendFileForSession(input) {

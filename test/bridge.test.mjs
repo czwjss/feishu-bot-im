@@ -595,7 +595,7 @@ function message(overrides = {}) {
 {
   const { harness, bridge } = makeBridge();
   await state.bindSession('chat:oc_inherit', 'sess-main');
-  await state.setSessionMeta('sess-main', { workspace: '/tmp/one', origin: 'feishu' });
+  await state.setSessionMeta('sess-main', { workspace: '/tmp/one' });
   await bridge.handleMessage(message({
     chat_id: 'oc_inherit', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
     content: JSON.stringify({ text: '/topic 继承测试\n正文内容' }),
@@ -611,7 +611,6 @@ function message(overrides = {}) {
 {
   const { harness, contextBySession, bridge } = makeBridge();
   await state.bindSession('chat:oc_sync', 'sess-main2');
-  await state.setSessionMeta('sess-main2', { origin: 'feishu' });
   await state.addSynced('oc_sync', { topicId: 7, title: '同步话题', summary: '结论要点', at: new Date().toISOString() });
   await bridge.handleMessage(message({ chat_id: 'oc_sync', content: JSON.stringify({ text: '总结一下' }) }));
   const context = contextBySession.get('sess-main2') ?? '';

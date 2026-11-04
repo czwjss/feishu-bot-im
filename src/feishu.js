@@ -13,7 +13,7 @@ import * as Lark from '@larksuiteoapi/node-sdk';
 import { DELIVERY_RETRY_MS, isRetryableDeliveryError, sleep } from './feishu-errors.js';
 
 const OPEN_ORIGIN = 'https://open.feishu.cn';
-const MEMBER_CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
+const CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
 
 function assertApiSuccess(operation, response) {
   if (response && typeof response === 'object' && typeof response.code === 'number' && response.code !== 0) {
@@ -124,7 +124,7 @@ export class FeishuBot {
   /** Groups the bot belongs to, cached for six hours. */
   async getChats({ refresh = false } = {}) {
     const cached = this.#chatCache.get('all');
-    if (!refresh && cached && Date.now() - cached.at < MEMBER_CACHE_TTL_MS) return cached.chats;
+    if (!refresh && cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.chats;
     const chats = [];
     const seen = new Set();
     let pageToken = '';
@@ -150,7 +150,7 @@ export class FeishuBot {
   async getChatMembers(chatId, { refresh = false } = {}) {
     if (!chatId) return [];
     const cached = this.#memberCache.get(chatId);
-    if (!refresh && cached && Date.now() - cached.at < MEMBER_CACHE_TTL_MS) return cached.members;
+    if (!refresh && cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.members;
     const members = [];
     const seen = new Set();
     let pageToken = '';

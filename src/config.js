@@ -460,12 +460,6 @@ export class StateStore {
     await this.#persist();
   }
 
-  /** Who created the Session: 'feishu' for ours, null when adopted. */
-  originOf(sessionId) {
-    if (typeof sessionId !== 'string') return null;
-    return (this.#value.meta ?? {})[sessionId]?.origin ?? null;
-  }
-
   get meta() {
     return { ...(this.#value.meta ?? {}) };
   }
