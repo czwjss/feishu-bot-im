@@ -157,7 +157,6 @@ export class FeishuBridge {
     const wantsMentions = this.#config.mentions?.enabled !== false;
     const wantsName = wantsMentions || this.#config.eavesdrop?.enabled === true;
     const senderName = wantsName && openId ? await this.#senderName(openId) : null;
-    const mentioned = new Map();
     if (wantsMentions) {
       this.#rememberParticipant(chatKey, openId, senderName);
       for (const mention of Array.isArray(message.mentions) ? message.mentions : []) {
@@ -165,8 +164,6 @@ export class FeishuBridge {
         if (!mentionId) continue;
         this.#rememberParticipant(chatKey, mentionId, mention.name);
         if (mentionId === this.#config.botOpenId) continue;
-        const name = String(mention?.name ?? '').replace(/[<>&\r\n]/g, '').trim();
-        mentioned.set(mentionId, name || mentionId);
       }
     }
     // 话题内只有 @机器人 才处理；话题外按 @ 或引用机器人处理
@@ -243,7 +240,6 @@ export class FeishuBridge {
       parts: promptParts,
       text: promptText,
       openId,
-      people: [...mentioned.entries()].map(([id, name]) => ({ id, name })),
     });
 
     // A bare mention (or an empty text body) carries no instruction. If the
@@ -381,6 +377,14 @@ export class FeishuBridge {
     people.set(openId, name || current || null);
   }
 
+  /** Mirror a Web turn to a Feishu chat through the normal card pipeline. */
+  async armFeishuReply(sessionId, chatId) {
+    if (typeof sessionId !== 'string' || !chatId) throw new Error('缺少 Session 或 chatId');
+    const bound = this.#state.keyForSession(sessionId);
+    const chatKey = bound && chatIdOfKey(bound) === chatId ? bound : `chat:${chatId}`;
+    return this.#turns.armFeishuReply(sessionId, { chatId, chatKey });
+  }
+
   /** Publish a roster learned through the people tool to this chat and its topics. */
   rememberPeople(chatId, people) {
     if (!chatId || !Array.isArray(people)) return;
@@ -412,21 +416,9 @@ export class FeishuBridge {
     });
   }
 
-  /** Fixed mention policy for the current turn. */
-  #mentionHint() {
-    return this.#config.mentions?.enabled !== false
-      ? '默认 at 规则（必须遵守）：涉及需要某人做决策、批准、确认、选择或答复时，一律用 at 提及该当事人；纯信息同步、状态汇报、闲聊、感谢等无需对方行动时不要 at。需要 at 时，先调用 im_feishu_people 按姓名模糊查询，拿到完整 open_id 后再直接输出 <at id=[open_id]></at>，并将 [open_id] 完整替换为该工具返回的真实 open_id。open_id 是飞书联系人的唯一标识，以 ou_ 开头；禁止截断，禁止保留 [open_id] 占位符；工具返回多个候选时先确认，不确定具体当事人时不要 at，不要猜 id。'
-      : '';
-  }
-
-  /** Guidance and mention policy stored in the plugin's systemPrompt.context. */
+  /** Guidance stored in the plugin's systemPrompt.context. */
   #promptContext(chatType) {
-    const guidance = renderGuidanceBlock(this.#contextScope(chatType)) ?? '';
-    const mention = this.#mentionHint();
-    const mentionBlock = chatType === 'group' && mention
-      ? `<feishu_bot_mention_policy>\n${mention}\n</feishu_bot_mention_policy>`
-      : '';
-    return [guidance, mentionBlock].filter(Boolean).join('\n\n');
+    return renderGuidanceBlock(this.#contextScope(chatType)) ?? '';
   }
 
   /** Resolve a bounded number of display names once, at injection time. */
@@ -449,7 +441,7 @@ export class FeishuBridge {
     return result;
   }
 
-  async #submitPrompt({ chatKey, chatId, chatType, createTime, messageId, parts, text, openId, people = [] }) {
+  async #submitPrompt({ chatKey, chatId, chatType, createTime, messageId, parts, text, openId }) {
     let sessionId = this.#state.sessionFor(chatKey);
     const create = async () => {
       const override = this.#state.overrideFor?.(chatKey) ?? {};
@@ -520,16 +512,9 @@ export class FeishuBridge {
         syncBlock = ['<feishu_bot_topic_sync>', ...lines, '</feishu_bot_topic_sync>'].join('\n');
       }
     }
-    // People mentioned in this message: gives the model their open_ids even
-    // though the mention placeholders are stripped from the user text.
-    let peopleBlock = null;
-    if (this.#config.mentions?.enabled !== false && people.length > 0) {
-      const lines = people.map((person) => person.name || person.id);
-      peopleBlock = ['<feishu_bot_people>', `本条消息被 at 的人：${lines.join('、')}`, '</feishu_bot_people>'].join('\n');
-    }
     // All injected context lives in the plugin's systemPrompt.context section;
     // the user's own message keeps only what they actually sent.
-    const injected = [this.#promptContext(chatType), sourceBlock, eavesdropBlock, syncBlock, peopleBlock]
+    const injected = [this.#promptContext(chatType), sourceBlock, eavesdropBlock, syncBlock]
       .filter(Boolean)
       .join('\n\n');
 

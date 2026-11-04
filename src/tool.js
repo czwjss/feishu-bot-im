@@ -112,7 +112,7 @@ export const CHATS_TOOL_NAME = 'im_feishu_chats';
 export function createChatsTool({ list }) {
   return Object.freeze({
     name: CHATS_TOOL_NAME,
-    description: 'List Feishu chats bound to this plugin. Use the returned chatId with im_feishu_deliver.',
+    description: 'List Feishu chats the bot belongs to, marking bound Sessions. Use the returned chatId with im_feishu_deliver or im_feishu_reply.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -120,6 +120,10 @@ export function createChatsTool({ list }) {
         bot: {
           type: 'string',
           description: 'Bot alias, name, or id to filter by. Omit to list every configured bot.',
+        },
+        refresh: {
+          type: 'boolean',
+          description: 'Bypass the six-hour group-list cache and refetch from Feishu.',
         },
       },
     },
@@ -155,7 +159,7 @@ export function createChatsTool({ list }) {
       }],
     },
     async execute(args) {
-      const rows = await list({ bot: args?.bot });
+      const rows = await list({ bot: args?.bot, refresh: args?.refresh === true });
       return {
         chats: (Array.isArray(rows) ? rows : []).map((row) => ({
           bot: String(row.bot ?? ''),
@@ -237,6 +241,56 @@ export function createPeopleTool({ find }) {
         chatId: args?.chatId,
         query: args?.query,
         refresh: args?.refresh === true,
+      });
+    },
+  });
+}
+
+
+export const REPLY_TOOL_NAME = 'im_feishu_reply';
+
+/** Bind the current turn's answer to a Feishu chat and stream it as a card. */
+export function createReplyTool({ arm }) {
+  return Object.freeze({
+    name: REPLY_TOOL_NAME,
+    description: 'Mirror this turn\'s answer to a Feishu chat as a streaming card. '
+      + 'Call it before composing the final answer when the user asks to send or reply to Feishu. '
+      + 'For a standalone message instead, use im_feishu_deliver.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        bot: {
+          type: 'string',
+          description: 'Bot alias, name, or id. Set it when several bots are configured and the Session is not bound.',
+        },
+        chatId: {
+          type: 'string',
+          description: 'Any chat id (oc_…) the bot can send to. Omit to use the calling Session\'s bound chat.',
+        },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          chatId: { type: 'string' },
+          armed: { type: 'boolean' },
+          already: { type: 'boolean' },
+        },
+        required: ['chatId', 'armed', 'already'],
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `已把本轮回复绑定到 ${value.chatId}，请继续输出回答。`,
+      }],
+    },
+    async execute(args, context) {
+      return arm({
+        sessionId: context?.agent?.session?.id,
+        bot: args?.bot,
+        chatId: args?.chatId,
       });
     },
   });

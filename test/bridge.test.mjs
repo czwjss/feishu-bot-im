@@ -1209,8 +1209,7 @@ function message(overrides = {}) {
     chat_id: 'oc_adopt', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
   }));
   const adoptedContext = adopted.contextBySession.get('sess-existing') ?? '';
-  assert.match(adoptedContext, /feishu_bot_mention_policy/, 'adopted group context gets the mention policy');
-  assert.ok(!adoptedContext.includes('你是我的秘书'), 'group scope does not inherit direct guidance');
+  assert.equal(adoptedContext, '', 'group scope has no guidance and at rules live in the system prompt');
   assert.equal(adopted.harness.prompts.at(-1).content[0].text, '你好', 'user message stays clean');
   own.bridge.dispose();
   adopted.bridge.dispose();
@@ -1250,14 +1249,7 @@ function message(overrides = {}) {
   const content = harness.prompts.at(-1).content;
   assert.equal(content.length, 1, 'only the user text');
   assert.equal(content[0].text, '你好');
-  const context = contextBySession.get('sess-1') ?? '';
-  assert.match(context, /^<feishu_bot_mention_policy>/);
-  assert.match(context, /一律用 at 提及该当事人/);
-  assert.match(context, /纯信息同步/);
-  assert.match(context, /不确定具体当事人时不要 at/);
-  assert.match(context, /im_feishu_people/, 'the policy points at the people tool');
-  assert.ok(!context.includes('@'), 'prompt wording never uses the @ symbol');
-  assert.ok(!context.includes('<feishu_bot_source_guidance>'), 'group scope has no guidance');
+  assert.equal(contextBySession.get('sess-1') ?? '', '', 'at rules live in the static system section');
   bridge.dispose();
 }
 
@@ -1505,7 +1497,7 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
-// 28) @ 人：名单内保留，未知 id 与 @all 擦除；当前消息提到的人也会注入 open_id
+// 28) @ 人：名单内保留，未知 id 与 @all 擦除；people 块不再注入
 {
   const { bot, harness, contextBySession, bridge } = makeBridge({ mentions: { enabled: true, allowAll: false } });
   // Bind an explicit id: FakeHarness numbers Sessions from 1 in every test.
@@ -1516,8 +1508,7 @@ function message(overrides = {}) {
     content: JSON.stringify({ text: '请通知一下' }),
   }));
   const context = contextBySession.get('sess-mention') ?? '';
-  assert.match(context, /<feishu_bot_people>/, 'mentioned people are injected');
-  assert.match(context, /张三/, 'the mentioned person carries their name');
+  assert.ok(!context.includes('<feishu_bot_people>'), 'the people block is no longer injected');
   const sessionId = 'sess-mention';
   const requestId = harness.prompts.at(-1).options.requestId;
   await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/start', data: { turn: 1 } });
@@ -1561,5 +1552,30 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
+// 29) Web 显式绑定飞书群：复用同一条 CardKit 流式卡片管线
+{
+  const { bot, bridge } = makeBridge();
+  bot.cardKit = true;
+  await state.bindSession('chat:oc_web_bound', 'sess-web-card');
+  await bridge.onSessionEvent({ id: 'sess-web-card' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: 'sess-web-card' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user', rpcId: 'web-rpc-1' } },
+  });
+  assert.equal(bot.cardRefs.length, 0, 'ordinary Web turns stay silent');
+  const armed = await bridge.armFeishuReply('sess-web-card', 'oc_other_group');
+  assert.equal(armed.armed, true);
+  assert.equal(bot.cardEntities.length, 1, 'arming opens the streaming card');
+  assert.equal(bot.cardRefs[0].chatId, 'oc_other_group', 'any chat id is allowed, not only the bound chat');
+  await bridge.onSessionEvent({ id: 'sess-web-card' }, {
+    type: 'assistant/message',
+    data: { turn: 1, message: { content: [{ type: 'text', text: 'Web 发起的飞书卡片回答' }] } },
+  });
+  await bridge.onSessionEvent({ id: 'sess-web-card' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+  assert.equal(bot.cardUpdates.length, 1, 'the same final-card path is used');
+  assert.match(JSON.stringify(bot.cardUpdates[0].card), /Web 发起的飞书卡片回答/);
+  bridge.dispose();
+}
+
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 63 scenarios passed');
+console.log('bridge: 64 scenarios passed');

@@ -4,6 +4,7 @@ import { FeishuBot } from '../src/feishu.js';
 
 const calls = [];
 let memberCalls = 0;
+let chatCalls = 0;
 const client = {
   im: {
     v1: {
@@ -11,6 +12,12 @@ const client = {
         async create(request) {
           calls.push(request);
           return { code: 0, data: { message_id: `om_${calls.length}` } };
+        },
+      },
+      chat: {
+        async list() {
+          chatCalls += 1;
+          return { code: 0, data: { items: [{ chat_id: 'oc_group', name: '研发群' }], has_more: false } };
         },
       },
       chatMembers: {
@@ -55,4 +62,11 @@ assert.equal(memberCalls, 2, 'cache avoided another API call');
 await bot.getChatMembers('oc_group', { refresh: true });
 assert.equal(memberCalls, 4, 'refresh bypasses the cache');
 
-console.log('feishu text: 14 assertions passed');
+const groups = await bot.getChats();
+assert.deepEqual(groups, [{ chatId: 'oc_group', name: '研发群' }]);
+await bot.getChats();
+assert.equal(chatCalls, 1, 'group list is cached');
+await bot.getChats({ refresh: true });
+assert.equal(chatCalls, 2, 'group refresh bypasses the cache');
+
+console.log('feishu text: 18 assertions passed');

@@ -85,6 +85,7 @@ export class FeishuBot {
   #appSecret;
   #token = null;
   #memberCache = new Map();
+  #chatCache = new Map();
 
   constructor({ appId, appSecret, client }) {
     this.#appId = appId;
@@ -118,6 +119,31 @@ export class FeishuBot {
     } catch {
       return null;
     }
+  }
+
+  /** Groups the bot belongs to, cached for six hours. */
+  async getChats({ refresh = false } = {}) {
+    const cached = this.#chatCache.get('all');
+    if (!refresh && cached && Date.now() - cached.at < MEMBER_CACHE_TTL_MS) return cached.chats;
+    const chats = [];
+    const seen = new Set();
+    let pageToken = '';
+    for (let page = 0; page < 20; page += 1) {
+      const response = assertApiSuccess('Feishu chat list', await this.#client.im.v1.chat.list({
+        params: { page_size: 100, ...(pageToken ? { page_token: pageToken } : {}) },
+      }));
+      for (const item of response?.data?.items ?? []) {
+        const chatId = item?.chat_id;
+        if (!chatId || seen.has(chatId)) continue;
+        seen.add(chatId);
+        chats.push({ chatId, name: String(item?.name ?? '').trim() });
+      }
+      if (!response?.data?.has_more) break;
+      pageToken = response?.data?.page_token;
+      if (!pageToken) break;
+    }
+    this.#chatCache.set('all', { at: Date.now(), chats });
+    return chats;
   }
 
   /** Full chat roster (open_id + name), cached for six hours. */

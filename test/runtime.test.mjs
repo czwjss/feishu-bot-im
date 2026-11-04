@@ -30,6 +30,14 @@ class FakeBot {
   async sendFile(chatId, key, name) { calls.push({ kind: 'file-msg', chatId, name }); }
   async sendImage(chatId) { calls.push({ kind: 'image-msg', chatId }); }
   async getChatName(chatId) { return `群-${chatId}`; }
+  async getChats() {
+    if (String(this.options?.appId).includes('bbbb')) return [{ chatId: 'oc_2', name: '群-oc_2' }];
+    return [
+      { chatId: 'oc_1', name: '群-oc_1' },
+      { chatId: 'oc_3', name: '群-oc_3' },
+      { chatId: 'oc_unbound', name: '未绑定群' },
+    ];
+  }
   async getChatMembers(chatId) {
     calls.push({ kind: 'members', chatId });
     return [
@@ -151,6 +159,7 @@ assert.equal(calls.at(-1).kind, 'file-msg');
 {
   const all = await manager.listChats();
   assert.ok(all.some((chat) => chat.chatId === 'oc_1' && chat.title === '群-oc_1'));
+  assert.ok(all.some((chat) => chat.chatId === 'oc_unbound' && chat.sessionId === ''), 'groups without a binding are discoverable');
   const onlySecond = await manager.listChats({ bot: '二号机' });
   assert.deepEqual(onlySecond.map((chat) => chat.chatId), ['oc_2']);
   await assert.rejects(() => manager.listChats({ bot: '不存在' }), /没有这个机器人/);
@@ -166,6 +175,14 @@ assert.equal(calls.at(-1).kind, 'file-msg');
   assert.equal(explicit.chatId, 'oc_2');
   assert.equal(explicit.people[0].name, '王芳');
   await assert.rejects(() => manager.findPeople({ sessionId: 'sess-web', bot: '二号机', chatId: 'oc_2', query: '' }), /关键词/);
+}
+
+// 9e) Web 轮次绑定飞书回复：没有绑定群时必须显式给 chatId
+{
+  await assert.rejects(
+    () => manager.armReply({ sessionId: 'sess-web', bot: '二号机' }),
+    /没有 chatId/,
+  );
 }
 
 // 10) 移除机器人：只清它自己的密钥、配置与落盘数据
@@ -187,4 +204,4 @@ assert.equal(await exists(join(dir, 'inbox', first.id)), false, 'inbox removed')
 assert.equal(await exists(join(dir, `state-${second.id}.json`)), true, 'other bot untouched');
 
 await rm(dir, { recursive: true, force: true });
-console.log('runtime (multi-bot): 19 scenarios passed');
+console.log('runtime (multi-bot): 20 scenarios passed');

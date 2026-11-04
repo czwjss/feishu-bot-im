@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createReturnFileTool, TOOL_NAME, createDeliverTool, DELIVER_TOOL_NAME, createChatsTool, CHATS_TOOL_NAME, createPeopleTool, PEOPLE_TOOL_NAME } from '../src/tool.js';
+import { createReturnFileTool, TOOL_NAME, createDeliverTool, DELIVER_TOOL_NAME, createChatsTool, CHATS_TOOL_NAME, createPeopleTool, PEOPLE_TOOL_NAME, createReplyTool, REPLY_TOOL_NAME } from '../src/tool.js';
 
 const calls = [];
 const tool = createReturnFileTool({
@@ -46,8 +46,9 @@ await assert.rejects(() => tool.execute({ path: '  ' }, {}), /path/);
     },
   });
   assert.equal(chats.name, CHATS_TOOL_NAME);
-  const result = await chats.execute({ bot: 'bot_default' });
+  const result = await chats.execute({ bot: 'bot_default', refresh: true });
   assert.equal(list[0].bot, 'bot_default');
+  assert.equal(list[0].refresh, true);
   assert.equal(result.chats.length, 2);
   assert.equal(result.chats[0].chatId, 'oc_daily');
   assert.equal(result.chats[1].title, '');
@@ -78,4 +79,18 @@ await assert.rejects(() => tool.execute({ path: '  ' }, {}), /path/);
   assert.match(people.output.render({}, { chatId: 'oc_daily', people: [] })[0].text, /没有找到/);
 }
 
-console.log('tool: 20 assertions passed');
+// 本轮回复绑定飞书
+{
+  const calls = [];
+  const reply = createReplyTool({
+    arm: async (input) => { calls.push(input); return { chatId: 'oc_target', armed: true, already: false }; },
+  });
+  assert.equal(reply.name, REPLY_TOOL_NAME);
+  const result = await reply.execute({ chatId: 'oc_target' }, { agent: { session: { id: 'sess-web' } } });
+  assert.equal(calls[0].sessionId, 'sess-web');
+  assert.equal(calls[0].chatId, 'oc_target');
+  assert.equal(result.armed, true);
+  assert.match(reply.output.render({}, result)[0].text, /已把本轮回复绑定到 oc_target/);
+}
+
+console.log('tool: 24 assertions passed');

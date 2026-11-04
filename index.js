@@ -10,8 +10,9 @@ import { ConfigStore, StateStore, configPaths } from './src/config.js';
 import { HarnessAdapter } from './src/harness.js';
 import { RuntimeManager } from './src/runtime.js';
 import { createRpcHandler, installRpc } from './src/rpc.js';
-import { createChatsTool, createDeliverTool, createPeopleTool, createReturnFileTool } from './src/tool.js';
+import { createChatsTool, createDeliverTool, createPeopleTool, createReplyTool, createReturnFileTool } from './src/tool.js';
 import { rewriteInjectedContextMessages } from './src/injected-context.js';
+import { FEISHU_POLICY } from './src/policy.js';
 
 export const name = 'feishu-bot-im';
 export const inject = ['connection', 'credentials', 'typertGateway'];
@@ -65,6 +66,11 @@ export async function apply(ctx, config = {}) {
   }, { global: true }), 'feishu-bot: injected context split');
 
   ctx.inject(['systemPrompt'], (promptCtx) => {
+    promptCtx.systemPrompt.section({
+      name: 'im-feishu:policy',
+      order: 130,
+      text: FEISHU_POLICY,
+    });
     promptCtx.systemPrompt.context({
       name: 'im-feishu:context',
       order: 120,
@@ -109,6 +115,9 @@ export async function apply(ctx, config = {}) {
     }));
     toolCtx.tools.register(createPeopleTool({
       find: (input) => manager.findPeople(input),
+    }));
+    toolCtx.tools.register(createReplyTool({
+      arm: (input) => manager.armReply(input),
     }));
   });
 

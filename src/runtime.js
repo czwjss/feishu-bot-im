@@ -358,19 +358,15 @@ export class BotRuntime {
     return { targetId: route, sentAt: new Date().toISOString() };
   }
 
-  /** Bound chats, deduped by chat id, for tool discovery. */
-  async listChats() {
+  /** Groups the bot belongs to, with the bound Session when one exists. */
+  async listChats({ refresh = false } = {}) {
     const sessions = this.#stateStore.value.sessions ?? {};
-    const byChat = new Map();
+    const bound = new Map();
     for (const [key, sessionId] of Object.entries(sessions)) {
       if (!key.startsWith('chat:') && !key.startsWith('topic:')) continue;
       const chatId = chatIdOfKey(key);
       if (!chatId) continue;
-      let chat = byChat.get(chatId);
-      if (!chat) {
-        chat = { chatId, sessionId: '', kind: 'chat', topics: 0 };
-        byChat.set(chatId, chat);
-      }
+      const chat = bound.get(chatId) ?? { sessionId: '', kind: 'chat', topics: 0 };
       if (key.startsWith('chat:')) {
         chat.kind = 'chat';
         chat.sessionId = sessionId;
@@ -378,12 +374,19 @@ export class BotRuntime {
         chat.topics += 1;
         if (!chat.sessionId) chat.sessionId = sessionId;
       }
+      bound.set(chatId, chat);
     }
+    const apiChats = await Promise.resolve(this.#bot?.getChats?.({ refresh })).catch(() => []);
+    const known = new Map();
+    for (const item of apiChats) known.set(item.chatId, { title: item.name || '' });
+    for (const chatId of bound.keys()) if (!known.has(chatId)) known.set(chatId, { title: '' });
     const alias = this.config?.alias ?? this.config?.botName ?? this.botId;
     const rows = [];
-    for (const chat of byChat.values()) {
-      const title = await Promise.resolve(this.#bot?.getChatName?.(chat.chatId)).catch(() => null);
-      rows.push({ bot: alias, chatId: chat.chatId, title: title ?? '', sessionId: chat.sessionId, kind: chat.kind, topics: chat.topics });
+    for (const [chatId, item] of known) {
+      const chat = bound.get(chatId) ?? { sessionId: '', kind: 'chat', topics: 0 };
+      let title = item.title;
+      if (!title) title = await Promise.resolve(this.#bot?.getChatName?.(chatId)).catch(() => null) ?? '';
+      rows.push({ bot: alias, chatId, title, sessionId: chat.sessionId, kind: chat.kind, topics: chat.topics });
     }
     return rows.sort((left, right) => String(left.title || left.chatId).localeCompare(String(right.title || right.chatId)));
   }
@@ -405,6 +408,11 @@ export class BotRuntime {
     }
     ranked.sort((left, right) => left.rank - right.rank || String(left.name).localeCompare(String(right.name)));
     return { chatId, people: ranked.slice(0, 10).map(({ name, openId }) => ({ name, openId })) };
+  }
+
+  armFeishuReply(sessionId, chatId) {
+    if (!this.#bridge) throw new Error('机器人尚未连接');
+    return this.#bridge.armFeishuReply(sessionId, chatId);
   }
 
   async syncSlashCommands() {
@@ -760,14 +768,24 @@ export class RuntimeManager {
     return runtime.deliver(route, text);
   }
 
-  async listChats({ bot } = {}) {
+  async listChats({ bot, refresh = false } = {}) {
     const wanted = typeof bot === 'string' ? bot.trim() : '';
     const runtimes = wanted
       ? [this.#runtimeForDelivery({ bot: wanted })]
       : this.runtimes;
     const rows = [];
-    for (const runtime of runtimes) rows.push(...await runtime.listChats());
+    for (const runtime of runtimes) rows.push(...await runtime.listChats({ refresh: refresh === true }));
     return rows;
+  }
+
+  async armReply({ sessionId, bot, chatId }) {
+    const runtime = this.#runtimeForDelivery({ sessionId, bot });
+    const bound = sessionId ? chatIdOfKey(runtime.chatKeyForSession(sessionId)) : null;
+    const target = String(chatId ?? '').trim() || bound;
+    if (!target) {
+      throw new Error('没有 chatId，且当前 Session 没有绑定飞书聊天；请先用 im_feishu_chats 查询');
+    }
+    return runtime.armFeishuReply(sessionId, target);
   }
 
   async findPeople({ sessionId, bot, chatId, query, refresh = false }) {

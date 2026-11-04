@@ -21,7 +21,8 @@
 - **审批与提问**：飞书里直接批准/拒绝或点选答案；
 - **文件收发**：图片、文件可发给机器人；机器人也能回传文件；
 - **上下文注入**：每条消息带上群名、发言者等来源信息，用户气泡保持干净；
-- **主动投递**：先用 `im_feishu_chats` 查已绑定群和精确 chat id，再用 `im_feishu_deliver` 推送；省略 `target` 时发当前 Session 绑定的飞书群。
+- **主动投递**：先用 `im_feishu_chats` 查机器人所在群和精确 chat id，再用 `im_feishu_deliver` 推送；省略 `target` 时发当前 Session 绑定的飞书群。
+- **Web 回复飞书**：Web turn 中先调用 `im_feishu_reply` 绑定目标群（默认当前绑定群，也可指定任意群），本轮回答走与飞书相同的流式卡片。
 - **人物查询**：`im_feishu_people` 按姓名模糊查询群成员并返回精确 open_id；群成员缓存 6 小时，可主动 refresh。
 
 ## 快速开始
@@ -83,7 +84,7 @@ pnpm install    # 或 npm install
 
 - 默认开启；涉及需要某人决策、批准、确认或选择时用 at 提及当事人，纯信息同步和闲聊不要 at，不确定具体当事人也不要 at；
 - 模型先调用 `im_feishu_people` 按姓名查询，拿到完整 open_id 后输出 `<at id=[open_id]></at>`，并完整替换占位符；禁止截断或保留占位符；
-- 当前消息里被 at 的人、旁听记录里的发送者只注入**名字**，不再携带 open_id；需要 at 时由 `im_feishu_people` 查精确 ID；
+- 旁听记录里的发送者只注入**名字**，不再携带 open_id；当前消息也不再注入 people 块；需要 at 时由 `im_feishu_people` 查精确 ID；
 - 卡片里保持 `<at id=ou_xxx></at>`；文本降级时转成 `<at user_id="ou_xxx">名称</at>`；
 - 未知/非法 open_id、at 能力关闭、at 所有人被禁止时，标签会被**整段擦除**，不会误 at；
 - `at 所有人` 默认禁止，可在群聊设置里放开；提示词只说明“按需 at”，不写 at 所有人的禁令，是否允许由插件强制执行。
