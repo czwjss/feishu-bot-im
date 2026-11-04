@@ -5,7 +5,8 @@
  * knows which Feishu tool to use, while the turn context carries only data.
  */
 export const FEISHU_POLICY = [
-  '飞书工具规则（只在飞书相关操作时适用）：',
+  '飞书规则（只在飞书相关操作时适用）：',
+  '- 飞书回复保持简洁、分段清晰：避免大段连续文字，优先用短段落和列表。',
   '- 飞书消息发起的轮次会自动用流式卡片回复；不要为了重复回复本轮调用 im_feishu_send。',
   '- Web 发起的轮次默认只回复 Web；需要另发卡片或文件时用 im_feishu_send。Web 轮次不会生成飞书流式卡片。',
   '- im_feishu_send 只用于独立卡片或文件，不用于回复当前飞书消息。',

@@ -72,6 +72,19 @@ export function questionCard({ question, options, questionId, resolvedText }) {
 }
 
 /** Plain notice card used for command results and status messages. */
+/** Feishu Card 2.0 header templates. The tool recommends the first five. */
+const FEISHU_CARD_COLORS = new Set([
+  'blue', 'wathet', 'turquoise', 'green', 'yellow', 'orange', 'red',
+  'carmine', 'violet', 'purple', 'indigo', 'grey', 'default',
+]);
+
+/** Normalize a model-provided color; unknown values fall back to grey. */
+export function normalizeCardColor(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const color = value.trim().toLowerCase() === 'gray' ? 'grey' : value.trim().toLowerCase();
+  return FEISHU_CARD_COLORS.has(color) ? color : 'grey';
+}
+
 const NOTICE_TONES = Object.freeze({
   新会话: 'green',
   新会话已就绪: 'green',

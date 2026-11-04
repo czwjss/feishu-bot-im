@@ -21,12 +21,13 @@ import {
     },
   });
   assert.equal(tool.name, SEND_TOOL_NAME);
-  assert.deepEqual(Object.keys(tool.parameters.properties), ['bot', 'chatId', 'title', 'text', 'path', 'name']);
-  const text = await tool.execute({ title: '问候', text: '早上好' }, { agent: { session: { id: 'sess-1' } } });
+  assert.deepEqual(Object.keys(tool.parameters.properties), ['bot', 'chatId', 'title', 'color', 'text', 'path', 'name']);
+  const text = await tool.execute({ title: '问候', color: 'blue', text: '早上好' }, { agent: { session: { id: 'sess-1' } } });
   assert.equal(text.kind, 'card');
   assert.equal(calls[0].sessionId, 'sess-1');
   assert.equal(calls[0].text, '早上好');
   assert.equal(calls[0].title, '问候');
+  assert.equal(calls[0].color, 'blue');
   assert.equal(calls[0].path, undefined);
   assert.match(tool.output.render({}, text)[0].text, /已发送卡片到 oc_daily/);
 
@@ -38,7 +39,16 @@ import {
 
   await assert.rejects(() => tool.execute({}, {}), /text 和 path/);
   await assert.rejects(() => tool.execute({ text: 'x', path: '/tmp/a' }, {}), /text 和 path/);
-  await assert.rejects(() => tool.execute({ path: '/tmp/a', title: 'x' }, {}), /title 仅用于文本卡片/);
+  await assert.rejects(() => tool.execute({ path: '/tmp/a', title: 'x' }, {}), /title\/color 仅用于文本卡片/);
+  const noTitle = await tool.execute({ text: '无标题', color: 'blue' }, { agent: { session: { id: 'sess-1' } } });
+  assert.equal(noTitle.kind, 'card');
+  assert.equal(calls.at(-1).color, 'blue');
+  const supported = await tool.execute({ title: '紫色标题', color: 'purple', text: 'x' }, { agent: { session: { id: 'sess-1' } } });
+  assert.equal(supported.kind, 'card');
+  assert.equal(calls.at(-1).color, 'purple');
+  const fallback = await tool.execute({ title: '回退', color: 'pink', text: 'x' }, { agent: { session: { id: 'sess-1' } } });
+  assert.equal(fallback.kind, 'card');
+  assert.equal(calls.at(-1).color, 'grey');
 }
 
 // 群发现工具
@@ -87,4 +97,4 @@ import {
   assert.match(people.output.render({}, { chatId: 'oc_daily', people: [] })[0].text, /没有找到/);
 }
 
-console.log('tool: 24 assertions passed');
+console.log('tool: 33 assertions passed');

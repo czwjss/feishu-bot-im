@@ -1,3 +1,5 @@
+import { normalizeCardColor } from './cards.js';
+
 /**
  * Model-facing Feishu tools.
  *
@@ -27,6 +29,10 @@ export function createSendTool({ send }) {
         title: {
           type: 'string',
           description: '卡片标题；仅文本卡片使用，可选，最多 100 字。',
+        },
+        color: {
+          type: 'string',
+          description: '标题颜色；仅文本卡片使用，可选。常用 blue、green、orange、red、grey；其他飞书合法值按传入使用，未知值回退 grey。',
         },
         text: {
           type: 'string',
@@ -66,14 +72,16 @@ export function createSendTool({ send }) {
       const text = typeof args?.text === 'string' ? args.text.trim() : '';
       const path = typeof args?.path === 'string' ? args.path.trim() : '';
       const title = typeof args?.title === 'string' ? args.title.trim() : '';
+      const color = normalizeCardColor(args?.color);
       if ((text && path) || (!text && !path)) throw new Error('text 和 path 必须且只能提供一个');
-      if (path && title) throw new Error('title 仅用于文本卡片');
+      if (path && (title || color)) throw new Error('title/color 仅用于文本卡片');
       return send({
         sessionId: context?.agent?.session?.id,
         bot: args?.bot,
         chatId: args?.chatId,
         text: text || undefined,
         title: title || undefined,
+        color,
         path: path || undefined,
         name: typeof args?.name === 'string' ? args.name : undefined,
         signal: context?.signal,

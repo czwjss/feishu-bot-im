@@ -126,12 +126,13 @@ assert.equal(calls.at(-1).kind, 'file-msg');
 {
   await second.catch?.(() => undefined);
   const alias = '二号机';
-  const result = await manager.send({ sessionId: 'sess-web', bot: alias, chatId: 'oc_daily', title: '定时通知', text: '来自 Web 定时任务' });
+  const result = await manager.send({ sessionId: 'sess-web', bot: alias, chatId: 'oc_daily', title: '定时通知', color: 'blue', text: '来自 Web 定时任务' });
   assert.equal(result.chatId, 'oc_daily');
   assert.equal(result.kind, 'card');
   assert.equal(calls.at(-1).kind, 'card');
   assert.equal(calls.at(-1).chatId, 'oc_daily');
   assert.equal(calls.at(-1).card.header.title.content, '定时通知');
+  assert.equal(calls.at(-1).card.header.template, 'blue');
   await assert.rejects(
     () => manager.send({ sessionId: 'sess-web', bot: '不存在的机器人', chatId: 'oc_daily', text: 'x' }),
     /没有这个机器人/,

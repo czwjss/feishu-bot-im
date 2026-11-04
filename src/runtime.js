@@ -12,7 +12,7 @@ import { secretRefFor } from './config.js';
 import { chatIdOfKey } from './message-text.js';
 import { FeishuBot, verifyCredentials } from './feishu.js';
 import { FeishuBridge } from './bridge.js';
-import { noticeCard } from './cards.js';
+import { normalizeCardColor, noticeCard } from './cards.js';
 import { RegistrationManager } from './registration.js';
 import { syncSlashCommands } from './slash-commands.js';
 
@@ -354,14 +354,14 @@ export class BotRuntime {
   }
 
   /** Send a standalone interactive card with Markdown text. */
-  async sendCardText(chatId, text, title = null) {
+  async sendCardText(chatId, text, title = null, color = null) {
     if (!this.#bot) throw new Error('机器人尚未连接');
     if (!chatId) throw new Error('缺少飞书群 chatId');
     const body = typeof text === 'string' ? text.trim().slice(0, 4000) : '';
     if (!body) throw new Error('卡片正文不能为空');
     const heading = typeof title === 'string' ? title.trim().slice(0, 100) : '';
     await this.#assertInChat(chatId);
-    await this.#bot.sendCard(chatId, noticeCard(body, heading || null));
+    await this.#bot.sendCard(chatId, noticeCard(body, heading || null, normalizeCardColor(color)));
     return { sentAt: new Date().toISOString() };
   }
 
@@ -769,14 +769,14 @@ export class RuntimeManager {
     return { runtime, target };
   }
 
-  async send({ sessionId, bot, chatId, text, title, path, name, signal }) {
+  async send({ sessionId, bot, chatId, text, title, color, path, name, signal }) {
     const hasText = typeof text === 'string' && text.trim().length > 0;
     const hasFile = typeof path === 'string' && path.trim().length > 0;
     if (hasText === hasFile) throw new Error('text 和 path 必须且只能提供一个');
-    if (hasFile && title) throw new Error('title 仅用于文本卡片');
+    if (hasFile && (title || color)) throw new Error('title/color 仅用于文本卡片');
     const resolved = this.#deliveryTarget({ sessionId, bot, chatId });
     if (hasText) {
-      const result = await resolved.runtime.sendCardText(resolved.target, text, title);
+      const result = await resolved.runtime.sendCardText(resolved.target, text, title, color);
       return { kind: 'card', chatId: resolved.target, sentAt: result.sentAt };
     }
     const result = await resolved.runtime.sendFileToChat(resolved.target, path, name, signal);

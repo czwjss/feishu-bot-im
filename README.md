@@ -21,7 +21,7 @@
 - **审批与提问**：飞书里直接批准/拒绝或点选答案；
 - **文件收发**：图片、文件可发给机器人；机器人也能回传文件；
 - **上下文注入**：每条消息带上群名、发言者等来源信息，用户气泡保持干净；
-- **主动投递**：先用 `im_feishu_chats` 查机器人所在群和精确 chat id，再用 `im_feishu_send` 发送独立卡片或文件；文本卡片可通过 `title` 设置标题，省略 `chatId` 时发当前 Session 绑定的飞书群。
+- **主动投递**：先用 `im_feishu_chats` 查机器人所在群和精确 chat id，再用 `im_feishu_send` 发送独立卡片或文件；文本卡片可通过 `title` 设置标题、`color` 设置标题颜色，省略 `chatId` 时发当前 Session 绑定的飞书群。
 - **Web 发飞书**：Web turn 通过 `im_feishu_send` 发送独立卡片/文件；Web 轮次不生成飞书流式卡片。
 - **人物查询**：`im_feishu_people` 按姓名模糊查询群成员并返回精确 open_id；群成员缓存 6 小时，可主动 refresh。
 
