@@ -23,6 +23,7 @@ export const REQUIRED_SCOPES = Object.freeze([
   'im:resource',
   'contact:user.base:readonly',
   'im:chat:readonly',
+  'im:chat.members:read',
   'cardkit:card:write',
 ]);
 export const REQUIRED_EVENTS = Object.freeze(['im.message.receive_v1']);
@@ -355,6 +356,55 @@ export class BotRuntime {
     if (route.startsWith('ou_')) await this.#bot.sendTextToUser(route, body);
     else await this.#bot.sendText(route, body);
     return { targetId: route, sentAt: new Date().toISOString() };
+  }
+
+  /** Bound chats, deduped by chat id, for tool discovery. */
+  async listChats() {
+    const sessions = this.#stateStore.value.sessions ?? {};
+    const byChat = new Map();
+    for (const [key, sessionId] of Object.entries(sessions)) {
+      if (!key.startsWith('chat:') && !key.startsWith('topic:')) continue;
+      const chatId = chatIdOfKey(key);
+      if (!chatId) continue;
+      let chat = byChat.get(chatId);
+      if (!chat) {
+        chat = { chatId, sessionId: '', kind: 'chat', topics: 0 };
+        byChat.set(chatId, chat);
+      }
+      if (key.startsWith('chat:')) {
+        chat.kind = 'chat';
+        chat.sessionId = sessionId;
+      } else {
+        chat.topics += 1;
+        if (!chat.sessionId) chat.sessionId = sessionId;
+      }
+    }
+    const alias = this.config?.alias ?? this.config?.botName ?? this.botId;
+    const rows = [];
+    for (const chat of byChat.values()) {
+      const title = await Promise.resolve(this.#bot?.getChatName?.(chat.chatId)).catch(() => null);
+      rows.push({ bot: alias, chatId: chat.chatId, title: title ?? '', sessionId: chat.sessionId, kind: chat.kind, topics: chat.topics });
+    }
+    return rows.sort((left, right) => String(left.title || left.chatId).localeCompare(String(right.title || right.chatId)));
+  }
+
+  /** Fuzzy lookup in the cached group roster; refreshes only when asked. */
+  async findPeople(chatId, query, { refresh = false } = {}) {
+    if (!this.#bot) throw new Error('机器人尚未连接');
+    if (!chatId) throw new Error('缺少 chatId');
+    const needle = String(query ?? '').normalize('NFKC').toLowerCase().replace(/\s+/g, '');
+    if (!needle) throw new Error('查询关键词不能为空');
+    const members = await this.#bot.getChatMembers(chatId, { refresh });
+    this.#bridge?.rememberPeople?.(chatId, members);
+    const ranked = [];
+    for (const member of members) {
+      const name = String(member.name ?? '').normalize('NFKC').toLowerCase().replace(/\s+/g, '');
+      const openId = String(member.openId ?? '').toLowerCase();
+      const rank = name === needle || openId === needle ? 0 : name.startsWith(needle) ? 1 : name.includes(needle) || openId.includes(needle) ? 2 : -1;
+      if (rank >= 0) ranked.push({ rank, name: member.name || member.openId, openId: member.openId });
+    }
+    ranked.sort((left, right) => left.rank - right.rank || String(left.name).localeCompare(String(right.name)));
+    return { chatId, people: ranked.slice(0, 10).map(({ name, openId }) => ({ name, openId })) };
   }
 
   async syncSlashCommands() {
@@ -701,7 +751,33 @@ export class RuntimeManager {
 
   async deliver({ sessionId, bot, target, text }) {
     const runtime = this.#runtimeForDelivery({ sessionId, bot });
-    return runtime.deliver(target, text);
+    const explicit = typeof target === 'string' ? target.trim() : '';
+    const bound = sessionId ? chatIdOfKey(runtime.chatKeyForSession(sessionId)) : null;
+    const route = explicit || bound;
+    if (!route) {
+      throw new Error('没有 target，且当前 Session 没有绑定飞书聊天；请先用 im_feishu_chats 查询 chat id');
+    }
+    return runtime.deliver(route, text);
+  }
+
+  async listChats({ bot } = {}) {
+    const wanted = typeof bot === 'string' ? bot.trim() : '';
+    const runtimes = wanted
+      ? [this.#runtimeForDelivery({ bot: wanted })]
+      : this.runtimes;
+    const rows = [];
+    for (const runtime of runtimes) rows.push(...await runtime.listChats());
+    return rows;
+  }
+
+  async findPeople({ sessionId, bot, chatId, query, refresh = false }) {
+    const runtime = this.#runtimeForDelivery({ sessionId, bot });
+    const bound = sessionId ? chatIdOfKey(runtime.chatKeyForSession(sessionId)) : null;
+    const target = String(chatId ?? '').trim() || bound;
+    if (!target) {
+      throw new Error('没有 chatId，且当前 Session 没有绑定飞书聊天；请先用 im_feishu_chats 查询');
+    }
+    return runtime.findPeople(target, query, { refresh: refresh === true });
   }
 
   async sendFileForSession(input) {

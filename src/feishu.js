@@ -10,7 +10,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as Lark from '@larksuiteoapi/node-sdk';
 
+import { DELIVERY_RETRY_MS, isRetryableDeliveryError, sleep } from './feishu-errors.js';
+
 const OPEN_ORIGIN = 'https://open.feishu.cn';
+const MEMBER_CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
 
 function assertApiSuccess(operation, response) {
   if (response && typeof response === 'object' && typeof response.code === 'number' && response.code !== 0) {
@@ -81,6 +84,7 @@ export class FeishuBot {
   #appId;
   #appSecret;
   #token = null;
+  #memberCache = new Map();
 
   constructor({ appId, appSecret, client }) {
     this.#appId = appId;
@@ -116,6 +120,33 @@ export class FeishuBot {
     }
   }
 
+  /** Full chat roster (open_id + name), cached for six hours. */
+  async getChatMembers(chatId, { refresh = false } = {}) {
+    if (!chatId) return [];
+    const cached = this.#memberCache.get(chatId);
+    if (!refresh && cached && Date.now() - cached.at < MEMBER_CACHE_TTL_MS) return cached.members;
+    const members = [];
+    const seen = new Set();
+    let pageToken = '';
+    for (let page = 0; page < 20; page += 1) {
+      const response = assertApiSuccess('Feishu chat members', await this.#client.im.v1.chatMembers.get({
+        path: { chat_id: chatId },
+        params: { member_id_type: 'open_id', page_size: 100, ...(pageToken ? { page_token: pageToken } : {}) },
+      }));
+      for (const item of response?.data?.items ?? []) {
+        const openId = item?.member_id;
+        if (!openId || seen.has(openId)) continue;
+        seen.add(openId);
+        members.push({ openId, name: String(item?.name ?? '').trim() });
+      }
+      if (!response?.data?.has_more) break;
+      pageToken = response?.data?.page_token;
+      if (!pageToken) break;
+    }
+    this.#memberCache.set(chatId, { at: Date.now(), members });
+    return members;
+  }
+
   /** Read one message (used to recognise replies to the bot). */
   async getMessage(messageId) {
     if (!messageId) return null;
@@ -128,33 +159,38 @@ export class FeishuBot {
     }
   }
 
-  /** Send directly to one user by open_id (proactive delivery). */
-  async sendTextToUser(openId, text) {
+  /** Send one text body, retrying the same idempotency uuid on transient failures. */
+  async #sendText(receiveId, receiveIdType, text) {
     const parts = splitText(text);
     const sent = [];
     for (const part of parts) {
-      const response = assertApiSuccess('Feishu message send', await this.#client.im.v1.message.create({
-        params: { receive_id_type: 'open_id' },
-        data: { receive_id: openId, msg_type: 'text', content: JSON.stringify({ text: part }) },
-      }));
+      const uuid = randomUUID();
+      let response;
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          response = assertApiSuccess('Feishu message send', await this.#client.im.v1.message.create({
+            params: { receive_id_type: receiveIdType },
+            data: { receive_id: receiveId, msg_type: 'text', content: JSON.stringify({ text: part }), uuid },
+          }));
+          break;
+        } catch (error) {
+          if (attempt >= DELIVERY_RETRY_MS.length || !isRetryableDeliveryError(error)) throw error;
+          await sleep(DELIVERY_RETRY_MS[attempt]);
+        }
+      }
       const messageId = response?.data?.message_id;
       if (messageId) sent.push(messageId);
     }
     return sent.at(-1) ?? null;
   }
 
+  /** Send directly to one user by open_id (proactive delivery). */
+  async sendTextToUser(openId, text) {
+    return this.#sendText(openId, 'open_id', text);
+  }
+
   async sendText(chatId, text) {
-    const parts = splitText(text);
-    const sent = [];
-    for (const part of parts) {
-      const response = assertApiSuccess('Feishu message send', await this.#client.im.v1.message.create({
-        params: { receive_id_type: 'chat_id' },
-        data: { receive_id: chatId, msg_type: 'text', content: JSON.stringify({ text: part }) },
-      }));
-      const messageId = response?.data?.message_id;
-      if (messageId) sent.push(messageId);
-    }
-    return sent.at(-1) ?? null;
+    return this.#sendText(chatId, 'chat_id', text);
   }
 
   async replyTextInThread(messageId, text) {

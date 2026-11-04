@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 
 import {
   CARDKIT_RETRY_MS,
+  DELIVERY_RETRY_MS,
   RATE_LIMIT_RETRY_MS,
   feishuErrorCode,
   feishuHttpStatus,
   isRateLimitError,
   isRetryableCardKitError,
+  isRetryableDeliveryError,
 } from '../src/feishu-errors.js';
 
 // 1) Axios/Feishu nested array shapes are flattened to the first numeric code.
@@ -29,9 +31,17 @@ assert.equal(isRetryableCardKitError({ response: { status: 400, data: [{ code: 1
 assert.equal(isRetryableCardKitError(new Error('Feishu CardKit is unavailable')), false);
 assert.equal(isRetryableCardKitError({ response: { status: 403 } }), false);
 
+// 2b) Text delivery retries only transient failures and rate limits.
+assert.equal(isRetryableDeliveryError(rate), true);
+assert.equal(isRetryableDeliveryError({ code: 'ECONNRESET' }), true);
+assert.equal(isRetryableDeliveryError({ response: { status: 503 } }), true);
+assert.equal(isRetryableDeliveryError({ response: { status: 403 } }), false);
+assert.equal(isRetryableDeliveryError(new Error('bad target')), false);
+assert.deepEqual(DELIVERY_RETRY_MS, [1_000, 2_000]);
+
 // 3) The 230020 message fallback and retry budgets stay stable.
 assert.equal(isRateLimitError(new Error('Update the single messages too frequently')), true);
 assert.deepEqual(RATE_LIMIT_RETRY_MS, [1_000, 2_000]);
 assert.deepEqual(CARDKIT_RETRY_MS, [200, 500, 1_000]);
 
-console.log('feishu errors: 15 assertions passed');
+console.log('feishu errors: 21 assertions passed');

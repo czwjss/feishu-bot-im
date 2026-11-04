@@ -53,3 +53,13 @@ export function isRetryableCardKitError(error) {
   const code = feishuErrorCode(error);
   return code === RATE_LIMIT_CODE || code === 300120 || code === 99991400 || code === 99991401;
 }
+
+export const DELIVERY_RETRY_MS = Object.freeze([1_000, 2_000]);
+
+/** Transient text-message failures worth retrying with the same idempotency uuid. */
+export function isRetryableDeliveryError(error) {
+  const status = feishuHttpStatus(error);
+  if (status === 408 || status === 429 || status >= 500) return true;
+  if (TRANSIENT_NETWORK_CODES.has(String(error?.code ?? ''))) return true;
+  return isRateLimitError(error);
+}

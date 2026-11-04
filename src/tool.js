@@ -63,22 +63,24 @@ export const DELIVER_TOOL_NAME = 'im_feishu_deliver';
 export function createDeliverTool({ send }) {
   return Object.freeze({
     name: DELIVER_TOOL_NAME,
-    description: 'Push a plain-text message to one Feishu conversation (a group chat id starting with oc_ '
-      + 'or a user open_id starting with ou_). Use it for reminders and scheduled reports; '
-      + 'delivery is confirmed before this call returns.',
+    description: 'Push a plain-text message to one Feishu conversation. '
+      + 'Use im_feishu_chats to discover a chat id when the target is not the calling Session\'s bound chat. '
+      + 'Delivery is confirmed before this call returns.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         bot: {
           type: 'string',
-          description: 'Bot alias or name. Needed when this Session is not a Feishu conversation '
-            + '(for example a scheduled Web task); omit inside a Feishu chat.',
+          description: 'Bot alias, name, or id. Set it when several bots are configured and the Session is not bound.',
         },
-        target: { type: 'string', description: 'Delivery target name, id, or route (chat_id / open_id).' },
+        target: {
+          type: 'string',
+          description: 'Exact chat_id (oc_…) or user open_id (ou_…). Omit to use the calling Session\'s bound chat.',
+        },
         text: { type: 'string', description: 'Message text, at most 4000 characters.' },
       },
-      required: ['target', 'text'],
+      required: ['text'],
     },
     output: {
       schema: {
@@ -98,6 +100,143 @@ export function createDeliverTool({ send }) {
         bot: args.bot,
         target: args.target,
         text: args.text,
+      });
+    },
+  });
+}
+
+
+export const CHATS_TOOL_NAME = 'im_feishu_chats';
+
+/** Discover the chats already bound to this plugin so a Web agent can quote an exact id. */
+export function createChatsTool({ list }) {
+  return Object.freeze({
+    name: CHATS_TOOL_NAME,
+    description: 'List Feishu chats bound to this plugin. Use the returned chatId with im_feishu_deliver.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        bot: {
+          type: 'string',
+          description: 'Bot alias, name, or id to filter by. Omit to list every configured bot.',
+        },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          chats: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                bot: { type: 'string' },
+                chatId: { type: 'string' },
+                title: { type: 'string' },
+                sessionId: { type: 'string' },
+                kind: { type: 'string' },
+                topics: { type: 'number' },
+              },
+              required: ['bot', 'chatId', 'title', 'sessionId', 'kind', 'topics'],
+            },
+          },
+        },
+        required: ['chats'],
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.chats.length === 0
+          ? '当前没有绑定任何飞书群聊。'
+          : value.chats.slice(0, 20).map((chat) => `${chat.title || chat.chatId}（${chat.chatId}，${chat.bot}）`).join('\n'),
+      }],
+    },
+    async execute(args) {
+      const rows = await list({ bot: args?.bot });
+      return {
+        chats: (Array.isArray(rows) ? rows : []).map((row) => ({
+          bot: String(row.bot ?? ''),
+          chatId: String(row.chatId ?? ''),
+          title: String(row.title ?? ''),
+          sessionId: String(row.sessionId ?? ''),
+          kind: String(row.kind ?? 'chat'),
+          topics: Number(row.topics) || 0,
+        })),
+      };
+    },
+  });
+}
+
+
+export const PEOPLE_TOOL_NAME = 'im_feishu_people';
+
+/** Resolve a person's or group member's exact open_id without dumping the roster. */
+export function createPeopleTool({ find }) {
+  return Object.freeze({
+    name: PEOPLE_TOOL_NAME,
+    description: 'Fuzzy-search the members of one Feishu chat and return exact open_ids. '
+      + 'Use it before writing an <at> tag. Members are cached for six hours; set refresh=true to refetch.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        bot: {
+          type: 'string',
+          description: 'Bot alias, name, or id. Set it when several bots are configured and the Session is not bound.',
+        },
+        chatId: {
+          type: 'string',
+          description: 'Chat id (oc_…). Omit to use the calling Session\'s bound chat.',
+        },
+        query: {
+          type: 'string',
+          description: 'Name fragment or exact open_id, for example "志文". Case and spaces are ignored.',
+        },
+        refresh: {
+          type: 'boolean',
+          description: 'Bypass the six-hour cache and refetch the group roster.',
+        },
+      },
+      required: ['query'],
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          chatId: { type: 'string' },
+          people: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                name: { type: 'string' },
+                openId: { type: 'string' },
+              },
+              required: ['name', 'openId'],
+            },
+          },
+        },
+        required: ['chatId', 'people'],
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.people.length === 0
+          ? `没有找到匹配的群成员（${value.chatId}）。`
+          : value.people.map((person) => `${person.name}（${person.openId}）`).join('\n'),
+      }],
+    },
+    async execute(args, context) {
+      return find({
+        sessionId: context?.agent?.session?.id,
+        bot: args?.bot,
+        chatId: args?.chatId,
+        query: args?.query,
+        refresh: args?.refresh === true,
       });
     },
   });

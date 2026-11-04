@@ -80,11 +80,11 @@ const block = renderEavesdropBlock([
   { at, senderId: 'ou_x', text: '[图片]' },
 ]);
 assert.match(block, /^<feishu_bot_eavesdrop>/);
-assert.ok(block.includes(`[${stamp}] 张三(ou_zhang)：今晚发版吗`));
-assert.ok(block.includes(`[${stamp}] ou_x：[图片]`));
+assert.ok(block.includes(`[${stamp}] 张三：今晚发版吗`));
+assert.ok(block.includes(`[${stamp}] 未知用户：[图片]`));
 assert.ok(!block.includes('时区'), 'timezone lives in each timestamp');
 assert.ok(!block.includes('本地时间'), 'no timezone description in the header');
-assert.match(block, /需要 at 人时用 open_id/);
+assert.match(block, /需要 at 人时先用 im_feishu_people 查 open_id/);
 assert.match(block, /请让用户 at 你重发/);
 assert.ok(!block.includes(String(at)), 'raw epoch is not shown');
 assert.equal(renderEavesdropBlock([]), null);

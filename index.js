@@ -10,7 +10,7 @@ import { ConfigStore, StateStore, configPaths } from './src/config.js';
 import { HarnessAdapter } from './src/harness.js';
 import { RuntimeManager } from './src/runtime.js';
 import { createRpcHandler, installRpc } from './src/rpc.js';
-import { createDeliverTool, createReturnFileTool } from './src/tool.js';
+import { createChatsTool, createDeliverTool, createPeopleTool, createReturnFileTool } from './src/tool.js';
 import { rewriteInjectedContextMessages } from './src/injected-context.js';
 
 export const name = 'feishu-bot-im';
@@ -103,6 +103,12 @@ export async function apply(ctx, config = {}) {
     }));
     toolCtx.tools.register(createDeliverTool({
       send: (input) => manager.deliver(input),
+    }));
+    toolCtx.tools.register(createChatsTool({
+      list: (input) => manager.listChats(input),
+    }));
+    toolCtx.tools.register(createPeopleTool({
+      find: (input) => manager.findPeople(input),
     }));
   });
 

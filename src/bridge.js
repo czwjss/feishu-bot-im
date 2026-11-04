@@ -381,6 +381,18 @@ export class FeishuBridge {
     people.set(openId, name || current || null);
   }
 
+  /** Publish a roster learned through the people tool to this chat and its topics. */
+  rememberPeople(chatId, people) {
+    if (!chatId || !Array.isArray(people)) return;
+    const keys = new Set(
+      Object.keys(this.#state.value.sessions ?? {}).filter((key) => chatIdOfKey(key) === chatId),
+    );
+    keys.add(`chat:${chatId}`);
+    for (const key of keys) {
+      for (const person of people) this.#rememberParticipant(key, person?.openId, person?.name);
+    }
+  }
+
   /** open_id → name for everyone the model could legitimately @ here. */
   #mentionDirectory(chatKey) {
     const directory = new Map();
@@ -403,7 +415,7 @@ export class FeishuBridge {
   /** Fixed mention policy for the current turn. */
   #mentionHint() {
     return this.#config.mentions?.enabled !== false
-      ? '默认 at 规则（必须遵守）：涉及需要某人做决策、批准、确认、选择或答复时，一律用 at 提及该当事人；纯信息同步、状态汇报、闲聊、感谢等无需对方行动时不要 at。需要 at 时，直接输出 <at id=[open_id]></at>，并将 [open_id] 完整替换为上下文中该联系人的真实 open_id。open_id 是飞书联系人的唯一标识，以 ou_ 开头，只能取自本会话上下文中出现的人；禁止截断，禁止保留 [open_id] 占位符。不确定具体当事人时不要 at，不要猜 id。'
+      ? '默认 at 规则（必须遵守）：涉及需要某人做决策、批准、确认、选择或答复时，一律用 at 提及该当事人；纯信息同步、状态汇报、闲聊、感谢等无需对方行动时不要 at。需要 at 时，先调用 im_feishu_people 按姓名模糊查询，拿到完整 open_id 后再直接输出 <at id=[open_id]></at>，并将 [open_id] 完整替换为该工具返回的真实 open_id。open_id 是飞书联系人的唯一标识，以 ou_ 开头；禁止截断，禁止保留 [open_id] 占位符；工具返回多个候选时先确认，不确定具体当事人时不要 at，不要猜 id。'
       : '';
   }
 
@@ -512,7 +524,7 @@ export class FeishuBridge {
     // though the mention placeholders are stripped from the user text.
     let peopleBlock = null;
     if (this.#config.mentions?.enabled !== false && people.length > 0) {
-      const lines = people.map((person) => `${person.name || person.id}(${person.id})`);
+      const lines = people.map((person) => person.name || person.id);
       peopleBlock = ['<feishu_bot_people>', `本条消息被 at 的人：${lines.join('、')}`, '</feishu_bot_people>'].join('\n');
     }
     // All injected context lives in the plugin's systemPrompt.context section;

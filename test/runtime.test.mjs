@@ -29,6 +29,14 @@ class FakeBot {
   async uploadImage() { calls.push({ kind: 'image' }); return 'ik'; }
   async sendFile(chatId, key, name) { calls.push({ kind: 'file-msg', chatId, name }); }
   async sendImage(chatId) { calls.push({ kind: 'image-msg', chatId }); }
+  async getChatName(chatId) { return `群-${chatId}`; }
+  async getChatMembers(chatId) {
+    calls.push({ kind: 'members', chatId });
+    return [
+      { openId: 'ou_a3726c3a89e593796ffc489c6377fd5f', name: '陈志文' },
+      { openId: 'ou_wangfang', name: '王芳' },
+    ];
+  }
 }
 
 const states = new Map();
@@ -128,6 +136,38 @@ assert.equal(calls.at(-1).kind, 'file-msg');
   );
 }
 
+// 9b) 省略 target：发到当前 Session 绑定的群
+{
+  const bound = await manager.deliver({ sessionId: 'sess-1', text: '发到绑定群' });
+  assert.equal(bound.targetId, 'oc_1');
+  assert.equal(calls.at(-1).chatId, 'oc_1');
+  await assert.rejects(
+    () => manager.deliver({ sessionId: 'sess-web', bot: '二号机', text: '没有绑定' }),
+    /没有绑定飞书聊天/,
+  );
+}
+
+// 9c) 群发现：按 bot 过滤，返回 chat id 与标题
+{
+  const all = await manager.listChats();
+  assert.ok(all.some((chat) => chat.chatId === 'oc_1' && chat.title === '群-oc_1'));
+  const onlySecond = await manager.listChats({ bot: '二号机' });
+  assert.deepEqual(onlySecond.map((chat) => chat.chatId), ['oc_2']);
+  await assert.rejects(() => manager.listChats({ bot: '不存在' }), /没有这个机器人/);
+}
+
+// 9d) 人物模糊查询：志文 → 陈志文，并刷新群缓存
+{
+  const found = await manager.findPeople({ sessionId: 'sess-1', query: '志文' });
+  assert.equal(found.chatId, 'oc_1');
+  assert.deepEqual(found.people, [{ name: '陈志文', openId: 'ou_a3726c3a89e593796ffc489c6377fd5f' }]);
+  assert.equal(calls.at(-1).kind, 'members');
+  const explicit = await manager.findPeople({ sessionId: 'sess-web', bot: '二号机', chatId: 'oc_2', query: '王芳', refresh: true });
+  assert.equal(explicit.chatId, 'oc_2');
+  assert.equal(explicit.people[0].name, '王芳');
+  await assert.rejects(() => manager.findPeople({ sessionId: 'sess-web', bot: '二号机', chatId: 'oc_2', query: '' }), /关键词/);
+}
+
 // 10) 移除机器人：只清它自己的密钥、配置与落盘数据
 const exists = (path) => access(path).then(() => true, () => false);
 await writeFile(join(dir, `state-${first.id}.json`), '{}');
@@ -147,4 +187,4 @@ assert.equal(await exists(join(dir, 'inbox', first.id)), false, 'inbox removed')
 assert.equal(await exists(join(dir, `state-${second.id}.json`)), true, 'other bot untouched');
 
 await rm(dir, { recursive: true, force: true });
-console.log('runtime (multi-bot): 12 scenarios passed');
+console.log('runtime (multi-bot): 19 scenarios passed');

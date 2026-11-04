@@ -1255,6 +1255,7 @@ function message(overrides = {}) {
   assert.match(context, /一律用 at 提及该当事人/);
   assert.match(context, /纯信息同步/);
   assert.match(context, /不确定具体当事人时不要 at/);
+  assert.match(context, /im_feishu_people/, 'the policy points at the people tool');
   assert.ok(!context.includes('@'), 'prompt wording never uses the @ symbol');
   assert.ok(!context.includes('<feishu_bot_source_guidance>'), 'group scope has no guidance');
   bridge.dispose();
@@ -1403,7 +1404,7 @@ function message(overrides = {}) {
   const block = contextBySession.get('sess-1') ?? '';
   assert.match(block, /<feishu_bot_eavesdrop>/);
   assert.match(block, /今晚发版吗/);
-  assert.match(block, /测试用户\(ou_user\)：今晚发版吗/, 'the record carries both name and open_id');
+  assert.match(block, /测试用户：今晚发版吗/, 'the record carries the name');
   await bridge.handleMessage(message({
     chat_id: 'oc_listen', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
     content: JSON.stringify({ text: '继续' }),
@@ -1516,7 +1517,7 @@ function message(overrides = {}) {
   }));
   const context = contextBySession.get('sess-mention') ?? '';
   assert.match(context, /<feishu_bot_people>/, 'mentioned people are injected');
-  assert.match(context, /张三\(ou_zhang\)/, 'the mentioned person carries name and open_id');
+  assert.match(context, /张三/, 'the mentioned person carries their name');
   const sessionId = 'sess-mention';
   const requestId = harness.prompts.at(-1).options.requestId;
   await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/start', data: { turn: 1 } });
