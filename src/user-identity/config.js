@@ -97,10 +97,6 @@ export class UserIdentityConfigStore {
     this.#path = path;
   }
 
-  get path() {
-    return this.#path;
-  }
-
   get config() {
     return this.#config;
   }

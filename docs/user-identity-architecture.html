@@ -406,7 +406,7 @@
       <div class="eyebrow-line">Open issues</div>
       <h3 id="risk-title">上线前还需要收敛</h3>
       <ul>
-        <li>Host 与 Preset 同时刷新 token 存在竞争，refresh_token 是一次性轮换。</li>
+        <li>Host/Preset 的刷新竞争已用共享刷新锁和写入前比对收敛；真实 Device Flow 端到端仍未自动化。</li>
         <li>当前每个机器人卡片都能授权，但底层只保存一份用户身份，切换应用会覆盖旧授权。</li>
         <li>会话绑定 guard 尚未实现。</li>
         <li>Device Flow 需要一次真实端到端验证，现有测试都是 mock。</li>
@@ -415,8 +415,8 @@
   </div>
 
   <div class="status-strip" aria-label="当前实现指标">
-    <div class="stat"><strong>6</strong><span>用户身份测试套件</span></div>
-    <div class="stat"><strong>135+</strong><span>用户身份断言</span></div>
+    <div class="stat"><strong>8</strong><span>用户身份测试套件</span></div>
+    <div class="stat"><strong>184</strong><span>用户身份断言</span></div>
     <div class="stat"><strong>1</strong><span>npm 包，两个 Cordis 入口</span></div>
     <div class="stat"><strong>0</strong><span>redirect URI</span></div>
   </div>

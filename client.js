@@ -1214,6 +1214,7 @@ window.__ModuleLoader__.load({
         style: S.overlay,
         role: 'dialog',
         'aria-modal': true,
+        'aria-label': t('飞书分身', 'Feishu identity'),
         onClick: (event) => { if (event.target === event.currentTarget) requestClose(); },
       },
       h('div', { style: S.modal },

@@ -46,10 +46,6 @@ export class UserIdentityAuth {
     return this.#configStore.config;
   }
 
-  get tokenStore() {
-    return this.#tokenStore;
-  }
-
   /** 重新读取磁盘上的配置和 token；Host 设置页与预设工具共用文件。 */
   async reload() {
     await this.#configStore.load();
@@ -213,6 +209,7 @@ export class UserIdentityAuth {
       // 切换机器人应用时不能沿用旧应用的 refresh_token/scope/user。
       previous: sameApp ? previous : null,
       now: this.#now(),
+      preserveAuthorizedAt: false,
     }));
     this.#logger?.info?.(`[im-feishu] 用户身份已授权：${user.name || user.openId}`);
     return saved;

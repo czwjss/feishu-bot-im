@@ -51,11 +51,8 @@ async function createUserIdentity(ctx, paths, botConfigStore, logger) {
   return new UserIdentityManager({
     configStore,
     botConfigStore,
-    tokenStore,
-    credentials: ctx.credentials,
     auth,
     connect,
-    dataDir: paths.root,
     logger,
   });
 }

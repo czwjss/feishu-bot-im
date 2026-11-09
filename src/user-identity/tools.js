@@ -291,8 +291,7 @@ export function createSendTool({ auth, fetchImpl }) {
       const name = typeof args?.name === 'string' ? args.name.trim() : '';
       if (text && path) throw new Error('text 和 path 必须且只能提供一个');
       if (path && (title || color)) throw new Error('title/color 仅用于文本卡片');
-      const target = {
-        accessToken: undefined,
+      const recipient = {
         chatId: chatId || undefined,
         openId: openId || undefined,
         email: email || undefined,
@@ -301,7 +300,7 @@ export function createSendTool({ auth, fetchImpl }) {
       };
       if (path) {
         const sent = await withAccessToken(auth, (accessToken) => sendMediaMessage({
-          ...target,
+          ...recipient,
           accessToken,
           path,
           name: name || undefined,
@@ -316,7 +315,7 @@ export function createSendTool({ auth, fetchImpl }) {
         };
       }
       const sent = await withAccessToken(auth, (accessToken) => sendCardMessage({
-        ...target,
+        ...recipient,
         accessToken,
         text,
         title: title || undefined,

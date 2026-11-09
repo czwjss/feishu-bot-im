@@ -2,8 +2,7 @@
 
 > 可视化架构图：[user-identity-architecture.html](user-identity-architecture.html)
 
-> 对应本地未提交改动（基线：`v0.4.1` / `dfddda4`）。
-> 本文只描述现状和设计判断，不代表已发布。
+> 历史分析快照（基线：`v0.4.1` / `dfddda4`）。当前实现已经提交，scope/RPC/token 策略以 [user-identity.md](user-identity.md) 和 [feishu-scopes.md](feishu-scopes.md) 为准。
 
 ## 1. 本地变更快照
 
@@ -110,7 +109,6 @@ offline_access im:message im:message.send_as_user im:message:readonly
 
 ```text
 user.status
-user.config.set
 user.connect.begin
 user.connect.cancel
 user.disconnect

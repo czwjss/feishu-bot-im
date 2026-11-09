@@ -1,7 +1,7 @@
 /**
  * 以用户身份调飞书 OpenAPI 的最小封装。
  *
- * 只覆盖分身第一版需要的三个能力：用户信息、会话历史、发送文本消息。
+ * 覆盖用户信息、会话历史、卡片/图片/文件发送。
  * 所有请求都使用 user_access_token（`Authorization: Bearer …`）。
  */
 import { readFile, stat } from 'node:fs/promises';
@@ -357,33 +357,6 @@ function validateText(text) {
 }
 
 /**
- * 以授权用户身份发送文本消息（普通 text 消息）。
- */
-export async function sendTextMessage({
-  accessToken,
-  chatId,
-  openId,
-  email,
-  text,
-  fetchImpl,
-  timeoutMs,
-  signal,
-} = {}) {
-  const [receiveIdType, receiveId] = resolveReceiveTarget({ chatId, openId, email });
-  const value = validateText(text);
-  return postUserMessage({
-    accessToken,
-    receiveIdType,
-    receiveId,
-    msgType: 'text',
-    content: JSON.stringify({ text: value }),
-    fetchImpl,
-    timeoutMs,
-    signal,
-  });
-}
-
-/**
  * 以授权用户身份发送交互卡片。正文用 Markdown，可选标题和标题颜色。
  */
 export async function sendCardMessage({
@@ -419,7 +392,7 @@ export async function sendCardMessage({
 
 function safeFileName(value, fallback) {
   const name = typeof value === 'string' ? value.trim() : '';
-  return (name || fallback || 'file').slice(0, 120);
+  return basename(name || fallback || 'file').replace(/[\u0000-\u001f]/g, '').slice(0, 120) || 'file';
 }
 
 async function uploadUserMedia({

@@ -34,11 +34,8 @@ try {
   const manager = new UserIdentityManager({
     configStore,
     botConfigStore,
-    tokenStore: {},
-    credentials: null,
     auth,
     connect,
-    dataDir: dir,
   });
 
   await configStore.save({ scope: 'offline_access' });
@@ -74,11 +71,8 @@ try {
     const keepalive = new UserIdentityManager({
       configStore,
       botConfigStore,
-      tokenStore: {},
-      credentials: null,
       auth: keepaliveAuth,
       connect,
-      dataDir: dir,
     });
     keepalive.startKeepalive({ intervalMs: 5, accessBeforeMs: 60_000 });
     await new Promise((resolve) => setTimeout(resolve, 30));

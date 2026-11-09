@@ -223,7 +223,7 @@ export async function refreshUserAccessToken({
 }
 
 /** token 响应 → user-token.json 文档。 */
-export function tokenDocument({ token, appId, user, previous = null, now = Date.now() }) {
+export function tokenDocument({ token, appId, user, previous = null, now = Date.now(), preserveAuthorizedAt = true }) {
   const issuedAt = Number.isFinite(now) ? now : Date.now();
   return {
     version: 1,
@@ -236,6 +236,8 @@ export function tokenDocument({ token, appId, user, previous = null, now = Date.
       : previous?.refreshTokenExpiresAt ?? null,
     scope: token.scope || previous?.scope || '',
     user: user ?? previous?.user ?? null,
-    authorizedAt: previous?.authorizedAt ?? new Date(issuedAt).toISOString(),
+    authorizedAt: preserveAuthorizedAt
+      ? previous?.authorizedAt ?? new Date(issuedAt).toISOString()
+      : new Date(issuedAt).toISOString(),
   };
 }

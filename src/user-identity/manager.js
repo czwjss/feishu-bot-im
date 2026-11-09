@@ -3,47 +3,30 @@
  *
  * 复用机器人应用与 credentials；不注册任何模型工具，工具在 ./user-identity 子路径。
  */
-import { maskAppId } from './app.js';
 import { DEFAULT_USER_SCOPE } from './config.js';
 
 export class UserIdentityManager {
   #configStore;
   #botConfigStore;
-  #tokenStore;
-  #credentials;
   #auth;
   #connect;
-  #dataDir;
   #logger;
   #qrCodeDataUrl = null;
   #keepaliveTimer = null;
 
-  constructor({ configStore, botConfigStore, tokenStore, credentials, auth, connect, dataDir, logger = null }) {
+  constructor({ configStore, botConfigStore, auth, connect, logger = null }) {
     this.#configStore = configStore;
     this.#botConfigStore = botConfigStore;
-    this.#tokenStore = tokenStore;
-    this.#credentials = credentials;
     this.#auth = auth;
     this.#connect = connect;
-    this.#dataDir = dataDir;
     this.#logger = logger;
-  }
-
-  get auth() {
-    return this.#auth;
   }
 
   async status() {
     const auth = await this.#auth.status();
-    const bots = (this.#botConfigStore?.bots ?? []).map((bot) => ({
-      id: bot.id,
-      name: bot.botName ?? bot.alias ?? bot.id,
-      appIdMasked: maskAppId(bot.appId),
-    }));
     const connectStatus = this.#connect.status;
     return Object.freeze({
-      dataDir: this.#dataDir,
-      config: Object.freeze({ ...auth.config, bots }),
+      config: auth.config,
       authorization: auth.authorization,
       connect: Object.freeze({
         ...connectStatus,

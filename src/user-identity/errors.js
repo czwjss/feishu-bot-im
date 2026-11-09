@@ -64,12 +64,7 @@ const OAUTH_ERROR_MESSAGES = Object.freeze({
   20074: '应用后台没有开启“刷新 user_access_token”开关',
 });
 
-export const DEVICE_FLOW_ERROR_MESSAGES = Object.freeze({
-  authorization_pending: '等待用户在飞书里确认授权',
-  slow_down: '飞书要求降低轮询频率',
-  access_denied: '用户拒绝了授权',
-  expired_token: '授权码已过期，请重新发起',
-});
+
 
 export function describeOAuthCode(code) {
   return OAUTH_ERROR_MESSAGES[Number(code)] ?? null;
