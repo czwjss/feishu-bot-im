@@ -25,6 +25,7 @@
 - **Web 发飞书**：Web turn 通过 `im_feishu_send` 发送独立卡片/文件；Web 轮次不生成飞书流式卡片。
 - **人物查询**：`im_feishu_people` 按姓名模糊查询群成员并返回精确 open_id；群成员缓存 6 小时，可主动 refresh。
 - **历史查询**：`im_feishu_messages` 按群、话题和时间范围读取历史；可选本地关键词筛选，不是飞书全文搜索。
+- **用户身份（飞书分身）**：可选子插件 `./user-identity`，以你本人身份读群历史、按群或联系人发卡片消息；复用机器人应用，设备授权连接，不需要重定向 URL。
 
 ## 快速开始
 
@@ -52,6 +53,23 @@ pnpm install    # 或 npm install
 2. 用飞书扫码确认（或手动填写 App ID / Secret）；
 3. 扫码会自动申请所需权限（消息收发、资源上传、群信息读取等）；
 4. 在飞书私聊里发一条消息，或在群里 @机器人 开始。
+
+
+## 用户身份（飞书分身）
+
+除了机器人身份，插件还带一个**可选子插件**，让 Agent 以你本人身份操作飞书：
+
+```text
+@czwjss/feishu-bot-im/user-identity
+  复用某个机器人的 App ID / App Secret
+  设备授权（Device Flow）连接，不需要重定向 URL
+  feishu_user_me / feishu_user_messages / feishu_user_send
+```
+
+它不会被 Host 自动加载，只在挂了这一行的 Agent 预设里出现，所以普通群聊
+Agent 看不到这些工具。
+
+配置步骤、权限清单和错误码见 [docs/user-identity.md](docs/user-identity.md)。
 
 ## 常用命令
 

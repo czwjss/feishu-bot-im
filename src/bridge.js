@@ -1105,6 +1105,20 @@ export class FeishuBridge {
     return `chat:${chatId}`;
   }
 
+  /** Current model selection from the durable projection, with menu-map fallback. */
+  async #modelSelectionFor(sessionId) {
+    if (!sessionId) return null;
+    if (typeof this.#harness.sessionProjections !== 'function') return this.#sessionModels.get(sessionId) ?? null;
+    const projections = await this.#harness.sessionProjections(sessionId).catch(() => null);
+    const projected = projections?.modelSelection?.next ?? projections?.modelSelection?.lastUsed ?? null;
+    if (projected) {
+      this.#sessionModels.set(sessionId, projected);
+      if (this.#sessionModels.size > 500) this.#sessionModels.delete(this.#sessionModels.keys().next().value);
+      return projected;
+    }
+    return this.#sessionModels.get(sessionId) ?? null;
+  }
+
   async #handleMenuAction(action, event) {
     const chatId = event?.context?.open_chat_id ?? null;
     const messageId = event?.context?.open_message_id ?? null;
@@ -1296,8 +1310,16 @@ export class FeishuBridge {
       return { ok: true, detail: '下一条消息的新会话生效' };
     }
     if (pending.action === 'reasoning_pick') {
-      const current = sessionId ? this.#sessionModels.get(sessionId) : (this.#state.overrideFor?.(chatKey).model ?? null);
-      const selection = { ...(current ?? {}), reasoningEffort: pending.value };
+      const current = sessionId
+        ? (await this.#modelSelectionFor(sessionId))
+          ?? this.#state.overrideFor?.(chatKey).model
+          ?? this.#config.model
+          ?? null
+        : (this.#state.overrideFor?.(chatKey).model ?? this.#config.model ?? null);
+      if (!current?.provider || !current?.model) {
+        return { ok: false, toast: { type: 'warning', content: '先选择模型，再调整思考强度' } };
+      }
+      const selection = { ...current, reasoningEffort: pending.value };
       if (sessionId) {
         await this.#harness.selectModel(sessionId, selection).catch((error) => this.#log('warn', 'selectReasoning failed', error));
         this.#sessionModels.set(sessionId, selection);

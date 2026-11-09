@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>飞书分身 · 架构图</title>
+<style>
+  :root {
+    --ink: #101828;
+    --ink-soft: #344054;
+    --muted: #667085;
+    --line: #d0d5dd;
+    --paper: #ffffff;
+    --canvas: #f3f6fb;
+    --host: #5b45c7;
+    --host-soft: #f1edff;
+    --preset: #087a55;
+    --preset-soft: #e8f8f1;
+    --feishu: #1f5fbf;
+    --feishu-soft: #eaf2ff;
+    --entry: #9a5b0b;
+    --entry-soft: #fff6e8;
+    --danger: #b42318;
+    --danger-soft: #fff1f0;
+    --ok: #087a55;
+    --ok-soft: #e8f8f1;
+    --shadow: 0 12px 34px rgba(16, 24, 40, .08);
+    --radius: 18px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1100px 500px at 85% -10%, #dfe9ff 0, transparent 60%),
+      radial-gradient(900px 420px at 0% 10%, #e9e4ff 0, transparent 55%),
+      var(--canvas);
+    color: var(--ink);
+    font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 28px 0 56px; }
+
+  .hero {
+    position: relative;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    align-items: end;
+    padding: 34px 36px;
+    border-radius: 24px;
+    color: #fff;
+    background:
+      linear-gradient(120deg, rgba(255,255,255,.09), transparent 45%),
+      linear-gradient(135deg, #151b2c 0%, #232a44 55%, #2e2354 100%);
+    box-shadow: 0 24px 60px rgba(16, 24, 40, .22);
+  }
+
+  .hero::after {
+    content: "";
+    position: absolute;
+    width: 380px; height: 380px;
+    right: -110px; top: -160px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(127, 163, 255, .35), transparent 65%);
+    pointer-events: none;
+  }
+
+  .eyebrow {
+    display: flex; align-items: center; gap: 9px;
+    color: #b7c4ff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+  }
+
+  .eyebrow::before { content: ""; width: 22px; height: 1px; background: #8ea2ff; }
+
+  h1 { margin: 10px 0 8px; font-size: clamp(30px, 4vw, 46px); line-height: 1.12; letter-spacing: -.03em; }
+  .hero p { margin: 0; max-width: 690px; color: #cbd5f4; font-size: 14px; line-height: 1.7; }
+
+  .hero-meta { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; position: relative; z-index: 1; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 7px 11px;
+    border: 1px solid rgba(255,255,255,.16);
+    border-radius: 999px;
+    background: rgba(255,255,255,.07);
+    color: #e8ecff;
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: #90f0c8; box-shadow: 0 0 0 4px rgba(144,240,200,.12); }
+
+  .section { margin-top: 26px; }
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+  .section-title { margin: 0; font-size: 15px; letter-spacing: .01em; }
+  .section-note { color: var(--muted); font-size: 12px; }
+
+  .flow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 78px minmax(0, 1fr) 78px minmax(0, 1fr);
+    align-items: stretch;
+    gap: 0;
+  }
+
+  .flow.tool-flow { grid-template-columns: minmax(0, 1fr) 78px minmax(0, 1fr) 78px minmax(0, 1fr); }
+
+  .node {
+    position: relative;
+    min-width: 0;
+    padding: 18px 18px 16px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--accent, var(--ink));
+    border-radius: var(--radius);
+    background: var(--paper);
+    box-shadow: var(--shadow);
+  }
+
+  .node.entry { --accent: var(--entry); }
+  .node.host { --accent: var(--host); }
+  .node.feishu { --accent: var(--feishu); }
+  .node.preset { --accent: var(--preset); }
+  .node.store { --accent: #976a00; }
+  .node.api { --accent: var(--feishu); }
+
+  .node-kicker {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--accent, var(--muted));
+    font-size: 10.5px;
+    font-weight: 750;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .node-kicker::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: currentColor; }
+
+  .node h3 { margin: 10px 0 4px; font-size: 17px; letter-spacing: -.01em; }
+  .node p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.65; }
+
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 13px; }
+  .pill {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 7px;
+    background: #f4f6fa;
+    color: #475467;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-size: 10.5px;
+    line-height: 1.35;
+  }
+  .entry .pill { background: var(--entry-soft); color: #7a4708; }
+  .host .pill { background: var(--host-soft); color: #4c3aab; }
+  .preset .pill { background: var(--preset-soft); color: #086447; }
+  .feishu .pill, .api .pill { background: var(--feishu-soft); color: #1b4f9c; }
+  .store .pill { background: #fff6dc; color: #765200; }
+
+  .arrow {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px;
+    color: var(--muted);
+    min-width: 0;
+    padding: 12px 5px;
+  }
+  .arrow .label {
+    font-size: 10.5px;
+    font-weight: 650;
+    letter-spacing: .02em;
+    color: #667085;
+    text-align: center;
+    line-height: 1.35;
+  }
+  .arrow .rail {
+    position: relative;
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 0, #98a2b3 15%, #98a2b3 85%, transparent 100%);
+  }
+  .arrow .rail::after {
+    content: "";
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    width: 8px; height: 8px;
+    border-top: 1.5px solid #667085;
+    border-right: 1.5px solid #667085;
+    transform: translateY(-50%) rotate(45deg);
+  }
+
+  .host-band {
+    margin-top: 16px;
+    padding: 18px;
+    border: 1px solid #d9d2f5;
+    border-radius: 20px;
+    background: linear-gradient(180deg, #fbfaff 0%, #f5f2ff 100%);
+  }
+  .host-band-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+  .host-band-title { margin: 0; font-size: 13px; color: #3b2a91; display: flex; align-items: center; gap: 8px; }
+  .host-band-title span { font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; color: #6556b7; font-weight: 500; }
+  .host-band-desc { color: #6a5aa8; font-size: 11.5px; }
+
+  .host-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .internal {
+    min-width: 0;
+    padding: 13px 14px;
+    border: 1px solid #e1dcf7;
+    border-radius: 13px;
+    background: rgba(255,255,255,.78);
+  }
+  .internal .name { font-size: 12.5px; font-weight: 700; color: #2f2668; }
+  .internal .desc { margin-top: 4px; color: #756d9e; font-size: 11px; line-height: 1.55; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+
+  .panel {
+    padding: 18px 20px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--paper);
+    box-shadow: var(--shadow);
+  }
+  .panel h3 { margin: 0 0 7px; font-size: 14px; }
+  .panel p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+  .panel .eyebrow-line { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--muted); font-size: 10.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+  .panel .eyebrow-line::before { content: ""; width: 18px; height: 1px; background: currentColor; }
+
+  .isolation { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .lane { padding: 12px; border-radius: 12px; background: #f8fafc; border: 1px solid #e4e7ec; }
+  .lane .who { font-size: 11px; font-weight: 700; color: #475467; }
+  .lane .tools { margin-top: 5px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; color: #344054; line-height: 1.6; }
+  .lane.avatar { background: var(--preset-soft); border-color: #b8e3d2; }
+  .lane.avatar .who { color: #086447; }
+
+  .risk {
+    border-color: #f3c6c2;
+    background: linear-gradient(180deg, #fffafa 0%, #fff4f3 100%);
+  }
+  .risk h3 { color: #9f2d23; }
+  .risk ul { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 7px; }
+  .risk li { position: relative; padding-left: 15px; color: #7a3a35; font-size: 12px; line-height: 1.6; }
+  .risk li::before { content: ""; position: absolute; left: 0; top: .55em; width: 6px; height: 6px; border-radius: 50%; background: #d92d20; }
+
+  .status-strip {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1px;
+    overflow: hidden;
+    margin-top: 16px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--line);
+  }
+  .stat { padding: 14px 16px; background: #fff; }
+  .stat strong { display: block; font-size: 18px; letter-spacing: -.02em; }
+  .stat span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+
+  footer { margin-top: 26px; padding-top: 16px; border-top: 1px solid #e4e7ec; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; color: #98a2b3; font-size: 11px; }
+
+  @media (max-width: 920px) {
+    .page { width: min(100% - 24px, 760px); padding-top: 16px; }
+    .hero { grid-template-columns: 1fr; padding: 26px 22px; }
+    .hero-meta { justify-content: flex-start; }
+    .flow, .flow.tool-flow { grid-template-columns: 1fr; gap: 10px; }
+    .arrow { flex-direction: row; justify-content: flex-start; padding: 0 8px; gap: 10px; }
+    .arrow .rail { width: 28px; flex: none; transform: rotate(90deg); }
+    .arrow .rail::after { right: 2px; }
+    .arrow .label { text-align: left; }
+    .host-grid { grid-template-columns: 1fr; }
+    .two-col { grid-template-columns: 1fr; }
+    .status-strip { grid-template-columns: 1fr 1fr; }
+  }
+
+  @media (max-width: 560px) {
+    .isolation { grid-template-columns: 1fr; }
+    .status-strip { grid-template-columns: 1fr; }
+    h1 { font-size: 32px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <div>
+      <div class="eyebrow">DSH plugin architecture</div>
+      <h1>飞书分身</h1>
+      <p>一个飞书应用，两种身份。机器人身份负责群聊接入与卡片；用户身份通过设备授权，以你本人名义读写飞书。设置入口在机器人卡片内，工具只在专门预设中出现。</p>
+    </div>
+    <div class="hero-meta" aria-label="架构标签">
+      <span class="badge"><span class="dot"></span>Host 全局设置</span>
+      <span class="badge">Preset 隔离工具</span>
+      <span class="badge">Device Flow</span>
+    </div>
+  </header>
+
+  <section class="section" aria-labelledby="auth-title">
+    <div class="section-head">
+      <h2 class="section-title" id="auth-title">授权链路</h2>
+      <span class="section-note">扫码确认一次，无需 redirect URI</span>
+    </div>
+    <div class="flow">
+      <article class="node entry">
+        <span class="node-kicker">入口</span>
+        <h3>机器人卡片</h3>
+        <p>每个机器人右侧的「分身」。入口绑定具体 bot，不使用独立的全局设置页。</p>
+        <div class="pills"><span class="pill">botId</span><span class="pill">分身</span></div>
+      </article>
+
+      <div class="arrow" aria-hidden="true"><span class="label">RPC</span><span class="rail"></span></div>
+
+      <article class="node host">
+        <span class="node-kicker">DSH Host</span>
+        <h3>UserIdentityManager</h3>
+        <p>保存 botId，发起设备授权，后台轮询 token，生成二维码，维护授权状态。</p>
+        <div class="pills"><span class="pill">user.connect.begin</span><span class="pill">qrcode</span><span class="pill">token refresh</span></div>
+      </article>
+
+      <div class="arrow" aria-hidden="true"><span class="label">Device Flow</span><span class="rail"></span></div>
+
+      <article class="node feishu">
+        <span class="node-kicker">Feishu accounts</span>
+        <h3>设备授权</h3>
+        <p>飞书返回 verification_uri_complete。Host 生成二维码，用户扫码确认后换取 user token。</p>
+        <div class="pills"><span class="pill">verification_uri_complete</span><span class="pill">v3/token</span></div>
+      </article>
+    </div>
+
+    <div class="host-band">
+      <div class="host-band-head">
+        <h3 class="host-band-title">Host 插件边界 <span>@czwjss/feishu-bot-im</span></h3>
+        <span class="host-band-desc">负责设置与授权，不注册 feishu_user_* 工具</span>
+      </div>
+      <div class="host-grid">
+        <div class="internal">
+          <div class="name">BotRuntime</div>
+          <div class="desc">长连接、卡片、流式回复；im_feishu_* 工具与 tenant token。</div>
+        </div>
+        <div class="internal">
+          <div class="name">RPC /api/im-feishu</div>
+          <div class="desc">user.status / user.connect.* / user.disconnect / user.refresh。</div>
+        </div>
+        <div class="internal">
+          <div class="name">本地存储</div>
+          <div class="desc">user-identity.json 与 0600 的 user-token.json；App Secret 留在 credentials。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="tool-title">
+    <div class="section-head">
+      <h2 class="section-title" id="tool-title">工具调用链路</h2>
+      <span class="section-note">仅「我的飞书分身」预设可见</span>
+    </div>
+    <div class="flow tool-flow">
+      <article class="node preset">
+        <span class="node-kicker">Agent Preset</span>
+        <h3>我的飞书分身</h3>
+        <p>挂载 ./user-identity 子插件，获得用户身份工具；普通群聊 Agent 没有这些工具。</p>
+        <div class="pills"><span class="pill">feishu_user_me</span><span class="pill">messages</span><span class="pill">send</span></div>
+      </article>
+
+      <div class="arrow" aria-hidden="true"><span class="label">读取 / 刷新</span><span class="rail"></span></div>
+
+      <article class="node store">
+        <span class="node-kicker">Local state</span>
+        <h3>user-token.json</h3>
+        <p>access / refresh token 和授权用户信息。工具调用前重新加载磁盘状态，避免 Host 写入后 Preset 仍读旧值。</p>
+        <div class="pills"><span class="pill">0600</span><span class="pill">reload on demand</span></div>
+      </article>
+
+      <div class="arrow" aria-hidden="true"><span class="label">User token</span><span class="rail"></span></div>
+
+      <article class="node api">
+        <span class="node-kicker">Feishu OpenAPI</span>
+        <h3>以本人身份操作</h3>
+        <p>读取群历史、向群或联系人发送卡片时使用 user_access_token，消息署名是授权用户，而不是机器人。</p>
+        <div class="pills"><span class="pill">im/v1/messages</span><span class="pill">authen/v1/user_info</span></div>
+      </article>
+    </div>
+  </section>
+
+  <div class="two-col">
+    <section class="panel" aria-labelledby="isolation-title">
+      <div class="eyebrow-line">Isolation</div>
+      <h3 id="isolation-title">两种 Agent，两个工具面</h3>
+      <p>工具隔离靠预设挂载，不靠运行时开关。</p>
+      <div class="isolation">
+        <div class="lane">
+          <div class="who">普通群聊 Agent</div>
+          <div class="tools">im_feishu_send<br>im_feishu_messages<br>im_feishu_chats<br>im_feishu_people</div>
+        </div>
+        <div class="lane avatar">
+          <div class="who">我的飞书分身</div>
+          <div class="tools">feishu_user_me<br>feishu_user_messages<br>feishu_user_send</div>
+        </div>
+      </div>
+      <p style="margin-top: 10px;">注意：预设只隔离工具；如果分身会话被绑定到飞书群，群成员仍可能诱导使用用户身份。</p>
+    </section>
+
+    <section class="panel risk" aria-labelledby="risk-title">
+      <div class="eyebrow-line">Open issues</div>
+      <h3 id="risk-title">上线前还需要收敛</h3>
+      <ul>
+        <li>Host 与 Preset 同时刷新 token 存在竞争，refresh_token 是一次性轮换。</li>
+        <li>当前每个机器人卡片都能授权，但底层只保存一份用户身份，切换应用会覆盖旧授权。</li>
+        <li>会话绑定 guard 尚未实现。</li>
+        <li>Device Flow 需要一次真实端到端验证，现有测试都是 mock。</li>
+      </ul>
+    </section>
+  </div>
+
+  <div class="status-strip" aria-label="当前实现指标">
+    <div class="stat"><strong>6</strong><span>用户身份测试套件</span></div>
+    <div class="stat"><strong>135+</strong><span>用户身份断言</span></div>
+    <div class="stat"><strong>1</strong><span>npm 包，两个 Cordis 入口</span></div>
+    <div class="stat"><strong>0</strong><span>redirect URI</span></div>
+  </div>
+
+  <footer>
+    <span>本地基线：v0.4.1 · 架构文档见 docs/user-identity-architecture.md</span>
+    <span>Host 设置 / Preset 工具 / Feishu Device Flow</span>
+  </footer>
+</div>
+</body>
+</html>

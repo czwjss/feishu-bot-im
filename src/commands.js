@@ -125,9 +125,16 @@ export async function collectMenuData(services, chatKey) {
     .map((item) => ({ ...item, label: label(item) }));
   const currentSession = sessions.find((item) => item.sessionId === sessionId) ?? null;
   const catalog = await harness.modelCatalog().catch(() => null);
-  const selected = (sessionId ? modelFor?.(sessionId) : null) ?? override.model ?? config.model ?? null;
+  // The durable Session projection is the source of truth; the in-memory map is
+  // only a fallback for the brief window before a projection update lands.
+  const projections = sessionId && typeof harness.sessionProjections === 'function'
+    ? await harness.sessionProjections(sessionId).catch(() => null)
+    : null;
+  const projected = projections?.modelSelection?.next ?? projections?.modelSelection?.lastUsed ?? null;
+  const selected = (sessionId ? projected ?? modelFor?.(sessionId) : null) ?? override.model ?? config.model ?? null;
   const models = [];
   let efforts = [];
+  let reasoningEffort = selected?.reasoningEffort ?? null;
   for (const group of catalog?.groups ?? []) {
     for (const item of group.models ?? []) {
       models.push({
@@ -136,10 +143,11 @@ export async function collectMenuData(services, chatKey) {
         current: selected ? selected.provider === group.id && selected.model === item.id : false,
       });
       if (selected && selected.provider === group.id && selected.model === item.id) {
+        reasoningEffort = selected.reasoningEffort ?? item.reasoning?.defaultEffort ?? null;
         efforts = (item.reasoning?.efforts ?? []).map((effort) => ({
           value: effort.id,
           label: effort.name ?? effort.id,
-          current: selected.reasoningEffort === effort.id,
+          current: reasoningEffort === effort.id,
         }));
       }
     }
@@ -156,6 +164,7 @@ export async function collectMenuData(services, chatKey) {
     currentWorkspace: override.workspace ?? config.workspace ?? null,
     workspaces,
     model: selected,
+    reasoningEffort,
     models,
     efforts,
   };
@@ -172,7 +181,7 @@ export function currentMenuValue(data, kind) {
   if (kind === 'model_pick') {
     return data.model ? `${data.model.provider}/${data.model.model}` : null;
   }
-  if (kind === 'reasoning_pick') return data.model?.reasoningEffort ?? null;
+  if (kind === 'reasoning_pick') return data.reasoningEffort ?? data.model?.reasoningEffort ?? null;
   if (kind === 'workspace_pick') return data.currentWorkspace;
   if (kind === 'session_pick') return data.sessionId;
   return null;

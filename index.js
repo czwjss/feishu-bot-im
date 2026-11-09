@@ -5,6 +5,7 @@
  * long connection, settings and chat→Session bindings.
  */
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import { ConfigStore, StateStore, configPaths } from './src/config.js';
 import { HarnessAdapter } from './src/harness.js';
@@ -13,6 +14,11 @@ import { createRpcHandler, installRpc } from './src/rpc.js';
 import { createChatsTool, createMessagesTool, createPeopleTool, createSendTool } from './src/tool.js';
 import { rewriteInjectedContextMessages } from './src/injected-context.js';
 import { FEISHU_POLICY } from './src/policy.js';
+import { UserIdentityAuth } from './src/user-identity/auth.js';
+import { UserIdentityConfigStore, USER_IDENTITY_FILE, USER_TOKEN_FILE } from './src/user-identity/config.js';
+import { UserIdentityConnect } from './src/user-identity/connect.js';
+import { UserIdentityManager } from './src/user-identity/manager.js';
+import { UserTokenStore } from './src/user-identity/token-store.js';
 
 export const name = 'feishu-bot-im';
 export const inject = ['connection', 'credentials', 'typertGateway'];
@@ -24,6 +30,34 @@ async function version() {
   } catch {
     return '0.0.0';
   }
+}
+
+/** 用户身份（飞书分身）：复用机器人应用，不注册模型工具。 */
+async function createUserIdentity(ctx, paths, botConfigStore, logger) {
+  const configStore = await new UserIdentityConfigStore({
+    path: join(paths.root, USER_IDENTITY_FILE),
+  }).load();
+  const tokenStore = await new UserTokenStore({
+    path: join(paths.root, USER_TOKEN_FILE),
+  }).load();
+  const auth = new UserIdentityAuth({
+    configStore,
+    tokenStore,
+    botConfigStore,
+    credentials: ctx.credentials,
+    logger,
+  });
+  const connect = new UserIdentityConnect({ auth, logger });
+  return new UserIdentityManager({
+    configStore,
+    botConfigStore,
+    tokenStore,
+    credentials: ctx.credentials,
+    auth,
+    connect,
+    dataDir: paths.root,
+    logger,
+  });
 }
 
 export async function apply(ctx, config = {}) {
@@ -82,7 +116,10 @@ export async function apply(ctx, config = {}) {
     manager.setPresetSource(() => presetCtx.agentPresets.list());
   });
 
-  const handler = createRpcHandler({ manager, harness, version: pluginVersion });
+  const userIdentity = await createUserIdentity(ctx, paths, configStore, logger);
+  userIdentity.startKeepalive();
+
+  const handler = createRpcHandler({ manager, harness, version: pluginVersion, userIdentity });
   ctx.effect(() => installRpc(ctx, handler), 'feishu-bot: management rpc');
 
   ctx.effect(() => ctx.on('session/event', (session, event) => {
@@ -119,6 +156,7 @@ export async function apply(ctx, config = {}) {
   });
 
   ctx.effect(() => () => manager.dispose(), 'feishu-bot: runtimes');
+  ctx.effect(() => () => userIdentity.dispose(), 'feishu-bot: user identity');
 
   try {
     await manager.start();

@@ -83,10 +83,31 @@ class FakeHarness {
       tokenUsage: { uncachedInputTokens: 7035658, outputTokens: 1329752, cacheReadTokens: 927102592, cacheWriteTokens: 0 },
       contextPressure: { pressureTokens: 548000, contextWindow: 1048576 },
       contextBreakdown: { systemTokens: 1400, toolsTokens: 9000, messageTokens: 431000 },
+      modelSelection: this.modelSelection,
     };
   }
-  async modelCatalog() { return { groups: [{ id: 'prov', name: 'Prov', models: [{ id: 'model-a', name: 'A' }] }] }; }
-  async selectModel(id, selection) { this.lastModel = { id, selection }; return {}; }
+  async modelCatalog() {
+    const reasoning = { defaultEffort: 'low', efforts: [{ id: 'low', name: '低' }, { id: 'high', name: '高' }] };
+    return {
+      groups: [{
+        id: 'prov',
+        name: 'Prov',
+        models: [
+          { id: 'model-a', name: 'A', reasoning },
+          { id: 'model-b', name: 'B', reasoning },
+        ],
+      }],
+    };
+  }
+  modelSelection = {
+    next: { provider: 'prov', model: 'model-a', reasoningEffort: 'high' },
+    lastUsed: null,
+  };
+  async selectModel(id, selection) {
+    this.lastModel = { id, selection };
+    this.modelSelection = { next: selection, lastUsed: selection };
+    return {};
+  }
   async workspaceBaseline() { return { workspaces: [{ path: '/tmp/one' }] }; }
   async executeCommand() { return {}; }
   async history() { return []; }
@@ -209,12 +230,14 @@ function message(overrides = {}) {
   assert.match(flat, /\*\*模型\*\*/);
   assert.ok(!/slash_run/.test(flat), 'command buttons are gone (native panel handles them)');
   assert.match(flat, /model_pick/, 'menu offers a model picker');
+  assert.match(flat, /reasoning_pick/, 'menu offers a reasoning picker when the model supports it');
+  assert.match(flat, /✓ 高/, 'menu reads the effort from the durable session projection');
   assert.match(flat, /menu_apply/, 'menu offers an apply button');
   assert.match(flat, /"压缩"/, "menu offers manual compaction");
   // 选择只登记待切换项，不立即生效
   await bridge.onCardAction({
     operator: { open_id: 'ou_user' },
-    action: { value: { action: 'model_pick' }, option: 'prov/model-a' },
+    action: { value: { action: 'model_pick' }, option: 'prov/model-b' },
     context: { open_chat_id: 'oc_panel', open_message_id: 'om_menu' },
   });
   assert.equal(harness.lastModel, undefined, 'pick alone must not switch');
@@ -224,7 +247,23 @@ function message(overrides = {}) {
     action: { value: { action: 'menu_apply' } },
     context: { open_chat_id: 'oc_panel', open_message_id: 'om_menu' },
   });
-  assert.deepEqual(harness.lastModel?.selection, { provider: 'prov', model: 'model-a' });
+  assert.deepEqual(harness.lastModel?.selection, { provider: 'prov', model: 'model-b' });
+
+  // A reasoning-only change must preserve provider/model instead of sending a partial selection.
+  await bridge.handleMessage(message({ chat_id: 'oc_panel', content: JSON.stringify({ text: '/menu' }) }));
+  await bridge.onCardAction({
+    operator: { open_id: 'ou_user' },
+    action: { value: { action: 'reasoning_pick' }, option: 'high' },
+    context: { open_chat_id: 'oc_panel', open_message_id: 'om_menu' },
+  });
+  await bridge.onCardAction({
+    operator: { open_id: 'ou_user' },
+    action: { value: { action: 'menu_apply' } },
+    context: { open_chat_id: 'oc_panel', open_message_id: 'om_menu' },
+  });
+  assert.deepEqual(harness.lastModel?.selection, {
+    provider: 'prov', model: 'model-b', reasoningEffort: 'high',
+  }, 'reasoning-only apply keeps the current model route');
   bridge.dispose();
 }
 
@@ -1550,4 +1589,4 @@ function message(overrides = {}) {
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 63 scenarios passed');
+console.log('bridge: 68 assertions passed');

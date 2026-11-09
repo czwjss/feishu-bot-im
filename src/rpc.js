@@ -15,10 +15,15 @@ function fail(code, message) {
   return { ok: false, error: { code, message, details: {} } };
 }
 
-export function createRpcHandler({ manager, harness, version }) {
+export function createRpcHandler({ manager, harness, version, userIdentity = null }) {
   const runtimeOf = (input) => {
     const botId = input?.botId ?? manager.runtimes[0]?.botId;
     return manager.runtimeForBot(botId);
+  };
+
+  const requireUserIdentity = () => {
+    if (!userIdentity) throw new Error('用户身份模块没有加载');
+    return userIdentity;
   };
 
   return async function handle(method, payload) {
@@ -165,6 +170,22 @@ export function createRpcHandler({ manager, harness, version }) {
 
       case 'version':
         return ok({ version });
+
+      // ── 用户身份（飞书分身）────────────────────────────────────────────
+      case 'user.status':
+        return ok(await requireUserIdentity().status());
+
+      case 'user.connect.begin':
+        return ok(await requireUserIdentity().connectBegin(input));
+
+      case 'user.connect.cancel':
+        return ok(await requireUserIdentity().connectCancel());
+
+      case 'user.disconnect':
+        return ok(await requireUserIdentity().disconnect());
+
+      case 'user.refresh':
+        return ok(await requireUserIdentity().refresh());
 
       // ── 兼容层：旧版单机器人设置页仍可工作 ─────────────────────────────
       case 'connection.status': {
