@@ -4,12 +4,30 @@
  * 只覆盖分身第一版需要的三个能力：用户信息、会话历史、发送文本消息。
  * 所有请求都使用 user_access_token（`Authorization: Bearer …`）。
  */
+import { readFile, stat } from 'node:fs/promises';
+import { basename, extname, isAbsolute, resolve } from 'node:path';
+
 import { normalizeCardColor, noticeCard } from '../cards.js';
 import { FeishuApiError, describeApiCode } from './errors.js';
 
 export const FEISHU_API_ORIGIN = 'https://open.feishu.cn';
 export const DEFAULT_TIMEOUT_MS = 15_000;
 export const MAX_TEXT_LENGTH = 8_000;
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_FILE_BYTES = 30 * 1024 * 1024;
+
+const IMAGE_MIME = Object.freeze({
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon',
+  '.tif': 'image/tiff',
+  '.tiff': 'image/tiff',
+  '.heic': 'image/heic',
+});
 
 function stringOf(value) {
   return typeof value === 'string' ? value : '';
@@ -396,4 +414,121 @@ export async function sendCardMessage({
     timeoutMs,
     signal,
   });
+}
+
+
+function safeFileName(value, fallback) {
+  const name = typeof value === 'string' ? value.trim() : '';
+  return (name || fallback || 'file').slice(0, 120);
+}
+
+async function uploadUserMedia({
+  accessToken,
+  path,
+  name,
+  cwd,
+  fetchImpl,
+  timeoutMs,
+  signal,
+} = {}) {
+  if (typeof path !== 'string' || !path.trim()) throw new Error('path 不能为空');
+  if (typeof fetchImpl !== 'function') throw new TypeError('飞书 API 需要 fetch 实现');
+  const absolute = isAbsolute(path) ? path : resolve(cwd || process.cwd(), path);
+  const info = await stat(absolute).catch(() => null);
+  if (!info?.isFile()) throw new Error(`文件不存在或不是普通文件：${absolute}`);
+  const fileName = safeFileName(name, basename(absolute));
+  const extension = extname(fileName).toLowerCase();
+  const mime = IMAGE_MIME[extension] ?? 'application/octet-stream';
+  const isImage = Boolean(IMAGE_MIME[extension]);
+  const limit = isImage ? MAX_IMAGE_BYTES : MAX_FILE_BYTES;
+  if (info.size > limit) {
+    throw new Error(`${isImage ? '图片' : '文件'}超过飞书 ${Math.round(limit / 1024 / 1024)}MB 上限`);
+  }
+  signal?.throwIfAborted?.();
+  const bytes = await readFile(absolute);
+  signal?.throwIfAborted?.();
+
+  const form = new FormData();
+  let endpoint;
+  let keyField;
+  if (isImage) {
+    endpoint = '/open-apis/im/v1/images';
+    keyField = 'image_key';
+    form.set('image_type', 'message');
+    form.append('image', new Blob([bytes], { type: mime }), fileName);
+  } else {
+    endpoint = '/open-apis/im/v1/files';
+    keyField = 'file_key';
+    form.set('file_type', 'stream');
+    form.set('file_name', fileName);
+    form.append('file', new Blob([bytes], { type: mime }), fileName);
+  }
+  const response = await fetchImpl(new URL(endpoint, FEISHU_API_ORIGIN), {
+    method: 'POST',
+    headers: { accept: 'application/json', authorization: `Bearer ${accessToken}` },
+    body: form,
+    signal: requestSignal({ timeoutMs, signal }),
+  });
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+  const code = payload && typeof payload.code === 'number' ? payload.code : null;
+  if (code !== null && code !== 0) {
+    const detail = describeApiCode(code);
+    throw new FeishuApiError(detail ? `${detail}（code ${code}）` : `${stringOf(payload.msg) || '飞书上传失败'}（code ${code}）`, {
+      feishuCode: code,
+      status: response.status,
+    });
+  }
+  if (!response.ok || !payload || typeof payload !== 'object') {
+    throw new FeishuApiError(`飞书上传返回 HTTP ${response.status}`, { status: response.status });
+  }
+  const key = stringOf(payload.data?.[keyField] ?? payload[keyField]);
+  if (!key) throw new FeishuApiError(`飞书上传没有返回 ${keyField}`, { status: response.status });
+  return Object.freeze({ kind: isImage ? 'image' : 'file', key, name: fileName, bytes: bytes.length });
+}
+
+/**
+ * 以授权用户身份发送本地图片或文件。
+ * 图片按扩展名走 message image，其余走 file；先上传再发送。
+ */
+export async function sendMediaMessage({
+  accessToken,
+  chatId,
+  openId,
+  email,
+  path,
+  name,
+  cwd,
+  fetchImpl,
+  timeoutMs,
+  signal,
+} = {}) {
+  const [receiveIdType, receiveId] = resolveReceiveTarget({ chatId, openId, email });
+  const uploaded = await uploadUserMedia({
+    accessToken,
+    path,
+    name,
+    cwd,
+    fetchImpl,
+    timeoutMs,
+    signal,
+  });
+  const content = uploaded.kind === 'image'
+    ? JSON.stringify({ image_key: uploaded.key })
+    : JSON.stringify({ file_key: uploaded.key, file_name: uploaded.name });
+  const sent = await postUserMessage({
+    accessToken,
+    receiveIdType,
+    receiveId,
+    msgType: uploaded.kind,
+    content,
+    fetchImpl,
+    timeoutMs,
+    signal,
+  });
+  return Object.freeze({ ...sent, kind: uploaded.kind, name: uploaded.name, bytes: uploaded.bytes });
 }

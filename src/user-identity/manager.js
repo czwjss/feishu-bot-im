@@ -100,20 +100,29 @@ export class UserIdentityManager {
   }
 
   /**
-   * Keep a refresh token alive while DSH is running. Feishu can issue a
-   * short-lived refresh token (7 days for the current device flow); rotating it
-   * before expiry avoids forcing the user to scan again.
+   * Keep the user token usable while DSH is running.
+   * - access_token is short-lived (about 2 hours);
+   * - refresh_token can be short too (7 days in the current device flow).
+   * Refresh when either is close to expiry, not only when refresh_token is low.
    */
-  startKeepalive({ intervalMs = 6 * 60 * 60 * 1000, refreshBeforeMs = 2 * 24 * 60 * 60 * 1000 } = {}) {
+  startKeepalive({
+    intervalMs = 15 * 60 * 1000,
+    accessBeforeMs = 10 * 60 * 1000,
+    refreshBeforeMs = 2 * 24 * 60 * 60 * 1000,
+  } = {}) {
     if (this.#keepaliveTimer) return;
     const tick = async () => {
       try {
         const status = await this.status();
         if (!status.authorization?.authorized) return;
-        const expiresAt = status.authorization.refreshTokenExpiresAt;
-        if (!Number.isFinite(expiresAt) || expiresAt - Date.now() > refreshBeforeMs) return;
+        const now = Date.now();
+        const accessExpiresAt = status.authorization.accessTokenExpiresAt;
+        const refreshExpiresAt = status.authorization.refreshTokenExpiresAt;
+        const accessDue = !Number.isFinite(accessExpiresAt) || accessExpiresAt - now <= accessBeforeMs;
+        const refreshDue = Number.isFinite(refreshExpiresAt) && refreshExpiresAt - now <= refreshBeforeMs;
+        if (!accessDue && !refreshDue) return;
         await this.refresh();
-        this.#logger?.info?.('[im-feishu] 用户身份 refresh_token 已自动续期');
+        this.#logger?.info?.(`[im-feishu] 用户身份 token 已自动续期（${accessDue ? 'access' : 'refresh'}）`);
       } catch (error) {
         this.#logger?.warn?.('[im-feishu] 用户身份自动续期失败', error);
       }

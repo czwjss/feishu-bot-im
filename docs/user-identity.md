@@ -94,7 +94,7 @@ POST accounts.feishu.cn/oauth/v3/token
 |---|---|
 | `feishu_user_me` | 授权用户本人信息（姓名、open_id、union_id、邮箱、头像） |
 | `feishu_user_messages` | 以本人身份读群历史；chatId 必须是 `oc_` 开头 |
-| `feishu_user_send` | 以本人身份发送交互卡片到群 `chatId` 或联系人 `openId` / 邮箱；正文支持 Markdown，≤ 8000 字符，可选标题/颜色 |
+| `feishu_user_send` | 以本人身份发送交互卡片、图片或文件到群 `chatId` 或联系人 `openId` / 邮箱；文本卡片支持 Markdown、标题/颜色 |
 
 未授权时会明确报错，不会伪造身份。
 

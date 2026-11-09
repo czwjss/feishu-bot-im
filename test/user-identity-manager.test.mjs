@@ -53,7 +53,40 @@ try {
   assert.match(configStore.config.scope, /docx:document:readonly/, 'connect includes doc scopes');
   assert.doesNotMatch(configStore.config.scope, /wiki:node|sheets:spreadsheet|base:app|calendar:calendar|task:task|approval:/, 'connect does not request excluded scopes');
 
-  console.log('im-feishu user identity manager: 7 assertions passed');
+  {
+    let refreshed = 0;
+    const keepaliveAuth = {
+      async status() {
+        return {
+          config: { app: { available: true, botId: 'bot_1' } },
+          authorization: {
+            authorized: true,
+            accessTokenExpiresAt: Date.now() - 1_000,
+            refreshTokenExpiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+          },
+        };
+      },
+      async refresh() {
+        refreshed += 1;
+        return { accessToken: 'fresh' };
+      },
+    };
+    const keepalive = new UserIdentityManager({
+      configStore,
+      botConfigStore,
+      tokenStore: {},
+      credentials: null,
+      auth: keepaliveAuth,
+      connect,
+      dataDir: dir,
+    });
+    keepalive.startKeepalive({ intervalMs: 5, accessBeforeMs: 60_000 });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    keepalive.dispose();
+    assert.ok(refreshed >= 1, 'keepalive refreshes an expired access token');
+  }
+
+  console.log('im-feishu user identity manager: 8 assertions passed');
 } finally {
   await rm(dir, { recursive: true, force: true });
 }
