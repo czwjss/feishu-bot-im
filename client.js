@@ -194,6 +194,7 @@ function dictionaries() {
 
 // client/shared.js
 var h = import_react.default.createElement;
+var RPC_ENDPOINT = "im-feishu";
 var API = {
   botAccessSet: "bot.access.set",
   botAdd: "bot.add",

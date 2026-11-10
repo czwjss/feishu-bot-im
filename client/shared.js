@@ -2,6 +2,7 @@ import React from 'react';
 import { NS } from './locale.js';
 
 const h = React.createElement;
+const RPC_ENDPOINT = 'im-feishu';
 
     export const API = {
       botAccessSet: 'bot.access.set',
