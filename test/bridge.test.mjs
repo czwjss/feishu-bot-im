@@ -1287,6 +1287,19 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
+// 14b4) 命令消息不需要解析引用图片
+{
+  const { bot, bridge } = makeBridge();
+  let downloads = 0;
+  bot.downloadResource = async () => { downloads += 1; return Buffer.alloc(0); };
+  await bridge.handleMessage(message({
+    chat_id: 'oc_quote_command', chat_type: 'group', parent_id: 'om_bot_image',
+    mentions: [], content: JSON.stringify({ text: '/menu' }),
+  }));
+  assert.equal(downloads, 0, 'commands do not download quoted images');
+  bridge.dispose();
+}
+
 // 14c) 群聊注入群名称（conversationTitle），放进 context
 {
   const { harness, contextBySession, bridge } = makeBridge({
@@ -1668,4 +1681,4 @@ function message(overrides = {}) {
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 81 assertions passed');
+console.log('bridge: 82 assertions passed');

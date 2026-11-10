@@ -162,7 +162,6 @@ export function renderGuidanceBlock(scope) {
   return `${INJECTED_CONTEXT_TAGS.guidanceOpen}\n${escapeGuidance(guidance)}\n${INJECTED_CONTEXT_TAGS.guidanceClose}`;
 }
 
-
 function cleanQuote(value, limit) {
   if (typeof value !== 'string') return '';
   return value.replace(CONTROL_CHARACTERS, ' ').replace(/\s+/g, ' ').trim().slice(0, limit);

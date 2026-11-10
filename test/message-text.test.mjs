@@ -28,4 +28,10 @@ assert.equal(interactiveTextOfContent(JSON.stringify({
   body: { elements: [{ tag: 'markdown', content: '收到，报告已发到当前会话。' }] },
 })), '报告\n收到，报告已发到当前会话。');
 
-console.log('message text: 12 assertions passed');
+// 5) 降级卡片里的 text 字符串也要能读出来
+assert.equal(interactiveTextOfContent(JSON.stringify({
+  title: null,
+  elements: [[{ tag: 'text', text: '请升级至最新版本客户端，以查看内容' }]],
+})), '请升级至最新版本客户端，以查看内容');
+
+console.log('message text: 13 assertions passed');

@@ -39,7 +39,9 @@ export function interactiveTextOfContent(content) {
     }
     if (typeof node !== 'object') return;
     add(node.content);
+    add(node.text);
     add(node.text?.content);
+    add(node.title);
     add(node.title?.content);
     for (const key of ['header', 'body', 'elements', 'fields', 'columns', 'column_set']) {
       if (node[key]) visit(node[key], depth + 1);

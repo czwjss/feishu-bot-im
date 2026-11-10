@@ -27,6 +27,8 @@ const BARE_MENTION_HINT = '在的，请直接说需求；发送 /menu 可以查�
 
 /** Reaction emoji used as a coarse message status. */
 const REACTION = Object.freeze({ processing: 'OnIt', done: 'DONE', stopped: 'DIZZY' });
+const PARENT_CACHE_TTL_MS = 5 * 60_000;
+const PARENT_MISS_TTL_MS = 30_000;
 
 export class FeishuBridge {
   #bot;
@@ -175,7 +177,6 @@ export class FeishuBridge {
       this.#recordEavesdrop(chatKey, message, openId, senderName);
       return;
     }
-    const quoted = await this.#quotedMessage(message);
 
     const text = (textOfContentOrPost(message) ?? '').replace(/@_user_\d+/g, '').trim();
     this.#chatTypes.set(chatKey, message.chat_type);
@@ -222,6 +223,9 @@ export class FeishuBridge {
       await sendNotice(this.#bot, message.chat_id, '目前支持文字、图片和文件消息；语音和视频暂不支持。', '暂不支持');
       return;
     }
+    // Resolve the quote only after commands / unsupported messages are handled:
+    // a /menu reply should not download quoted images.
+    const quoted = await this.#quotedMessage(message);
 
     let parts = text ? [{ type: 'text', text }] : [];
     if (message.message_type === 'image' || message.message_type === 'file' || message.message_type === 'post') {
@@ -691,7 +695,10 @@ export class FeishuBridge {
     const cached = this.#messageCache.get(parentId);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
     const value = await Promise.resolve(this.#bot.getMessage?.(parentId)).catch(() => null) ?? null;
-    this.#messageCache.set(parentId, { value, expiresAt: Date.now() + 5 * 60_000 });
+    this.#messageCache.set(parentId, {
+      value,
+      expiresAt: Date.now() + (value ? PARENT_CACHE_TTL_MS : PARENT_MISS_TTL_MS),
+    });
     if (this.#messageCache.size > 200) this.#messageCache.delete(this.#messageCache.keys().next().value);
     return value;
   }
@@ -711,20 +718,22 @@ export class FeishuBridge {
     const senderName = parent.senderType === 'app'
       ? (this.#config.botName || '机器人')
       : ((await this.#senderName(parent.senderId)) || parent.senderId || '未知发送者');
+    const messageType = parent.msgType ?? parent.message_type ?? '';
+    const content = parent.bodyContent ?? parent.content ?? '';
     const description = describeMessageForEavesdrop({
-      message_type: parent.msgType ?? parent.message_type,
-      content: parent.bodyContent ?? parent.content ?? '',
+      message_type: messageType,
+      content,
       mentions: parent.mentions ?? [],
     });
     const imageBuild = await this.#inbound.buildQuotedImages({
       messageId: parent.messageId ?? message?.parent_id,
-      messageType: parent.msgType ?? parent.message_type,
-      bodyContent: parent.bodyContent ?? parent.content ?? '',
+      messageType,
+      bodyContent: content,
     });
     return {
       senderName,
       messageId: parent.messageId ?? message?.parent_id ?? '',
-      messageType: parent.msgType ?? parent.message_type ?? '',
+      messageType,
       text: description.text ?? '',
       imageCount: imageBuild.count,
       imageNotes: imageBuild.notes,

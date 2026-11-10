@@ -235,7 +235,6 @@ export class FeishuBot {
         senderType: item.sender?.sender_type ?? null,
         messageId: item.message_id ?? messageId,
         msgType: item.msg_type ?? item.message_type ?? null,
-        createTime: item.create_time ?? null,
         bodyContent: item.body?.content ?? '',
         mentions: Array.isArray(item.mentions) ? item.mentions : [],
       };
