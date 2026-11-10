@@ -14,9 +14,9 @@ import {
   sendMediaMessage,
 } from './api.js';
 
-export const ME_TOOL_NAME = 'feishu_user_me';
-export const MESSAGES_TOOL_NAME = 'feishu_user_messages';
-export const SEND_TOOL_NAME = 'feishu_user_send';
+export const ME_TOOL_NAME = 'feishu_avatar_me';
+export const MESSAGES_TOOL_NAME = 'feishu_avatar_messages';
+export const SEND_TOOL_NAME = 'feishu_avatar_send';
 
 /**
  * 执行一次用户身份 API 调用；token 过期时刷新后重试一次。

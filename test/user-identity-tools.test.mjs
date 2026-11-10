@@ -37,6 +37,7 @@ function fakeFetch(handler) {
 {
   const tools = createUserIdentityTools({ auth: fakeAuth(), fetchImpl: async () => ({}) });
   assert.deepEqual(tools.map((tool) => tool.name), [ME_TOOL_NAME, MESSAGES_TOOL_NAME, SEND_TOOL_NAME]);
+  assert.deepEqual([ME_TOOL_NAME, MESSAGES_TOOL_NAME, SEND_TOOL_NAME], ['feishu_avatar_me', 'feishu_avatar_messages', 'feishu_avatar_send']);
   for (const tool of tools) {
     assert.equal(tool.parameters.type, 'object');
     assert.equal(typeof tool.execute, 'function');
@@ -179,4 +180,4 @@ function fakeFetch(handler) {
   await assert.rejects(() => send.execute({ chatId: 'oc_chat', text: 'x'.repeat(8_001) }, {}), /过长/);
 }
 
-console.log('im-feishu user identity tools: 40 assertions passed');
+console.log('im-feishu user identity tools: 41 assertions passed');

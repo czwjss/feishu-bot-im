@@ -63,7 +63,7 @@ pnpm install    # 或 npm install
 @czwjss/feishu-bot-im/user-identity
   复用某个机器人的 App ID / App Secret
   设备授权（Device Flow）连接，不需要重定向 URL
-  feishu_user_me / feishu_user_messages / feishu_user_send
+  feishu_avatar_me / feishu_avatar_messages / feishu_avatar_send
 ```
 
 它不会被 Host 自动加载，只在挂了这一行的 Agent 预设里出现，所以普通群聊

@@ -50,11 +50,11 @@ Host 侧（全局加载）
   用户身份配置
   设备授权 / token 刷新
   RPC
-  不注册 feishu_user_* 模型工具
+  不注册 feishu_avatar_* 模型工具
 
 Preset 侧（按需加载）
   @czwjss/feishu-bot-im/user-identity
-  注册 feishu_user_* 工具
+  注册 feishu_avatar_* 工具
   读取同一个 token 文件
 ```
 
@@ -121,9 +121,9 @@ user.refresh
 
 | 工具 | 能力 |
 |---|---|
-| `feishu_user_me` | 授权用户身份信息 |
-| `feishu_user_messages` | 以本人身份读群历史 |
-| `feishu_user_send` | 以本人身份发送文本 |
+| `feishu_avatar_me` | 授权用户身份信息 |
+| `feishu_avatar_messages` | 以本人身份读群历史 |
+| `feishu_avatar_send` | 以本人身份发送文本 |
 
 ## 4. 数据流
 
@@ -146,7 +146,7 @@ flowchart LR
   end
 
   subgraph Preset[Agent 预设：我的飞书分身]
-    Tools[user-identity 子插件\nfeishu_user_* 工具]
+    Tools[user-identity 子插件\nfeishu_avatar_* 工具]
   end
 
   subgraph Files[本地数据]
@@ -198,7 +198,7 @@ sequenceDiagram
   S->>H: 轮询 user.status
   H-->>S: authorized
 
-  U->>T: 使用 feishu_user_send / messages
+  U->>T: 使用 feishu_avatar_send / messages
   T->>T: requireAccessToken()
   T->>A: 以 user token 调用 OpenAPI
 ```
@@ -207,7 +207,7 @@ sequenceDiagram
 
 ```text
 Host 插件
-  没有 feishu_user_* 工具
+  没有 feishu_avatar_* 工具
   只做设置、OAuth、token
 
 普通群聊 Agent
@@ -215,7 +215,7 @@ Host 插件
 
 我的飞书分身
   额外挂载 ./user-identity
-  只有 feishu_user_* 工具
+  只有 feishu_avatar_* 工具
 ```
 
 但要注意：**预设隔离工具，不隔离会话绑定**。如果「我的飞书分身」会话被绑定到飞书群，群成员仍可能诱导工具。
@@ -329,7 +329,7 @@ resolveIdentityApp()
 ```text
 方向：已并入飞书机器人产品
 Host：设置、OAuth、token、RPC
-Preset：user-identity 子插件，仅注册 feishu_user_* 工具
+Preset：user-identity 子插件，仅注册 feishu_avatar_* 工具
 OAuth：Device Flow，无需 redirect URI
 问题：不是功能没做，而是 Host 与 Preset 状态没有收敛成单一来源
 ```

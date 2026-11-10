@@ -553,7 +553,7 @@ mode: draft / auto
           </article>
         </div>
 
-        <div class="principle"><strong>关键边界：</strong>Worker 只负责理解与起草，不能调用 <span class="mono">feishu_user_send</span>，也不能直接写飞书。所有外部发送统一经过 Host 的 Policy + Outbound Sender，保证可审计、可限频、可人工拦截。</div>
+        <div class="principle"><strong>关键边界：</strong>Worker 只负责理解与起草，不能调用 <span class="mono">feishu_avatar_send</span>，也不能直接写飞书。所有外部发送统一经过 Host 的 Policy + Outbound Sender，保证可审计、可限频、可人工拦截。</div>
 
         <div class="split" style="margin-top:14px">
           <article class="panel">
