@@ -125,3 +125,13 @@ MIT © 2026 czwjss
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=czwjss/feishu-bot-im&type=Date)](https://star-history.com/#czwjss/feishu-bot-im&Date)
+
+## 开发 / 构建
+
+Client 源码按功能拆分在 `client/`，用 esbuild 生成单文件 `client.js`：
+
+```bash
+pnpm run build:client
+```
+
+`npm test` 会先自动构建；发布前 `prepublishOnly` 也会构建。

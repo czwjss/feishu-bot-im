@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Feishu Bot",
-    "description": "Multiple Feishu bots wired straight into DeepSeek Harness."
+    "description": "Multiple Feishu bots wired into DeepSeek Harness, including the user identity avatar."
   }
 }
