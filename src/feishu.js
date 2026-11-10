@@ -220,13 +220,22 @@ export class FeishuBot {
     };
   }
 
-  /** Read one message (used to recognise replies to the bot). */
+  /** Read one message (reply recognition and quoted-message context). */
   async getMessage(messageId) {
     if (!messageId) return null;
     try {
       const response = await this.#client.im.v1.message.get({ path: { message_id: messageId } });
       const item = (response?.data?.items ?? [])[0];
-      return item ? { senderId: item.sender?.id ?? item.sender?.sender_id?.open_id ?? null, senderType: item.sender?.sender_type ?? null } : null;
+      if (!item) return null;
+      return {
+        senderId: item.sender?.id ?? item.sender?.sender_id?.open_id ?? null,
+        senderType: item.sender?.sender_type ?? null,
+        messageId: item.message_id ?? messageId,
+        msgType: item.msg_type ?? item.message_type ?? null,
+        createTime: item.create_time ?? null,
+        bodyContent: item.body?.content ?? '',
+        mentions: Array.isArray(item.mentions) ? item.mentions : [],
+      };
     } catch {
       return null;
     }

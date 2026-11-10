@@ -12,6 +12,8 @@
  * resend it.
  */
 
+import { interactiveTextOfContent } from './message-text.js';
+
 export const DEFAULT_EAVESDROP_LIMIT = 20;
 
 const EAVESDROP_TAGS = Object.freeze({
@@ -109,7 +111,7 @@ export function describeMessageForEavesdrop(message) {
   } else if (type === 'sticker') {
     text = '[表情]';
   } else if (type === 'interactive') {
-    text = '[卡片]';
+    text = interactiveTextOfContent(content) || '[卡片]';
   } else if (type === 'share_chat') {
     text = '[群名片]';
   } else if (type === 'share_user') {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { chatIdOfKey, scopedValue, textOfContentOrPost } from '../src/message-text.js';
+import { chatIdOfKey, interactiveTextOfContent, scopedValue, textOfContentOrPost } from '../src/message-text.js';
 
 // 1) 绑定键 → 飞书 chat id：普通会话与话题都必须落到 oc_…
 assert.equal(chatIdOfKey('chat:oc_123'), 'oc_123');
@@ -22,4 +22,10 @@ assert.equal(textOfContentOrPost({
 }), '正文链接');
 assert.equal(textOfContentOrPost({ message_type: 'image', content: '{}' }), null);
 
-console.log('message text: 11 assertions passed');
+// 4) 卡片正文也能被引用/旁听读取
+assert.equal(interactiveTextOfContent(JSON.stringify({
+  header: { title: { content: '报告' } },
+  body: { elements: [{ tag: 'markdown', content: '收到，报告已发到当前会话。' }] },
+})), '报告\n收到，报告已发到当前会话。');
+
+console.log('message text: 12 assertions passed');

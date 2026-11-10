@@ -12,7 +12,7 @@ import { buildMenuCard, collectMenuData, currentMenuValue, menuOptionLabel, runC
 import { DEFAULT_EAVESDROP_LIMIT, EavesdropStore, describeMessageForEavesdrop, renderEavesdropBlock } from './eavesdrop.js';
 import { extractMentionIds, renderMentions } from './mentions.js';
 import { InboundContent } from './inbound.js';
-import { renderGuidanceBlock, renderSourceBlock } from './context-enhancement.js';
+import { renderGuidanceBlock, renderQuoteBlock, renderSourceBlock } from './context-enhancement.js';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { sendNotice } from './notify.js';
 import { dirname } from 'node:path';
@@ -48,6 +48,7 @@ export class FeishuBridge {
   #externalAsk = new Map();
   #reactionActive = new Map();
   #userNames = new Map();
+  #messageCache = new Map();
   #eavesdrop = new EavesdropStore();
   #participants = new Map();
   #onContext;
@@ -174,6 +175,7 @@ export class FeishuBridge {
       this.#recordEavesdrop(chatKey, message, openId, senderName);
       return;
     }
+    const quoted = await this.#quotedMessage(message);
 
     const text = (textOfContentOrPost(message) ?? '').replace(/@_user_\d+/g, '').trim();
     this.#chatTypes.set(chatKey, message.chat_type);
@@ -240,6 +242,7 @@ export class FeishuBridge {
       parts: promptParts,
       text: promptText,
       openId,
+      quoted,
     });
 
     // A bare mention (or an empty text body) carries no instruction. If the
@@ -433,7 +436,7 @@ export class FeishuBridge {
     return result;
   }
 
-  async #submitPrompt({ chatKey, chatId, chatType, createTime, messageId, parts, text, openId }) {
+  async #submitPrompt({ chatKey, chatId, chatType, createTime, messageId, parts, text, openId, quoted = null }) {
     let sessionId = this.#state.sessionFor(chatKey);
     const create = async () => {
       const override = this.#state.overrideFor?.(chatKey) ?? {};
@@ -505,7 +508,8 @@ export class FeishuBridge {
     }
     // All injected context lives in the plugin's systemPrompt.context section;
     // the user's own message keeps only what they actually sent.
-    const injected = [this.#guidanceContext(chatType), sourceBlock, eavesdropBlock, syncBlock]
+    const quoteBlock = renderQuoteBlock(quoted);
+    const injected = [this.#guidanceContext(chatType), sourceBlock, quoteBlock, eavesdropBlock, syncBlock]
       .filter(Boolean)
       .join('\n\n');
 
@@ -675,14 +679,46 @@ export class FeishuBridge {
     return name;
   }
 
+  /** Fetch and briefly cache one parent message (used for reply + quote). */
+  async #parentMessage(message) {
+    const parentId = typeof message?.parent_id === 'string' && message.parent_id.trim()
+      ? message.parent_id.trim()
+      : '';
+    if (!parentId) return null;
+    const cached = this.#messageCache.get(parentId);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    const value = await Promise.resolve(this.#bot.getMessage?.(parentId)).catch(() => null) ?? null;
+    this.#messageCache.set(parentId, { value, expiresAt: Date.now() + 5 * 60_000 });
+    if (this.#messageCache.size > 200) this.#messageCache.delete(this.#messageCache.keys().next().value);
+    return value;
+  }
+
   /** A reply to one of our messages counts as addressed, even without @. */
   async #isReplyToBot(message) {
-    const parentId = message?.parent_id;
-    if (!parentId) return false;
-    const parent = await Promise.resolve(this.#bot.getMessage?.(parentId)).catch(() => null);
+    const parent = await this.#parentMessage(message);
     if (!parent) return false;
     if (parent.senderType === 'app') return true;
     return Boolean(this.#config.botOpenId && parent.senderId === this.#config.botOpenId);
+  }
+
+  /** The message the user replied to; Feishu events carry only its id. */
+  async #quotedMessage(message) {
+    const parent = await this.#parentMessage(message);
+    if (!parent) return null;
+    const senderName = parent.senderType === 'app'
+      ? (this.#config.botName || '机器人')
+      : ((await this.#senderName(parent.senderId)) || parent.senderId || '未知发送者');
+    const description = describeMessageForEavesdrop({
+      message_type: parent.msgType ?? parent.message_type,
+      content: parent.bodyContent ?? parent.content ?? '',
+      mentions: parent.mentions ?? [],
+    });
+    return {
+      senderName,
+      messageId: parent.messageId ?? message?.parent_id ?? '',
+      messageType: parent.msgType ?? parent.message_type ?? '',
+      text: description.text ?? '',
+    };
   }
 
   /** Private-chat or group enhancement scope. */

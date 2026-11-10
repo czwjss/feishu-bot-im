@@ -46,7 +46,15 @@ class FakeBot {
   }
   async getChatName(chatId) { return chatId === 'oc_group' ? '研发群' : null; }
   async getUserName(openId) { return openId === 'ou_user' ? '测试用户' : null; }
-  async getMessage(id) { return id === 'om_bot_msg' ? { senderId: 'ou_bot', senderType: 'app' } : { senderId: 'ou_other', senderType: 'user' }; }
+  async getMessage(id) {
+    if (id === 'om_bot_msg') {
+      return {
+        senderId: 'ou_bot', senderType: 'app', messageId: id, msgType: 'text',
+        bodyContent: JSON.stringify({ text: '收到，报告已发到当前会话。' }),
+      };
+    }
+    return { senderId: 'ou_other', senderType: 'user', messageId: id, msgType: 'text', bodyContent: JSON.stringify({ text: '另一条消息' }) };
+  }
   async patchCard(id, card) { this.patches.push({ id, card }); return id; }
   async addReaction(messageId, emoji) { this.reactions = this.reactions ?? []; const id = `r${this.reactions.length + 1}`; this.reactions.push({ messageId, emoji, id }); return id; }
   async removeReaction(messageId, reactionId) { this.removed = this.removed ?? []; this.removed.push({ messageId, reactionId }); return true; }
@@ -1208,6 +1216,23 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
+// 14b) 引用消息：只带 parent_id，必须抓回原消息并注入 context
+{
+  const { harness, contextBySession, bridge } = makeBridge();
+  await bridge.handleMessage(message({
+    chat_id: 'oc_quote', chat_type: 'group', parent_id: 'om_bot_msg',
+    mentions: [], content: JSON.stringify({ text: '你能知道我引用了什么内容吗' }),
+  }));
+  assert.equal(harness.prompts.length, 1);
+  const context = contextBySession.get('sess-1') ?? '';
+  assert.match(context, /<feishu_bot_quote>/);
+  assert.match(context, /senderName: 机器人/);
+  assert.match(context, /messageId: om_bot_msg/);
+  assert.match(context, /text: 收到，报告已发到当前会话。/);
+  assert.equal(harness.prompts[0].content[0].text, '你能知道我引用了什么内容吗', 'quoted text does not pollute the user bubble');
+  bridge.dispose();
+}
+
 // 14c) 群聊注入群名称（conversationTitle），放进 context
 {
   const { harness, contextBySession, bridge } = makeBridge({
@@ -1589,4 +1614,4 @@ function message(overrides = {}) {
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 68 assertions passed');
+console.log('bridge: 73 assertions passed');
