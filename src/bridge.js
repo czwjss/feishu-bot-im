@@ -233,13 +233,16 @@ export class FeishuBridge {
       }
     }
 
-    const submitPrompt = (promptParts, promptText) => this.#submitPrompt({
+    const quotedParts = Array.isArray(quoted?.parts) ? quoted.parts : [];
+    const promptParts = quotedParts.length > 0 ? [...quotedParts, ...parts] : parts;
+
+    const submitPrompt = (incomingParts, promptText) => this.#submitPrompt({
       chatKey,
       chatId: message.chat_id,
       chatType: message.chat_type,
       createTime: message.create_time,
       messageId: message.message_id,
-      parts: promptParts,
+      parts: incomingParts,
       text: promptText,
       openId,
       quoted,
@@ -248,7 +251,7 @@ export class FeishuBridge {
     // A bare mention (or an empty text body) carries no instruction. If the
     // chat already has a Session, send a minimal user turn so the model can
     // answer; a chat without one gets the hint and no Session is created.
-    if (parts.length === 0) {
+    if (promptParts.length === 0) {
       if (message.chat_type !== 'group') return;
       if (this.#state.sessionFor(chatKey)) {
         await this.#react(message.message_id, REACTION.processing);
@@ -260,7 +263,7 @@ export class FeishuBridge {
     }
 
     await this.#react(message.message_id, REACTION.processing);
-    await submitPrompt(parts, text);
+    await submitPrompt(promptParts, text);
   }
 
   /** Hint card for a bare group mention when the chat has no Session yet. */
@@ -713,11 +716,19 @@ export class FeishuBridge {
       content: parent.bodyContent ?? parent.content ?? '',
       mentions: parent.mentions ?? [],
     });
+    const imageBuild = await this.#inbound.buildQuotedImages({
+      messageId: parent.messageId ?? message?.parent_id,
+      messageType: parent.msgType ?? parent.message_type,
+      bodyContent: parent.bodyContent ?? parent.content ?? '',
+    });
     return {
       senderName,
       messageId: parent.messageId ?? message?.parent_id ?? '',
       messageType: parent.msgType ?? parent.message_type ?? '',
       text: description.text ?? '',
+      imageCount: imageBuild.count,
+      imageNotes: imageBuild.notes,
+      parts: imageBuild.parts,
     };
   }
 

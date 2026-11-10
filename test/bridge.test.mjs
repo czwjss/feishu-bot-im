@@ -53,6 +53,22 @@ class FakeBot {
         bodyContent: JSON.stringify({ text: '收到，报告已发到当前会话。' }),
       };
     }
+    if (id === 'om_bot_image') {
+      return { senderId: 'ou_bot', senderType: 'app', messageId: id, msgType: 'image', bodyContent: JSON.stringify({ image_key: 'img_quote_1' }) };
+    }
+    if (id === 'om_bot_card_image') {
+      return {
+        senderId: 'ou_bot', senderType: 'app', messageId: id, msgType: 'interactive',
+        bodyContent: JSON.stringify({
+          schema: '2.0',
+          header: { title: { tag: 'plain_text', content: '发布完成' } },
+          body: { elements: [
+            { tag: 'markdown', content: 'v0.5.0 已发布到 npm。' },
+            { tag: 'img', img_key: 'img_card_1' },
+          ] },
+        }),
+      };
+    }
     return { senderId: 'ou_other', senderType: 'user', messageId: id, msgType: 'text', bodyContent: JSON.stringify({ text: '另一条消息' }) };
   }
   async patchCard(id, card) { this.patches.push({ id, card }); return id; }
@@ -1233,6 +1249,44 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
+// 14b2) 引用图片：下载为原生 image part，并在引用块里标记图片数
+{
+  const { bot, harness, contextBySession, bridge } = makeBridge();
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const downloads = [];
+  bot.downloadResource = async (messageId, key, type) => { downloads.push({ messageId, key, type }); return png; };
+  await bridge.handleMessage(message({
+    chat_id: 'oc_quote_image', chat_type: 'group', parent_id: 'om_bot_image',
+    mentions: [], content: JSON.stringify({ text: '这张图是什么' }),
+  }));
+  const context = contextBySession.get('sess-1') ?? '';
+  const image = harness.prompts.at(-1).content.find((part) => part.type === 'image');
+  assert.equal(context.includes('imageCount: 1'), true);
+  assert.deepEqual(downloads, [{ messageId: 'om_bot_image', key: 'img_quote_1', type: 'image' }]);
+  assert.equal(image.mediaType, 'image/png');
+  assert.equal(Buffer.from(image.data, 'base64').length, png.length);
+  bridge.dispose();
+}
+
+// 14b3) 引用卡片内嵌图片：提取 img_key 并下载，同时保留卡片正文
+{
+  const { bot, harness, contextBySession, bridge } = makeBridge();
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const downloads = [];
+  bot.downloadResource = async (messageId, key, type) => { downloads.push({ messageId, key, type }); return png; };
+  await bridge.handleMessage(message({
+    chat_id: 'oc_quote_card_image', chat_type: 'group', parent_id: 'om_bot_card_image',
+    mentions: [], content: JSON.stringify({ text: '卡片里写了什么' }),
+  }));
+  const context = contextBySession.get('sess-1') ?? '';
+  const image = harness.prompts.at(-1).content.find((part) => part.type === 'image');
+  assert.equal(context.includes('text: 发布完成 v0.5.0 已发布到 npm。'), true);
+  assert.equal(context.includes('imageCount: 1'), true);
+  assert.deepEqual(downloads, [{ messageId: 'om_bot_card_image', key: 'img_card_1', type: 'image' }]);
+  assert.equal(image.mediaType, 'image/png');
+  bridge.dispose();
+}
+
 // 14c) 群聊注入群名称（conversationTitle），放进 context
 {
   const { harness, contextBySession, bridge } = makeBridge({
@@ -1614,4 +1668,4 @@ function message(overrides = {}) {
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 73 assertions passed');
+console.log('bridge: 81 assertions passed');

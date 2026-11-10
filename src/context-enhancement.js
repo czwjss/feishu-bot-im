@@ -185,6 +185,12 @@ export function renderQuoteBlock(quote) {
   if (messageId) lines.push(`messageId: ${escapeValue(messageId)}`);
   if (messageType) lines.push(`messageType: ${escapeValue(messageType)}`);
   if (text) lines.push(`text: ${escapeValue(text)}`);
+  if (Number.isInteger(quote.imageCount) && quote.imageCount > 0) {
+    lines.push(`imageCount: ${quote.imageCount}`);
+  }
+  if (Array.isArray(quote.imageNotes) && quote.imageNotes.length > 0) {
+    lines.push(`imageNotes: ${escapeValue(quote.imageNotes.map((note) => String(note)).join('；').slice(0, 500))}`);
+  }
   return [
     INJECTED_CONTEXT_TAGS.quoteOpen,
     ...lines,

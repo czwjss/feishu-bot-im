@@ -46,6 +46,33 @@ function imageKeysOf(message) {
   return [];
 }
 
+/** Card images use img_key/image_key at arbitrary nesting levels. */
+export function imageKeysOfCard(content) {
+  let parsed;
+  try {
+    parsed = typeof content === 'string' ? JSON.parse(content) : content;
+  } catch {
+    return [];
+  }
+  const keys = new Set();
+  const visit = (node, depth = 0) => {
+    if (!node || depth > 8 || keys.size >= 9) return;
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item, depth + 1);
+      return;
+    }
+    if (typeof node !== 'object') return;
+    for (const key of [node.img_key, node.image_key, node.imageKey, node.imgKey, node.image?.image_key]) {
+      if (typeof key === 'string' && key.trim()) keys.add(key.trim());
+    }
+    for (const value of Object.values(node)) {
+      if (value && typeof value === 'object') visit(value, depth + 1);
+    }
+  };
+  visit(parsed);
+  return [...keys].slice(0, 9);
+}
+
 export class InboundContent {
   #bot;
   #inboxDir;
@@ -62,6 +89,47 @@ export class InboundContent {
     const target = join(this.#inboxDir, baseName);
     await writeFile(target, bytes, { mode: 0o600 });
     return target;
+  }
+
+  /**
+   * Download images from a quoted message or its card. The returned parts are
+   * native image parts; failed downloads are reported as notes, not guessed.
+   */
+  async buildQuotedImages(parent = {}) {
+    const messageId = typeof parent.messageId === 'string' ? parent.messageId : '';
+    if (!messageId) return { parts: [], notes: [], count: 0 };
+    const messageType = parent.messageType ?? parent.message_type ?? '';
+    const content = parent.bodyContent ?? parent.content ?? '';
+    const keys = messageType === 'interactive'
+      ? imageKeysOfCard(content)
+      : imageKeysOf({ message_type: messageType, content });
+    const unique = [...new Set(keys)].slice(0, 9);
+    const parts = [];
+    const notes = [];
+    for (const [index, key] of unique.entries()) {
+      try {
+        const bytes = await this.#bot.downloadResource(messageId, key, 'image');
+        if (bytes.length > MAX_IMAGE_BYTES) {
+          notes.push(`引用消息的第 ${index + 1} 张图片超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB，未加载`);
+          continue;
+        }
+        const mediaType = sniffImageType(bytes);
+        if (!mediaType) {
+          notes.push(`引用消息的第 ${index + 1} 张图片格式不受支持`);
+          continue;
+        }
+        parts.push({
+          type: 'image',
+          mediaType,
+          data: bytes.toString('base64'),
+          name: `feishu-quote-${messageId}-${index + 1}`,
+        });
+      } catch (error) {
+        this.#logger?.warn?.('[im-feishu] quoted image download failed', error?.message ?? error);
+        notes.push(`引用消息的第 ${index + 1} 张图片下载失败`);
+      }
+    }
+    return { parts, notes, count: unique.length };
   }
 
   /**
