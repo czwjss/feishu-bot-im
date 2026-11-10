@@ -224,7 +224,10 @@ export class FeishuBot {
   async getMessage(messageId) {
     if (!messageId) return null;
     try {
-      const response = await this.#client.im.v1.message.get({ path: { message_id: messageId } });
+      const response = await this.#client.im.v1.message.get({
+        path: { message_id: messageId },
+        params: { card_msg_content_type: 'user_card_content' },
+      });
       const item = (response?.data?.items ?? [])[0];
       if (!item) return null;
       return {
