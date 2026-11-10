@@ -165,7 +165,7 @@ export function renderGuidanceBlock(scope) {
 
 function cleanQuote(value, limit) {
   if (typeof value !== 'string') return '';
-  return value.replace(CONTROL_CHARACTERS, '').trim().slice(0, limit);
+  return value.replace(CONTROL_CHARACTERS, ' ').replace(/\s+/g, ' ').trim().slice(0, limit);
 }
 
 /**
