@@ -364,6 +364,48 @@ export async function listMessages({
   });
 }
 
+/**
+ * 会话成员姓名表（open_id → 姓名）。
+ *
+ * 消息列表不返回发送者姓名，收件箱展示需要另取一次成员表。
+ * 读不到成员（外部群等）时返回空 Map，调用方退化为 open_id。
+ */
+export async function chatMemberNames({
+  accessToken,
+  chatId,
+  pageSize = 100,
+  fetchImpl,
+  timeoutMs,
+  signal,
+} = {}) {
+  const containerId = normalizeChatId(chatId);
+  const names = new Map();
+  let pageToken = null;
+  for (let page = 0; page < 20; page += 1) {
+    const data = await requestFeishu({
+      path: `/open-apis/im/v1/chats/${encodeURIComponent(containerId)}/members`,
+      query: {
+        member_id_type: 'open_id',
+        page_size: Math.min(100, Math.max(1, Number(pageSize) || 100)),
+        ...(pageToken ? { page_token: pageToken } : {}),
+      },
+      accessToken,
+      fetchImpl,
+      timeoutMs,
+      signal,
+    });
+    for (const item of Array.isArray(data.items) ? data.items : []) {
+      const id = stringOf(item?.member_id);
+      const name = stringOf(item?.name).trim();
+      if (id && name) names.set(id, name);
+    }
+    if (!data.has_more || !data.page_token) break;
+    pageToken = stringOf(data.page_token) || null;
+    if (!pageToken) break;
+  }
+  return names;
+}
+
 /** 本地关键词筛选（不是飞书全文搜索）。 */
 export function filterMessagesByKeyword(items, keyword) {
   const needle = typeof keyword === 'string' ? keyword.trim().toLowerCase() : '';

@@ -6,7 +6,7 @@
  * 由 `feishu_avatar_inbox` 工具交给 Agent，或直接回复。
  * 回复仍走 `feishu_avatar_send`（用户本人身份），监听本身不写飞书。
  */
-import { listChats, listMessages } from './api.js';
+import { chatMemberNames, listChats, listMessages } from './api.js';
 import {
   MAX_MONITOR_CHATS,
   MAX_MESSAGES_PER_CHAT,
@@ -39,6 +39,8 @@ export class UserMonitorManager {
   #disposed = false;
   #listMessages;
   #listChats;
+  #chatMemberNames;
+  #nameCache = new Map();
 
   constructor({
     auth,
@@ -46,6 +48,7 @@ export class UserMonitorManager {
     logger = null,
     listMessages: listMessagesImpl = listMessages,
     listChats: listChatsImpl = listChats,
+    chatMemberNames: chatMemberNamesImpl = chatMemberNames,
     now = Date.now,
     setInterval: setIntervalImpl = setInterval,
     clearInterval: clearIntervalImpl = clearInterval,
@@ -60,6 +63,7 @@ export class UserMonitorManager {
     this.#clearInterval = clearIntervalImpl;
     this.#listMessages = listMessagesImpl;
     this.#listChats = listChatsImpl;
+    this.#chatMemberNames = chatMemberNamesImpl;
   }
 
   get store() {
@@ -164,6 +168,7 @@ export class UserMonitorManager {
       chatMode: input.chatMode === 'p2p' ? 'p2p' : 'group',
       external: input.external === true,
     };
+    await this.#assertWatchable(chat);
     await this.#store.saveConfig({ chats: [...this.#store.config.chats, chat] });
     // 新增监听从当前时间开始，不回补历史。
     const state = { ...this.#store.state, chats: { ...this.#store.state.chats } };
@@ -290,6 +295,35 @@ export class UserMonitorManager {
     }
   }
 
+  /**
+   * 拒绝对“与机器人自己的私聊”开监听：那里只有你自己的消息和应用发出的卡片，
+   * 前者被当作自己过滤，后者不是用户消息，永远记录不到任何内容。
+   */
+  async #assertWatchable(chat) {
+    const accessToken = await this.#auth.requireAccessToken();
+    const result = await this.#listMessages({
+      accessToken,
+      chatId: chat.chatId,
+      pageSize: 20,
+      sort: 'desc',
+    }).catch(() => null);
+    if (!result) return;
+    const items = result.items ?? [];
+    if (chat.chatMode !== 'p2p') return;
+    const hasAppSender = items.some((item) => item.senderType && item.senderType !== 'user');
+    if (hasAppSender) {
+      throw new Error('这是与机器人自己的私聊：只有你的消息和机器人卡片，监听不会记录到新内容；请选择和其他人的私聊或群聊');
+    }
+  }
+
+  /** 会话成员姓名表，每会话只取一次。 */
+  async #namesFor(chatId, accessToken) {
+    if (this.#nameCache.has(chatId)) return this.#nameCache.get(chatId);
+    const names = await this.#chatMemberNames({ accessToken, chatId }).catch(() => new Map());
+    this.#nameCache.set(chatId, names);
+    return names;
+  }
+
   async #pollChat(chat, accessToken, selfOpenId) {
     const current = this.#store.state.chats[chat.chatId] ?? {};
     const messages = current.messages ?? [];
@@ -331,6 +365,11 @@ export class UserMonitorManager {
         if (eligible.length >= MAX_MESSAGES_PER_POLL) break;
       }
 
+      let names = new Map();
+      if (eligible.some(({ item }) => !item.senderName)) {
+        names = await this.#namesFor(chat.chatId, accessToken);
+      }
+
       let cursorTimeMs = current.cursorTimeMs;
       let cursorMessageId = current.cursorMessageId ?? null;
       let lastDeliveredAt = current.lastDeliveredAt ?? null;
@@ -344,7 +383,7 @@ export class UserMonitorManager {
           ...nextMessages,
           {
             messageId: item.messageId,
-            senderName: item.senderName ?? '',
+            senderName: item.senderName || names.get(item.senderOpenId) || '',
             senderOpenId: item.senderOpenId ?? '',
             createTime: item.createTime ?? new Date(time).toISOString(),
             text: item.text ?? `[${item.msgType || '消息'}]`,
