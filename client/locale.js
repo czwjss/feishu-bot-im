@@ -160,7 +160,11 @@ export const MESSAGES = Object.freeze({
   "全部消息": "All messages",
   "仅@我/回复我": "Mentions & replies",
   "关键词": "Keywords",
-  "关键词，用逗号分隔": "Keywords, comma separated"
+  "关键词，用逗号分隔": "Keywords, comma separated",
+  "条待确认草稿": "drafts to confirm",
+  "回复消息": "reply",
+  "发送": "Send",
+  "忽略": "Ignore"
 });
 
 export function dictionaries() {

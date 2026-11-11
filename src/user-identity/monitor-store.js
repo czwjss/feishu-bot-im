@@ -19,6 +19,8 @@ export const MAX_SEEN_IDS = 500;
 export const MAX_MESSAGES_PER_CHAT = 50;
 export const MAX_MESSAGE_TEXT = 2_000;
 export const MAX_KEYWORDS = 10;
+export const MAX_DRAFTS = 20;
+export const DRAFT_TTL_MS = 30 * 60_000;
 export const TRIGGER_MODES = Object.freeze(['all', 'mention', 'keyword']);
 export const MIN_POLL_INTERVAL_MS = 5_000;
 export const MAX_POLL_INTERVAL_MS = 60_000;
@@ -109,6 +111,29 @@ function stringOf(value) {
   return typeof value === 'string' ? value : '';
 }
 
+export function normalizeMonitorDraft(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const draftId = cleanString(source.draftId);
+  const chatId = chatKey(cleanString(source.chatId));
+  const text = stringOf(source.text).slice(0, MAX_MESSAGE_TEXT);
+  if (!draftId || !chatId || !text) return null;
+  const status = ['pending', 'sent', 'ignored', 'expired'].includes(source.status)
+    ? source.status
+    : 'pending';
+  return Object.freeze({
+    draftId,
+    chatId,
+    chatName: cleanString(source.chatName),
+    replyToMessageId: cleanString(source.replyToMessageId) || null,
+    text,
+    title: cleanString(source.title),
+    status,
+    createdAt: cleanTime(source.createdAt) ?? Date.now(),
+    sentMessageId: cleanString(source.sentMessageId) || null,
+    error: cleanString(source.error) || null,
+  });
+}
+
 export function normalizeMonitorState(value) {
   const source = value && typeof value === 'object' ? value : {};
   const sourceChats = source.chats && typeof source.chats === 'object' ? source.chats : {};
@@ -145,9 +170,19 @@ export function normalizeMonitorState(value) {
       lastDeliveredAt: cleanTime(entry.lastDeliveredAt),
     });
   }
+  const drafts = [];
+  const draftIds = new Set();
+  for (const raw of Array.isArray(source.drafts) ? source.drafts : []) {
+    const draft = normalizeMonitorDraft(raw);
+    if (!draft || draftIds.has(draft.draftId)) continue;
+    draftIds.add(draft.draftId);
+    drafts.push(draft);
+    if (drafts.length >= MAX_DRAFTS) break;
+  }
   return Object.freeze({
     version: MONITOR_VERSION,
     chats: Object.freeze(chats),
+    drafts: Object.freeze(drafts),
   });
 }
 

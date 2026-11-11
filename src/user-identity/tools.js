@@ -18,6 +18,7 @@ export const ME_TOOL_NAME = 'feishu_avatar_me';
 export const MESSAGES_TOOL_NAME = 'feishu_avatar_messages';
 export const SEND_TOOL_NAME = 'feishu_avatar_send';
 export const INBOX_TOOL_NAME = 'feishu_avatar_inbox';
+export const DRAFT_TOOL_NAME = 'feishu_avatar_draft';
 
 /**
  * 执行一次用户身份 API 调用；token 过期时刷新后重试一次。
@@ -427,12 +428,83 @@ export function createInboxTool({ monitor }) {
   });
 }
 
+/**
+ * 提交回复草稿：不会发送，等用户在设置页确认后才以本人身份发出。
+ */
+export function createDraftTool({ monitor }) {
+  return Object.freeze({
+    name: DRAFT_TOOL_NAME,
+    description: '为监听到的飞书消息创建回复草稿（不会发送）。用户在设置页确认「发送」后才以你本人身份发出；'
+      + '回复或讨论性请求默认先提交草稿，只有用户明确说“直接发”时才用 feishu_avatar_send。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        chatId: {
+          type: 'string',
+          description: '目标会话（oc_…），必须在监听列表里。',
+        },
+        text: {
+          type: 'string',
+          description: '回复正文，Markdown，最多 8000 字符。',
+        },
+        messageId: {
+          type: 'string',
+          description: '要引用的消息 ID（可选）；提供时以回复形式发送，保持上下文。',
+        },
+        title: {
+          type: 'string',
+          description: '卡片标题，可选，最多 100 字符。',
+        },
+      },
+      required: ['chatId', 'text'],
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          draftId: { type: 'string' },
+          chatId: { type: 'string' },
+          status: { type: 'string' },
+          text: { type: 'string' },
+        },
+        required: ['draftId', 'chatId', 'status'],
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `草稿已创建（${value.draftId}），等待在设置页确认后发送
+
+${value.text ?? ''}`,
+      }],
+    },
+    async execute(args) {
+      if (!monitor) throw new Error('飞书分身消息监听没有加载，无法创建草稿');
+      const draft = await monitor.createDraft({
+        chatId: args?.chatId,
+        messageId: args?.messageId,
+        text: args?.text,
+        title: args?.title,
+      });
+      return {
+        draftId: draft.draftId,
+        chatId: draft.chatId,
+        status: draft.status,
+        text: draft.text,
+      };
+    },
+  });
+}
+
 export function createUserIdentityTools({ auth, fetchImpl, monitor = null }) {
   const tools = [
     createMeTool({ auth, fetchImpl }),
     createMessagesTool({ auth, fetchImpl }),
     createSendTool({ auth, fetchImpl }),
   ];
-  if (monitor) tools.push(createInboxTool({ monitor }));
+  if (monitor) {
+    tools.push(createInboxTool({ monitor }));
+    tools.push(createDraftTool({ monitor }));
+  }
   return tools;
 }

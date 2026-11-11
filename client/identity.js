@@ -12,11 +12,14 @@ const h = React.createElement;
       const [busy, setBusy] = React.useState('');
       const [error, setError] = React.useState(null);
 
+      const [drafts, setDrafts] = React.useState([]);
       const load = React.useCallback(async () => {
         try {
           const value = await rpc(connection, API.userMonitorStatus, {});
           setMonitor(value);
           setError(null);
+          const inbox = await rpc(connection, API.userMonitorDrafts, {}).catch(() => null);
+          if (inbox) setDrafts(Array.isArray(inbox.drafts) ? inbox.drafts : []);
           return value;
         } catch (failure) {
           setError(failure?.message ?? String(failure));
@@ -36,6 +39,8 @@ const h = React.createElement;
         try {
           const value = await operation();
           if (value) setMonitor(value);
+          const inbox = await rpc(connection, API.userMonitorDrafts, {}).catch(() => null);
+          if (inbox) setDrafts(Array.isArray(inbox.drafts) ? inbox.drafts : []);
         } catch (failure) {
           setError(failure?.message ?? String(failure));
         } finally {
@@ -51,6 +56,14 @@ const h = React.createElement;
       const add = (chat) => act(`add:${chat.chatId}`, () => rpc(connection, API.userMonitorAdd, chat));
       const remove = (chat) => act(`remove:${chat.chatId}`, () => rpc(connection, API.userMonitorRemove, { chatId: chat.chatId }));
       const setChat = (chat, patch) => act(`mode:${chat.chatId}`, () => rpc(connection, API.userMonitorChatSet, { chatId: chat.chatId, ...patch }));
+      const sendDraft = (draft) => act(`send:${draft.draftId}`, async () => {
+        await rpc(connection, API.userMonitorDraftSend, { draftId: draft.draftId });
+        return null;
+      });
+      const ignoreDraft = (draft) => act(`ignore:${draft.draftId}`, async () => {
+        await rpc(connection, API.userMonitorDraftIgnore, { draftId: draft.draftId });
+        return null;
+      });
       const toggle = () => act('toggle', () => rpc(connection, API.userMonitorEnable, {
         enabled: monitor?.enabled !== true,
       }));
@@ -70,6 +83,7 @@ const h = React.createElement;
       const clearAll = () => act2('clear', () => rpc(connection, API.userMonitorClear, {}));
 
       const chats = Array.isArray(monitor?.chats) ? monitor.chats : [];
+      const pendingDrafts = drafts.filter((draft) => draft.status === 'pending');
       const monitored = new Set(chats.map((chat) => chat.chatId));
       const candidates = (available ?? []).filter((chat) => !monitored.has(chat.chatId));
       const formatTime = (ms) => (Number.isFinite(ms) && ms > 0 ? new Date(ms).toLocaleTimeString() : '—');
@@ -149,6 +163,21 @@ const h = React.createElement;
             h('span', { style: S.hint }, `${t('最后检查', 'Last check')}：${formatTime(chats[0]?.lastPollAt)}`),
             h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'poll', onClick: () => void poll() },
               t('立即检查', 'Check now'))),
+          pendingDrafts.length > 0
+            ? h('div', { style: { display: 'grid', gap: '6px', paddingTop: '6px', borderTop: '1px solid var(--dsw-alias-border-l1)' } },
+              h('div', { style: { fontSize: '12px', fontWeight: 600 } }, `${pendingDrafts.length} ${t('条待确认草稿', 'drafts to confirm')}`),
+              pendingDrafts.map((draft) => h('div', {
+                key: draft.draftId,
+                style: { display: 'grid', gap: '4px', padding: '6px', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-2)' },
+              },
+              h('div', { style: S.hint }, `${draft.chatName || draft.chatId}${draft.replyToMessageId ? ` · ${t('回复消息', 'reply')}` : ''}`),
+              h('div', { style: { fontSize: '13px', whiteSpace: 'pre-wrap' } }, draft.text),
+              h('div', { style: S.row },
+                h('button', { type: 'button', className: 'bxf-mini', disabled: busy === `send:${draft.draftId}`, onClick: () => void sendDraft(draft) },
+                  t('发送', 'Send')),
+                h('button', { type: 'button', className: 'bxf-mini', disabled: busy === `ignore:${draft.draftId}`, onClick: () => void ignoreDraft(draft) },
+                  t('忽略', 'Ignore'))))))
+            : null,
           chatRows,
           monitor.unreadTotal > 0
             ? h('div', { style: { display: 'grid', gap: '6px', paddingTop: '6px', borderTop: '1px solid var(--dsw-alias-border-l1)' } },

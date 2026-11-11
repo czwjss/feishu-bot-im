@@ -203,7 +203,11 @@ var MESSAGES = Object.freeze({
   "\u5168\u90E8\u6D88\u606F": "All messages",
   "\u4EC5@\u6211/\u56DE\u590D\u6211": "Mentions & replies",
   "\u5173\u952E\u8BCD": "Keywords",
-  "\u5173\u952E\u8BCD\uFF0C\u7528\u9017\u53F7\u5206\u9694": "Keywords, comma separated"
+  "\u5173\u952E\u8BCD\uFF0C\u7528\u9017\u53F7\u5206\u9694": "Keywords, comma separated",
+  "\u6761\u5F85\u786E\u8BA4\u8349\u7A3F": "drafts to confirm",
+  "\u56DE\u590D\u6D88\u606F": "reply",
+  "\u53D1\u9001": "Send",
+  "\u5FFD\u7565": "Ignore"
 });
 function dictionaries() {
   const zh = {};
@@ -257,6 +261,9 @@ var API = {
   userMonitorEnable: "user.monitor.enable",
   userMonitorPoll: "user.monitor.poll",
   userMonitorChatSet: "user.monitor.chat.set",
+  userMonitorDrafts: "user.monitor.drafts",
+  userMonitorDraftSend: "user.monitor.draft.send",
+  userMonitorDraftIgnore: "user.monitor.draft.ignore",
   userMonitorInbox: "user.monitor.inbox",
   userMonitorRead: "user.monitor.read",
   userMonitorClear: "user.monitor.clear"
@@ -595,11 +602,14 @@ function MonitorPanel({ connection }) {
   const [manualMode, setManualMode] = import_react2.default.useState("p2p");
   const [busy, setBusy] = import_react2.default.useState("");
   const [error, setError] = import_react2.default.useState(null);
+  const [drafts, setDrafts] = import_react2.default.useState([]);
   const load = import_react2.default.useCallback(async () => {
     try {
       const value = await rpc(connection, API.userMonitorStatus, {});
       setMonitor(value);
       setError(null);
+      const inbox = await rpc(connection, API.userMonitorDrafts, {}).catch(() => null);
+      if (inbox) setDrafts(Array.isArray(inbox.drafts) ? inbox.drafts : []);
       return value;
     } catch (failure) {
       setError(failure?.message ?? String(failure));
@@ -621,6 +631,8 @@ function MonitorPanel({ connection }) {
     try {
       const value = await operation();
       if (value) setMonitor(value);
+      const inbox = await rpc(connection, API.userMonitorDrafts, {}).catch(() => null);
+      if (inbox) setDrafts(Array.isArray(inbox.drafts) ? inbox.drafts : []);
     } catch (failure) {
       setError(failure?.message ?? String(failure));
     } finally {
@@ -635,6 +647,14 @@ function MonitorPanel({ connection }) {
   const add = (chat) => act(`add:${chat.chatId}`, () => rpc(connection, API.userMonitorAdd, chat));
   const remove = (chat) => act(`remove:${chat.chatId}`, () => rpc(connection, API.userMonitorRemove, { chatId: chat.chatId }));
   const setChat = (chat, patch) => act(`mode:${chat.chatId}`, () => rpc(connection, API.userMonitorChatSet, { chatId: chat.chatId, ...patch }));
+  const sendDraft = (draft) => act(`send:${draft.draftId}`, async () => {
+    await rpc(connection, API.userMonitorDraftSend, { draftId: draft.draftId });
+    return null;
+  });
+  const ignoreDraft = (draft) => act(`ignore:${draft.draftId}`, async () => {
+    await rpc(connection, API.userMonitorDraftIgnore, { draftId: draft.draftId });
+    return null;
+  });
   const toggle = () => act("toggle", () => rpc(connection, API.userMonitorEnable, {
     enabled: monitor?.enabled !== true
   }));
@@ -652,6 +672,7 @@ function MonitorPanel({ connection }) {
   const markRead = () => act2("read", () => rpc(connection, API.userMonitorRead, {}));
   const clearAll = () => act2("clear", () => rpc(connection, API.userMonitorClear, {}));
   const chats = Array.isArray(monitor?.chats) ? monitor.chats : [];
+  const pendingDrafts = drafts.filter((draft) => draft.status === "pending");
   const monitored = new Set(chats.map((chat) => chat.chatId));
   const candidates = (available ?? []).filter((chat) => !monitored.has(chat.chatId));
   const formatTime = (ms) => Number.isFinite(ms) && ms > 0 ? new Date(ms).toLocaleTimeString() : "\u2014";
@@ -765,6 +786,34 @@ function MonitorPanel({ connection }) {
           t("\u7ACB\u5373\u68C0\u67E5", "Check now")
         )
       ),
+      pendingDrafts.length > 0 ? h2(
+        "div",
+        { style: { display: "grid", gap: "6px", paddingTop: "6px", borderTop: "1px solid var(--dsw-alias-border-l1)" } },
+        h2("div", { style: { fontSize: "12px", fontWeight: 600 } }, `${pendingDrafts.length} ${t("\u6761\u5F85\u786E\u8BA4\u8349\u7A3F", "drafts to confirm")}`),
+        pendingDrafts.map((draft) => h2(
+          "div",
+          {
+            key: draft.draftId,
+            style: { display: "grid", gap: "4px", padding: "6px", borderRadius: "8px", background: "var(--dsw-alias-bg-layer-2)" }
+          },
+          h2("div", { style: S.hint }, `${draft.chatName || draft.chatId}${draft.replyToMessageId ? ` \xB7 ${t("\u56DE\u590D\u6D88\u606F", "reply")}` : ""}`),
+          h2("div", { style: { fontSize: "13px", whiteSpace: "pre-wrap" } }, draft.text),
+          h2(
+            "div",
+            { style: S.row },
+            h2(
+              "button",
+              { type: "button", className: "bxf-mini", disabled: busy === `send:${draft.draftId}`, onClick: () => void sendDraft(draft) },
+              t("\u53D1\u9001", "Send")
+            ),
+            h2(
+              "button",
+              { type: "button", className: "bxf-mini", disabled: busy === `ignore:${draft.draftId}`, onClick: () => void ignoreDraft(draft) },
+              t("\u5FFD\u7565", "Ignore")
+            )
+          )
+        ))
+      ) : null,
       chatRows,
       monitor.unreadTotal > 0 ? h2(
         "div",

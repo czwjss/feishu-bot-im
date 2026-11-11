@@ -38,6 +38,9 @@ tools.length = 0;
 sections.length = 0;
 installUserIdentityContributions(ctx, {}, {
   summary: () => '飞书分身收件箱有 1 条未读：测试私聊 1 条。',
+  async createDraft(input) {
+    return { draftId: 'draft-1', chatId: input.chatId, status: 'pending', text: input.text };
+  },
   async inbox(input) {
     inboxCalls.push(input);
     return {
@@ -54,18 +57,24 @@ assert.deepEqual(tools.map((tool) => tool.name), [
   'feishu_avatar_messages',
   'feishu_avatar_send',
   'feishu_avatar_inbox',
+  'feishu_avatar_draft',
 ]);
 assert.equal(sections.length, 2, 'inbox context is registered with the monitor');
 assert.equal(sections[1].name, 'im-feishu-user:inbox');
 assert.equal(sections[1].order, 121);
 assert.match(String(sections[1].text()), /1 条未读/);
-const inboxTool = tools.at(-1);
+const draftTool = tools.at(-1);
+assert.equal(draftTool.name, 'feishu_avatar_draft');
+const created = await draftTool.execute({ chatId: 'oc_test', text: '好的' });
+assert.equal(created.draftId, 'draft-1');
+assert.equal(created.status, 'pending');
+const inboxTool = tools.at(-2);
 assert.equal(inboxTool.parameters.properties.limit.maximum, 50);
 const value = await inboxTool.execute({});
 assert.equal(value.total, 1);
 assert.equal(value.items[0].text, '你好');
 assert.deepEqual(inboxCalls, [{ chatId: '', limit: undefined, unreadOnly: true, markRead: true }]);
-console.log('user identity contributions: 16 assertions passed');
+console.log('user identity contributions: 20 assertions passed');
 
 const preset = await import('../src/user-identity/index.js');
 assert.deepEqual(preset.inject, []);

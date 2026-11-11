@@ -217,6 +217,15 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
           keywords: input.keywords,
         }));
 
+      case 'user.monitor.drafts':
+        return ok(await requireUserMonitor().drafts());
+
+      case 'user.monitor.draft.send':
+        return ok(await requireUserMonitor().sendDraft(input.draftId));
+
+      case 'user.monitor.draft.ignore':
+        return ok(await requireUserMonitor().ignoreDraft(input.draftId));
+
       case 'user.monitor.inbox':
         return ok(await requireUserMonitor().inbox(input));
 

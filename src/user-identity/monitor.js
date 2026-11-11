@@ -6,8 +6,10 @@
  * 由 `feishu_avatar_inbox` 工具交给 Agent，或直接回复。
  * 回复仍走 `feishu_avatar_send`（用户本人身份），监听本身不写飞书。
  */
-import { chatMemberNames, getMessage, listChats, listMessages } from './api.js';
+import { chatMemberNames, getMessage, listChats, listMessages, replyCardMessage, sendCardMessage } from './api.js';
 import {
+  DRAFT_TTL_MS,
+  MAX_DRAFTS,
   MAX_MONITOR_CHATS,
   MAX_MESSAGES_PER_CHAT,
   MAX_SEEN_IDS,
@@ -43,6 +45,8 @@ export class UserMonitorManager {
   #listChats;
   #chatMemberNames;
   #getMessage;
+  #sendCard;
+  #replyCard;
   #nameCache = new Map();
   #parentSender = new Map();
 
@@ -54,6 +58,8 @@ export class UserMonitorManager {
     listChats: listChatsImpl = listChats,
     chatMemberNames: chatMemberNamesImpl = chatMemberNames,
     getMessage: getMessageImpl = getMessage,
+    sendCard: sendCardImpl = sendCardMessage,
+    replyCard: replyCardImpl = replyCardMessage,
     now = Date.now,
     setInterval: setIntervalImpl = setInterval,
     clearInterval: clearIntervalImpl = clearInterval,
@@ -70,6 +76,8 @@ export class UserMonitorManager {
     this.#listChats = listChatsImpl;
     this.#chatMemberNames = chatMemberNamesImpl;
     this.#getMessage = getMessageImpl;
+    this.#sendCard = sendCardImpl;
+    this.#replyCard = replyCardImpl;
   }
 
   get store() {
@@ -132,6 +140,95 @@ export class UserMonitorManager {
     };
   }
 
+  /** 待确认草稿（pending + 最近已处理），过期自动标 expired。 */
+  async drafts() {
+    const now = this.#now();
+    const drafts = (this.#store.state.drafts ?? []).map((draft) => (
+      draft.status === 'pending' && now - draft.createdAt > DRAFT_TTL_MS
+        ? { ...draft, status: 'expired' }
+        : draft
+    ));
+    return { drafts };
+  }
+
+  /**
+   * 创建待确认草稿。不会发送任何消息；发送必须显式调用 sendDraft。
+   */
+  async createDraft({ chatId, messageId, text, title } = {}) {
+    const id = stringOf(chatId).trim();
+    const chat = this.#store.config.chats.find((item) => item.chatId === id);
+    if (!chat) throw new Error('这个会话不在监听列表里，无法创建草稿');
+    const body = stringOf(text).trim();
+    if (!body) throw new Error('草稿正文不能为空');
+    const draft = {
+      draftId: `draft-${this.#now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      chatId: id,
+      chatName: chat.name || id,
+      replyToMessageId: stringOf(messageId).trim() || null,
+      text: body,
+      title: stringOf(title).trim(),
+      status: 'pending',
+      createdAt: this.#now(),
+      sentMessageId: null,
+      error: null,
+    };
+    const pending = (this.#store.state.drafts ?? []).filter((item) => item.status === 'pending');
+    await this.#store.saveState({
+      ...this.#store.state,
+      drafts: [...pending, draft].slice(-MAX_DRAFTS),
+    });
+    return draft;
+  }
+
+  /** 用户确认后以本人身份发送草稿。 */
+  async sendDraft(draftId) {
+    const id = stringOf(draftId).trim();
+    const drafts = [...(this.#store.state.drafts ?? [])];
+    const index = drafts.findIndex((draft) => draft.draftId === id);
+    if (index < 0) throw new Error('草稿不存在或已处理');
+    const draft = drafts[index];
+    if (draft.status !== 'pending') throw new Error(`草稿状态是 ${draft.status}，不能发送`);
+    if (this.#now() - draft.createdAt > DRAFT_TTL_MS) throw new Error('草稿已过期，请重新生成');
+
+    const accessToken = await this.#auth.requireAccessToken();
+    let sent;
+    try {
+      if (draft.replyToMessageId) {
+        sent = await this.#replyCard({
+          accessToken,
+          messageId: draft.replyToMessageId,
+          text: draft.text,
+          title: draft.title || undefined,
+        });
+      } else {
+        sent = await this.#sendCard({
+          accessToken,
+          chatId: draft.chatId,
+          text: draft.text,
+          title: draft.title || undefined,
+        });
+      }
+    } catch (error) {
+      drafts[index] = { ...draft, error: error?.message ?? String(error) };
+      await this.#store.saveState({ ...this.#store.state, drafts });
+      throw error;
+    }
+    drafts[index] = { ...draft, status: 'sent', sentMessageId: sent.messageId ?? null, error: null };
+    await this.#store.saveState({ ...this.#store.state, drafts });
+    return drafts[index];
+  }
+
+  /** 忽略草稿，不发送。 */
+  async ignoreDraft(draftId) {
+    const id = stringOf(draftId).trim();
+    const drafts = [...(this.#store.state.drafts ?? [])];
+    const index = drafts.findIndex((draft) => draft.draftId === id);
+    if (index < 0) throw new Error('草稿不存在或已处理');
+    drafts[index] = { ...drafts[index], status: 'ignored' };
+    await this.#store.saveState({ ...this.#store.state, drafts });
+    return drafts[index];
+  }
+
   /**
    * 注入用的未读摘要；没有未读时返回空串。
    * 只给计数和会话名，不把正文塞进 system prompt。
@@ -148,8 +245,10 @@ export class UserMonitorManager {
     const detail = unread.slice(0, 5)
       .map((item) => `${item.name} ${item.count} 条`)
       .join('、');
-    return `飞书分身收件箱有 ${total} 条未读：${detail}。用 feishu_avatar_inbox 查看；`
-      + '需要回复时用 feishu_avatar_send，以用户本人身份发送。';
+    const pending = (this.#store.state.drafts ?? []).filter((draft) => draft.status === 'pending').length;
+    const draftNote = pending > 0 ? `另有 ${pending} 条待确认草稿。` : '';
+    return `飞书分身收件箱有 ${total} 条未读：${detail}。${draftNote}`
+      + '用 feishu_avatar_inbox 查看；回复草稿用 feishu_avatar_draft 提交，等用户确认后再发。';
   }
 
   /** 候选会话：群聊 + 最近私聊。 */

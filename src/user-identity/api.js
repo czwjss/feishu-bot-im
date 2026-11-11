@@ -528,6 +528,44 @@ export async function sendCardMessage({
 }
 
 
+/**
+ * 以用户身份回复某条消息（保持引用关系）。
+ * 群聊回复优先用它，避免出现无引用的新消息。
+ */
+export async function replyCardMessage({
+  accessToken,
+  messageId,
+  text,
+  title,
+  color,
+  fetchImpl,
+  timeoutMs,
+  signal,
+} = {}) {
+  const id = stringOf(messageId).trim();
+  if (!id) throw new Error('messageId 不能为空');
+  const value = validateText(text);
+  const heading = typeof title === 'string' ? title.trim() : '';
+  if (heading.length > 100) throw new Error('title 最多 100 字符');
+  if (color && !heading) throw new Error('color 需要同时提供 title');
+  const card = noticeCard(value, heading || null, normalizeCardColor(color));
+  const data = await requestFeishu({
+    path: `/open-apis/im/v1/messages/${encodeURIComponent(id)}/reply`,
+    method: 'POST',
+    body: { msg_type: 'interactive', content: JSON.stringify(card) },
+    accessToken,
+    fetchImpl,
+    timeoutMs,
+    signal,
+  });
+  return Object.freeze({
+    messageId: stringOf(data.message_id),
+    chatId: stringOf(data.chat_id),
+    createTime: formatCreateTime(data.create_time),
+    msgType: stringOf(data.msg_type) || 'interactive',
+  });
+}
+
 function safeFileName(value, fallback) {
   const name = typeof value === 'string' ? value.trim() : '';
   return basename(name || fallback || 'file').replace(/[\u0000-\u001f]/g, '').slice(0, 120) || 'file';
