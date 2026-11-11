@@ -157,6 +157,22 @@ try {
   await engine.skip({ token: token2, reason: '只是通知' });
   assert.equal(sent.length, 1, 'skip does not send');
 
+  // 4b) 只有机器人消息的批次不自动回复，避免刷屏
+  await store.saveState({
+    chats: {
+      [chatId]: {
+        cursorTimeMs: clock.now() - 60_000,
+        seen: [],
+        messages: [{ messageId: 'om_bot_only', senderName: '机器人', senderOpenId: 'cli_app', senderType: 'app', text: '通知', createTime: new Date(clock.now()).toISOString(), read: false }],
+        batch: { messageIds: ['om_bot_only'], firstAt: clock.now(), lastAt: clock.now() },
+        sessionId: 'sess-auto-1',
+      },
+    },
+  });
+  const promptsBeforeBotOnly = prompts.length;
+  assert.equal(await engine.flush({ ...chat }), null, 'bot-only batch is not dispatched');
+  assert.equal(prompts.length, promptsBeforeBotOnly, 'no new worker prompt for bot-only batch');
+
   // 5) 非 auto 会话不派发
   const otherChat = { chatId: 'oc_watch', name: '只记录', chatMode: 'p2p', mode: 'all', replyMode: 'watch' };
   assert.equal(await engine.flush(otherChat), null);
@@ -174,4 +190,4 @@ try {
   await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-console.log('user identity auto reply: 21 assertions passed');
+console.log('user identity auto reply: 23 assertions passed');

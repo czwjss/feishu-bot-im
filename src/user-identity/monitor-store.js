@@ -115,6 +115,7 @@ export function normalizeMonitorMessage(value) {
     messageId,
     senderName: cleanString(source.senderName),
     senderOpenId: cleanString(source.senderOpenId),
+    senderType: cleanString(source.senderType),
     createTime: cleanString(source.createTime),
     text,
     read: source.read === true,

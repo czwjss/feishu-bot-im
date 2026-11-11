@@ -640,6 +640,7 @@ export class UserMonitorManager {
             senderName: item.senderName || roster.get(item.senderOpenId)
               || (item.senderType === 'app' ? '机器人' : ''),
             senderOpenId: item.senderOpenId ?? '',
+            senderType: item.senderType ?? '',
             createTime: item.createTime ?? new Date(time).toISOString(),
             text: this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, roster),
             read: false,

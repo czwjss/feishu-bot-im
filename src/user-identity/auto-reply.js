@@ -167,7 +167,14 @@ export class AutoReplyEngine {
     const entry = this.#store.state.chats[chat.chatId] ?? {};
     const ids = entry.batch?.messageIds ?? [];
     if (ids.length === 0) return null;
-    const messages = (entry.messages ?? []).filter((message) => ids.includes(message.messageId));
+    const batchMessages = (entry.messages ?? []).filter((message) => ids.includes(message.messageId));
+    // 只有机器人/应用消息时不自动回复，避免和机器人互相刷屏。
+    const messages = batchMessages.filter((message) => message.senderType !== 'app');
+    if (batchMessages.length > 0 && messages.length === 0) {
+      this.#logger?.info?.(`[im-feishu] ${chat.chatId} 本批只有机器人消息，跳过自动回复`);
+      await this.#patch(chat.chatId, { batch: { messageIds: [], firstAt: null, lastAt: null, token: null } });
+      return null;
+    }
     if (messages.length === 0) {
       await this.#patch(chat.chatId, { batch: { messageIds: [], firstAt: null, lastAt: null, token: null } });
       return null;
