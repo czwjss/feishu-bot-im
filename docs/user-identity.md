@@ -9,8 +9,7 @@
 用户身份    user_access_token     feishu_avatar_* 群里显示「陈志文」
 ```
 
-用户身份能力并进了飞书机器人插件，不再单独建包；工具只在挂了 `user-identity`
-子插件的预设里出现，群聊 Agent 看不到。
+用户身份能力并进了飞书机器人插件，不再单独建包；`feishu_avatar_*` 工具由 Host 默认注册，不需要修改 Agent 预设。
 
 ## 1. 开通权限
 
@@ -64,29 +63,18 @@ POST accounts.feishu.cn/oauth/v3/token
 
 **不需要重定向 URL，也不需要本机回调端口。**
 
-## 3. 挂到预设
+## 3. 默认挂载
 
-工具在子插件 `@czwjss/feishu-bot-im/user-identity` 里，默认不加载。
-用 Creator 模式新建一个预设，或在 profile patch 里追加一行：
+`feishu_avatar_*` 工具由 Host 的 `feishu-bot-im` 插件全局注册，**默认即挂载**，
+不需要修改任何 Agent 预设。
 
-```yaml
-- id: im-feishu-user-identity
-  name: '@czwjss/feishu-bot-im/user-identity'
-```
-
-例如 Creator 模式里说：
+旧版本要求挂载的子插件：
 
 ```text
-新建一个预设「我的飞书分身」：在 standard 预设基础上，
-额外挂载 @czwjss/feishu-bot-im/user-identity。
+@czwjss/feishu-bot-im/user-identity
 ```
 
-结果：
-
-```text
-普通群聊 Agent         没有 feishu_avatar_*
-我的飞书分身           只有 feishu_avatar_*
-```
+现在保留为兼容 no-op；已有预设不必删除，也不会重复注册工具。
 
 ## 4. 工具
 
@@ -111,7 +99,7 @@ POST accounts.feishu.cn/oauth/v3/token
 - 设置页和 RPC 不回传 token 明文；
 - token 过期前 60 秒自动用 refresh_token 刷新；
 - 设备授权链接和 user_code 只保存在 Host 内存里，重启后失效；
-- 用户身份工具只在专门预设里出现，群成员无法通过群聊 Agent 调用。
+- 工具默认对所有 Agent 可见；如果机器人被拉进群，群成员可能诱导它调用 `feishu_avatar_*`。只应在可信环境启用。
 
 ## 6. 常见错误
 
@@ -121,4 +109,4 @@ POST accounts.feishu.cn/oauth/v3/token
 | 授权页报 `20027` | scope 没有在应用后台开通 | 开通权限并发布应用 |
 | `99991679` | token 缺 scope | 补 scope 后重新连接 |
 | `20037` / `20073` | refresh_token 过期/已用 | 重新连接 |
-| 工具不存在 | 预设没挂 `user-identity` | 在预设里加入子插件 |
+| 工具不存在 | `feishu-bot-im` Host 插件未启用 | 在插件设置中启用并重启 DSH |

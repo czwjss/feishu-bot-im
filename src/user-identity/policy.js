@@ -1,7 +1,7 @@
 /**
  * 用户身份（飞书分身）的静态 system prompt。
  *
- * 只在挂了 ./user-identity 的预设里生效；群聊 Agent 不会看到这些规则。
+ * 由 Host 的 feishu-bot-im 插件全局注册，所有 Agent 默认可见。
  */
 export const USER_IDENTITY_POLICY = [
   '飞书分身（用户身份）规则：',

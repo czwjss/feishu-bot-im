@@ -2,7 +2,7 @@
 
 > 可视化架构图：[user-identity-architecture.html](user-identity-architecture.html)
 
-> 历史分析快照（基线：`v0.4.1` / `dfddda4`）。当前实现已经提交，scope/RPC/token 策略以 [user-identity.md](user-identity.md) 和 [feishu-scopes.md](feishu-scopes.md) 为准。
+> 历史分析快照（基线：`v0.4.1` / `dfddda4`）。当前实现已经提交；`feishu_avatar_*` 工具现由 Host 默认注册，旧预设子插件为 no-op。scope/RPC/token 策略以 [user-identity.md](user-identity.md) 和 [feishu-scopes.md](feishu-scopes.md) 为准。
 
 ## 1. 本地变更快照
 

@@ -19,6 +19,8 @@ import { UserIdentityConfigStore, USER_IDENTITY_FILE, USER_TOKEN_FILE } from './
 import { UserIdentityConnect } from './src/user-identity/connect.js';
 import { UserIdentityManager } from './src/user-identity/manager.js';
 import { UserTokenStore } from './src/user-identity/token-store.js';
+import { createUserIdentityTools } from './src/user-identity/tools.js';
+import { USER_IDENTITY_POLICY } from './src/user-identity/policy.js';
 
 export const name = 'feishu-bot-im';
 export const inject = ['connection', 'credentials', 'typertGateway'];
@@ -32,7 +34,7 @@ async function version() {
   }
 }
 
-/** 用户身份（飞书分身）：复用机器人应用，不注册模型工具。 */
+/** 用户身份（飞书分身）：复用机器人应用；Host 全局注册模型工具。 */
 async function createUserIdentity(ctx, paths, botConfigStore, logger) {
   const configStore = await new UserIdentityConfigStore({
     path: join(paths.root, USER_IDENTITY_FILE),
@@ -48,13 +50,14 @@ async function createUserIdentity(ctx, paths, botConfigStore, logger) {
     logger,
   });
   const connect = new UserIdentityConnect({ auth, logger });
-  return new UserIdentityManager({
+  const manager = new UserIdentityManager({
     configStore,
     botConfigStore,
     auth,
     connect,
     logger,
   });
+  return { manager, auth };
 }
 
 export async function apply(ctx, config = {}) {
@@ -107,13 +110,18 @@ export async function apply(ctx, config = {}) {
       order: 120,
       text: (assembly) => manager.injectedContextFor(assembly?.agent?.session?.id),
     });
+    promptCtx.systemPrompt.section({
+      name: 'im-feishu-user:policy',
+      order: 141,
+      text: USER_IDENTITY_POLICY,
+    });
   });
 
   ctx.inject(['agentPresets'], (presetCtx) => {
     manager.setPresetSource(() => presetCtx.agentPresets.list());
   });
 
-  const userIdentity = await createUserIdentity(ctx, paths, configStore, logger);
+  const { manager: userIdentity, auth: userIdentityAuth } = await createUserIdentity(ctx, paths, configStore, logger);
   userIdentity.startKeepalive();
 
   const handler = createRpcHandler({ manager, harness, version: pluginVersion, userIdentity });
@@ -150,6 +158,9 @@ export async function apply(ctx, config = {}) {
     toolCtx.tools.register(createPeopleTool({
       find: (input) => manager.findPeople(input),
     }));
+    for (const tool of createUserIdentityTools({ auth: userIdentityAuth })) {
+      toolCtx.tools.register(tool);
+    }
   });
 
   ctx.effect(() => () => manager.dispose(), 'feishu-bot: runtimes');
