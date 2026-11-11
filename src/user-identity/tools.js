@@ -19,6 +19,8 @@ export const MESSAGES_TOOL_NAME = 'feishu_avatar_messages';
 export const SEND_TOOL_NAME = 'feishu_avatar_send';
 export const INBOX_TOOL_NAME = 'feishu_avatar_inbox';
 export const DRAFT_TOOL_NAME = 'feishu_avatar_draft';
+export const REPLY_TOOL_NAME = 'feishu_avatar_reply';
+export const SKIP_TOOL_NAME = 'feishu_avatar_skip';
 
 /**
  * 执行一次用户身份 API 调用；token 过期时刷新后重试一次。
@@ -496,6 +498,57 @@ ${value.text ?? ''}`,
   });
 }
 
+/**
+ * 自动回复决策：Worker 处理完一批消息后调用，Host 负责发送。
+ * 只在自动回复模式的任务里出现。
+ */
+export function createReplyTool({ monitor }) {
+  return Object.freeze({
+    name: REPLY_TOOL_NAME,
+    description: '在自动回复任务中提交本批消息的回复，Host 会以你本人身份发送（优先回复原消息）。'
+      + 'token 必须是任务提示里给出的批次令牌；一次任务只调用一次。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        token: { type: 'string', description: '任务提示里给出的批次令牌。' },
+        text: { type: 'string', description: '回复正文，Markdown，最多 8000 字符。' },
+      },
+      required: ['token', 'text'],
+    },
+    async execute(args) {
+      const engine = monitor?.autoReply;
+      if (!engine) throw new Error('自动回复未启用');
+      const result = await engine.reply({ token: args?.token, text: args?.text });
+      return { sent: true, messageId: result.sentMessageId, handled: result.messageIds.length };
+    },
+  });
+}
+
+/** 自动回复决策：本批不需要回复。 */
+export function createSkipTool({ monitor }) {
+  return Object.freeze({
+    name: SKIP_TOOL_NAME,
+    description: '在自动回复任务中声明本批消息不需要回复（例如只是通知、已有人回答、与自己无关）。'
+      + 'token 必须是任务提示里给出的批次令牌。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        token: { type: 'string', description: '任务提示里给出的批次令牌。' },
+        reason: { type: 'string', description: '为什么不需要回复，简短一句。' },
+      },
+      required: ['token'],
+    },
+    async execute(args) {
+      const engine = monitor?.autoReply;
+      if (!engine) throw new Error('自动回复未启用');
+      const result = await engine.skip({ token: args?.token, reason: args?.reason });
+      return { skipped: true, handled: result.messageIds.length };
+    },
+  });
+}
+
 export function createUserIdentityTools({ auth, fetchImpl, monitor = null }) {
   const tools = [
     createMeTool({ auth, fetchImpl }),
@@ -505,6 +558,8 @@ export function createUserIdentityTools({ auth, fetchImpl, monitor = null }) {
   if (monitor) {
     tools.push(createInboxTool({ monitor }));
     tools.push(createDraftTool({ monitor }));
+    tools.push(createReplyTool({ monitor }));
+    tools.push(createSkipTool({ monitor }));
   }
   return tools;
 }

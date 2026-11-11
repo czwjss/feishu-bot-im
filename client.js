@@ -207,7 +207,13 @@ var MESSAGES = Object.freeze({
   "\u6761\u5F85\u786E\u8BA4\u8349\u7A3F": "drafts to confirm",
   "\u56DE\u590D\u6D88\u606F": "reply",
   "\u53D1\u9001": "Send",
-  "\u5FFD\u7565": "Ignore"
+  "\u5FFD\u7565": "Ignore",
+  "\u5904\u7406\u65B9\u5F0F": "Handling",
+  "\u53EA\u8BB0\u5F55": "Record only",
+  "\u751F\u6210\u8349\u7A3F": "Draft",
+  "\u81EA\u52A8\u56DE\u590D": "Auto reply",
+  "\u5F85\u5904\u7406": "pending",
+  "\u4E0A\u6B21\u81EA\u52A8\u56DE\u590D": "last auto"
 });
 function dictionaries() {
   const zh = {};
@@ -689,6 +695,8 @@ function MonitorPanel({ connection }) {
         "div",
         { style: S.hint },
         `${chat.chatMode === "p2p" ? t("\u79C1\u804A", "Direct") : t("\u7FA4\u804A", "Group")} \xB7 ${chat.chatId}`,
+        chat.pendingBatch ? ` \xB7 ${t("\u5F85\u5904\u7406", "pending")} ${chat.pendingBatch}` : "",
+        chat.lastAutoReplyAt ? ` \xB7 ${t("\u4E0A\u6B21\u81EA\u52A8\u56DE\u590D", "last auto")} ${formatTime(chat.lastAutoReplyAt)}` : "",
         chat.lastError ? h2("span", { style: { color: "var(--dsw-alias-state-error-primary)" } }, ` \xB7 ${chat.lastError}`) : null
       )
     ),
@@ -713,6 +721,19 @@ function MonitorPanel({ connection }) {
         void setChat(chat, { keywords });
       }
     }) : null,
+    h2(
+      "select",
+      {
+        style: { ...S.input, width: "auto", height: "28px", fontSize: "12px" },
+        value: chat.replyMode ?? "watch",
+        disabled: busy === `mode:${chat.chatId}`,
+        title: t("\u5904\u7406\u65B9\u5F0F", "Handling"),
+        onChange: (event) => void setChat(chat, { replyMode: event.target.value })
+      },
+      h2("option", { value: "watch" }, t("\u53EA\u8BB0\u5F55", "Record only")),
+      h2("option", { value: "draft" }, t("\u751F\u6210\u8349\u7A3F", "Draft")),
+      h2("option", { value: "auto" }, t("\u81EA\u52A8\u56DE\u590D", "Auto reply"))
+    ),
     h2(
       "button",
       { type: "button", className: "bxf-mini", disabled: busy === `remove:${chat.chatId}`, onClick: () => void remove(chat) },

@@ -4,8 +4,8 @@
  * 配置：`<dataDir>/monitor.json`
  * 状态：`<dataDir>/monitor-state.json`
  *
- * 监听按会话保存游标、去重集合和最近消息（有上限、0600），
- * 供 `feishu_avatar_inbox` 工具读取；不调用模型，也不自动回复。
+ * 监听按会话保存游标、去重集合、最近消息和批次状态（有上限、0600）。
+ * `watch` 只记录，`auto` 由 Host 把一批消息派给 Worker 会话并按其决策回复。
  */
 import { readFile } from 'node:fs/promises';
 
@@ -22,6 +22,17 @@ export const MAX_KEYWORDS = 10;
 export const MAX_DRAFTS = 20;
 export const DRAFT_TTL_MS = 30 * 60_000;
 export const TRIGGER_MODES = Object.freeze(['all', 'mention', 'keyword']);
+export const REPLY_MODES = Object.freeze(['watch', 'draft', 'auto']);
+/** 一批消息的防抖窗口：首条到达后再等这么久就把批次交给 Worker。 */
+export const BATCH_DEBOUNCE_MS = 45_000;
+/** 批次最多等这么久，避免持续刷屏时一直不处理。 */
+export const BATCH_MAX_WAIT_MS = 3 * 60_000;
+export const BATCH_MAX_MESSAGES = 10;
+/** Worker 必须在这段时间内给出决策，否则本批放弃、消息保持未读。 */
+export const DECISION_TIMEOUT_MS = 180_000;
+/** 自动回复频率上限（每会话每小时）。 */
+export const AUTO_REPLY_HOURLY_LIMIT = 20;
+export const MAX_OUTBOX = 20;
 export const DEFAULT_POLL_INTERVAL_MS = 60_000;
 export const MIN_POLL_INTERVAL_MS = 5_000;
 export const MAX_POLL_INTERVAL_MS = 60_000;
@@ -69,6 +80,8 @@ export function normalizeMonitorChat(value) {
     external: source.external === true,
     mode,
     keywords: normalizeKeywords(source.keywords),
+    replyMode: REPLY_MODES.includes(source.replyMode) ? source.replyMode : 'watch',
+    preset: cleanString(source.preset),
   });
 }
 
@@ -161,10 +174,35 @@ export function normalizeMonitorState(value) {
       messages.push(message);
       if (messages.length >= MAX_MESSAGES_PER_CHAT) break;
     }
+    const batch = entry.batch && typeof entry.batch === 'object' ? entry.batch : {};
+    const pendingIds = Array.isArray(batch.messageIds)
+      ? batch.messageIds.map(cleanString).filter(Boolean).slice(0, BATCH_MAX_MESSAGES)
+      : [];
+    const outbox = [];
+    for (const raw of Array.isArray(entry.outbox) ? entry.outbox : []) {
+      const item = raw && typeof raw === 'object' ? raw : {};
+      const messageId = cleanString(item.messageId);
+      if (!messageId) continue;
+      outbox.push(Object.freeze({
+        messageId,
+        text: stringOf(item.text).slice(0, MAX_MESSAGE_TEXT),
+        at: cleanTime(item.at) ?? 0,
+        source: cleanString(item.source) || 'auto',
+      }));
+      if (outbox.length >= MAX_OUTBOX) break;
+    }
     chats[chatId] = Object.freeze({
       cursorTimeMs: cleanTime(entry.cursorTimeMs),
       cursorMessageId: cleanString(entry.cursorMessageId) || null,
       messages: Object.freeze(messages),
+      sessionId: cleanString(entry.sessionId) || null,
+      batch: Object.freeze({
+        messageIds: Object.freeze(pendingIds),
+        firstAt: cleanTime(batch.firstAt),
+        lastAt: cleanTime(batch.lastAt),
+        token: cleanString(batch.token) || null,
+      }),
+      outbox: Object.freeze(outbox),
       seen: Object.freeze(seen),
       lastPollAt: cleanTime(entry.lastPollAt),
       lastError: cleanString(entry.lastError) || null,

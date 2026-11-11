@@ -164,7 +164,13 @@ export const MESSAGES = Object.freeze({
   "条待确认草稿": "drafts to confirm",
   "回复消息": "reply",
   "发送": "Send",
-  "忽略": "Ignore"
+  "忽略": "Ignore",
+  "处理方式": "Handling",
+  "只记录": "Record only",
+  "生成草稿": "Draft",
+  "自动回复": "Auto reply",
+  "待处理": "pending",
+  "上次自动回复": "last auto"
 });
 
 export function dictionaries() {

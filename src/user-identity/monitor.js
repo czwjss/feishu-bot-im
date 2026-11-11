@@ -7,6 +7,7 @@
  * 回复仍走 `feishu_avatar_send`（用户本人身份），监听本身不写飞书。
  */
 import { chatMemberNames, getMessage, listChats, listMessages, replyCardMessage, sendCardMessage } from './api.js';
+import { AutoReplyEngine } from './auto-reply.js';
 import {
   DRAFT_TTL_MS,
   MAX_DRAFTS,
@@ -51,12 +52,15 @@ export class UserMonitorManager {
   #getMessage;
   #sendCard;
   #replyCard;
+  #autoReply;
   #nameCache = new Map();
   #parentSender = new Map();
 
   constructor({
     auth,
     store,
+    harness = null,
+    autoReply = null,
     logger = null,
     listMessages: listMessagesImpl = listMessages,
     listChats: listChatsImpl = listChats,
@@ -67,12 +71,29 @@ export class UserMonitorManager {
     now = Date.now,
     setInterval: setIntervalImpl = setInterval,
     clearInterval: clearIntervalImpl = clearInterval,
+    setTimeout: setTimeoutImpl = setTimeout,
+    clearTimeout: clearTimeoutImpl = clearTimeout,
   }) {
     if (!auth) throw new TypeError('UserMonitorManager 需要 auth');
     if (!store) throw new TypeError('UserMonitorManager 需要 store');
     this.#auth = auth;
     this.#store = store;
     this.#logger = logger;
+    this.#autoReply = autoReply
+      ?? (harness
+        ? new AutoReplyEngine({
+          store,
+          harness,
+          auth,
+          sendCard: sendCardImpl,
+          replyCard: replyCardImpl,
+          logger,
+          now,
+          setTimeout: setTimeoutImpl,
+          clearTimeout: clearTimeoutImpl,
+        })
+        : null);
+    this.#autoReply?.setSelfOpenId?.('');
     this.#now = now;
     this.#setInterval = setIntervalImpl;
     this.#clearInterval = clearIntervalImpl;
@@ -107,6 +128,12 @@ export class UserMonitorManager {
   dispose() {
     this.#disposed = true;
     this.stop();
+    this.#autoReply?.dispose?.();
+  }
+
+  /** 自动回复引擎（未提供 harness 时为 null）。 */
+  get autoReply() {
+    return this.#autoReply;
   }
 
   /** 监听状态 + 每会话未读数和最近消息（受上限约束）。 */
@@ -123,6 +150,9 @@ export class UserMonitorManager {
       return {
         ...chat,
         unread,
+        sessionId: entry.sessionId ?? null,
+        pendingBatch: entry.batch?.messageIds?.length ?? 0,
+        lastAutoReplyAt: (entry.outbox ?? []).filter((item) => item.source === 'auto').at(-1)?.at ?? null,
         cursorTimeMs: entry.cursorTimeMs ?? null,
         lastPollAt: entry.lastPollAt ?? null,
         lastError: entry.lastError ?? null,
@@ -422,6 +452,7 @@ export class UserMonitorManager {
       }
       const auth = await this.#auth.status().catch(() => null);
       const selfOpenId = auth?.authorization?.user?.openId ?? '';
+      this.#autoReply?.setSelfOpenId?.(selfOpenId);
       for (const chat of this.#store.config.chats) {
         if (this.#disposed) break;
         await this.#pollChat(chat, accessToken, selfOpenId);
@@ -443,6 +474,8 @@ export class UserMonitorManager {
         ...chat,
         mode: patch.mode === undefined ? chat.mode : patch.mode,
         keywords: patch.keywords === undefined ? chat.keywords : patch.keywords,
+        replyMode: patch.replyMode === undefined ? chat.replyMode : patch.replyMode,
+        preset: patch.preset === undefined ? chat.preset : patch.preset,
       });
     });
     await this.#store.saveConfig({ chats });
@@ -629,13 +662,21 @@ export class UserMonitorManager {
         cursorMessageId = lastSkipped.item.messageId;
       }
 
+      if (eligible.length > 0 && chat.replyMode === 'auto' && this.#autoReply) {
+        const freshIds = eligible.filter(({ updateOf }) => !updateOf).map(({ item }) => item.messageId);
+        if (freshIds.length > 0) await this.#autoReply.enqueue(chat, freshIds).catch(() => undefined);
+      }
+
       // 统一收尾：即使本轮只记录了部分消息，也要把游标推到最新的已处理消息。
+      // 批次与出站记录可能已被自动回复引擎写过，收尾时以最新值为准。
+      const latest = this.#store.state.chats[chat.chatId] ?? {};
       await this.#store.saveState({
         ...this.#store.state,
         chats: {
           ...this.#store.state.chats,
           [chat.chatId]: {
             ...current,
+            ...latest,
             cursorTimeMs,
             cursorMessageId,
             messages: nextMessages,

@@ -127,6 +127,7 @@ export async function apply(ctx, config = {}) {
   const userMonitor = new UserMonitorManager({
     auth: userIdentityAuth,
     store: monitorStore,
+    harness,
     logger,
   });
   installUserIdentityContributions(ctx, userIdentityAuth, userMonitor);

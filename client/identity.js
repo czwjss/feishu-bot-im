@@ -98,6 +98,8 @@ const h = React.createElement;
           h('div', { style: { fontSize: '13px' } }, chat.name || chat.chatId),
           h('div', { style: S.hint },
             `${chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group')} · ${chat.chatId}`,
+            chat.pendingBatch ? ` · ${t('待处理', 'pending')} ${chat.pendingBatch}` : '',
+            chat.lastAutoReplyAt ? ` · ${t('上次自动回复', 'last auto')} ${formatTime(chat.lastAutoReplyAt)}` : '',
             chat.lastError ? h('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, ` · ${chat.lastError}`) : null)),
         h('select', {
           style: { ...S.input, width: 'auto', height: '28px', fontSize: '12px' },
@@ -119,6 +121,16 @@ const h = React.createElement;
             },
           })
           : null,
+        h('select', {
+          style: { ...S.input, width: 'auto', height: '28px', fontSize: '12px' },
+          value: chat.replyMode ?? 'watch',
+          disabled: busy === `mode:${chat.chatId}`,
+          title: t('处理方式', 'Handling'),
+          onChange: (event) => void setChat(chat, { replyMode: event.target.value }),
+        },
+        h('option', { value: 'watch' }, t('只记录', 'Record only')),
+        h('option', { value: 'draft' }, t('生成草稿', 'Draft')),
+        h('option', { value: 'auto' }, t('自动回复', 'Auto reply'))),
         h('button', { type: 'button', className: 'bxf-mini', disabled: busy === `remove:${chat.chatId}`, onClick: () => void remove(chat) },
           t('移除', 'Remove'))));
 
