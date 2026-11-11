@@ -64,6 +64,10 @@ const h = React.createElement;
         });
       };
 
+      const act2 = async (label, operation) => act(label, operation);
+      const markRead = () => act2('read', () => rpc(connection, API.userMonitorRead, {}));
+      const clearAll = () => act2('clear', () => rpc(connection, API.userMonitorClear, {}));
+
       const chats = Array.isArray(monitor?.chats) ? monitor.chats : [];
       const monitored = new Set(chats.map((chat) => chat.chatId));
       const candidates = (available ?? []).filter((chat) => !monitored.has(chat.chatId));
@@ -109,8 +113,8 @@ const h = React.createElement;
         }, monitor?.enabled ? t('停止监听', 'Stop') : t('开始监听', 'Start')),
       },
       h('p', { style: { ...S.hint, margin: '0 0 10px' } },
-        t('定时检查已选会话的新消息，并投递到 DSH。新增监听从当前时间开始，不回补历史。',
-          'Polls selected chats and delivers new messages to DSH. New monitors start at the current time and do not backfill history.'),
+        t('定时检查已选会话的新消息，记录到本地收件箱。新增监听从当前时间开始，不回补历史；不调用模型，也不自动回复。',
+          'Polls selected chats into a local inbox. New monitors start at the current time and do not backfill; no model calls and no automatic replies.'),
         h('br'),
         t('会话列表已同时包含群聊和最近私聊；找不到时可手动填 chat_id。',
           'The picker includes groups and recent direct chats; enter a chat_id manually if one is missing.')),
@@ -125,6 +129,21 @@ const h = React.createElement;
             h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'poll', onClick: () => void poll() },
               t('立即检查', 'Check now'))),
           chatRows,
+          monitor.unreadTotal > 0
+            ? h('div', { style: { display: 'grid', gap: '6px', paddingTop: '6px', borderTop: '1px solid var(--dsw-alias-border-l1)' } },
+              h('div', { style: S.row },
+                h('span', { style: S.badge('warn') }, `${monitor.unreadTotal} ${t('条未读', 'unread')}`),
+                h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'read', onClick: () => void markRead() },
+                  t('全部已读', 'Mark read')),
+                h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'clear', onClick: () => void clearAll() },
+                  t('清空记录', 'Clear'))),
+              chats.filter((chat) => (chat.messages ?? []).some((message) => !message.read)).map((chat) => h('div', { key: `m:${chat.chatId}`, style: { display: 'grid', gap: '2px' } },
+                h('div', { style: S.hint }, `${chat.name || chat.chatId}${chat.unread ? ` · ${chat.unread}` : ''}`),
+                (chat.messages ?? []).filter((message) => !message.read).slice(-3).map((message) => h('div', {
+                  key: message.messageId,
+                  style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+                }, `${message.senderName || t('未知', 'Unknown')}：${message.text}`)))))
+            : null,
           h('div', { style: { ...S.row, marginTop: '4px' } },
             h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'chats', onClick: () => void refreshChats() },
               busy === 'chats' ? t('正在读取…', 'Loading…') : t('选择会话', 'Choose chats'))),

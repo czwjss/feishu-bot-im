@@ -118,7 +118,6 @@ export async function apply(ctx, config = {}) {
   });
 
   const { manager: userIdentity, auth: userIdentityAuth } = await createUserIdentity(ctx, paths, configStore, logger);
-  installUserIdentityContributions(ctx, userIdentityAuth);
   userIdentity.startKeepalive();
 
   const monitorStore = await new MonitorStore({
@@ -127,11 +126,10 @@ export async function apply(ctx, config = {}) {
   }).load();
   const userMonitor = new UserMonitorManager({
     auth: userIdentityAuth,
-    harness,
     store: monitorStore,
     logger,
-    defaultWorkspace: configStore.bots?.[0]?.workspace ?? '',
   });
+  installUserIdentityContributions(ctx, userIdentityAuth, userMonitor);
   userMonitor.start();
 
   const handler = createRpcHandler({ manager, harness, version: pluginVersion, userIdentity, userMonitor });

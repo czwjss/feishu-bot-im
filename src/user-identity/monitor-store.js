@@ -4,7 +4,8 @@
  * 配置：`<dataDir>/monitor.json`
  * 状态：`<dataDir>/monitor-state.json`
  *
- * 监听只保存消息 ID 和游标，不保存正文。
+ * 监听按会话保存游标、去重集合和最近消息（有上限、0600），
+ * 供 `feishu_avatar_inbox` 工具读取；不调用模型，也不自动回复。
  */
 import { readFile } from 'node:fs/promises';
 
@@ -15,6 +16,8 @@ export const MONITOR_FILE = 'monitor.json';
 export const MONITOR_STATE_FILE = 'monitor-state.json';
 export const MAX_MONITOR_CHATS = 20;
 export const MAX_SEEN_IDS = 500;
+export const MAX_MESSAGES_PER_CHAT = 50;
+export const MAX_MESSAGE_TEXT = 2_000;
 export const MIN_POLL_INTERVAL_MS = 5_000;
 export const MAX_POLL_INTERVAL_MS = 60_000;
 
@@ -64,6 +67,25 @@ export function normalizeMonitorConfig(value) {
   });
 }
 
+export function normalizeMonitorMessage(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const messageId = cleanString(source.messageId);
+  if (!messageId) return null;
+  const text = stringOf(source.text).slice(0, MAX_MESSAGE_TEXT);
+  return Object.freeze({
+    messageId,
+    senderName: cleanString(source.senderName),
+    senderOpenId: cleanString(source.senderOpenId),
+    createTime: cleanString(source.createTime),
+    text,
+    read: source.read === true,
+  });
+}
+
+function stringOf(value) {
+  return typeof value === 'string' ? value : '';
+}
+
 export function normalizeMonitorState(value) {
   const source = value && typeof value === 'object' ? value : {};
   const sourceChats = source.chats && typeof source.chats === 'object' ? source.chats : {};
@@ -81,10 +103,19 @@ export function normalizeMonitorState(value) {
       seen.push(valueId);
       if (seen.length >= MAX_SEEN_IDS) break;
     }
+    const messages = [];
+    const messageIds = new Set();
+    for (const raw of Array.isArray(entry.messages) ? entry.messages : []) {
+      const message = normalizeMonitorMessage(raw);
+      if (!message || messageIds.has(message.messageId)) continue;
+      messageIds.add(message.messageId);
+      messages.push(message);
+      if (messages.length >= MAX_MESSAGES_PER_CHAT) break;
+    }
     chats[chatId] = Object.freeze({
       cursorTimeMs: cleanTime(entry.cursorTimeMs),
       cursorMessageId: cleanString(entry.cursorMessageId) || null,
-      sessionId: cleanString(entry.sessionId) || null,
+      messages: Object.freeze(messages),
       seen: Object.freeze(seen),
       lastPollAt: cleanTime(entry.lastPollAt),
       lastError: cleanString(entry.lastError) || null,

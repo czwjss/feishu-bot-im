@@ -211,6 +211,15 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
         await requireUserMonitor().pollOnce();
         return ok(await requireUserMonitor().status());
 
+      case 'user.monitor.inbox':
+        return ok(await requireUserMonitor().inbox(input));
+
+      case 'user.monitor.read':
+        return ok(await requireUserMonitor().markRead(input.chatId));
+
+      case 'user.monitor.clear':
+        return ok(await requireUserMonitor().clearMessages(input.chatId));
+
       // ── 兼容层：旧版单机器人设置页仍可工作 ─────────────────────────────
       case 'connection.status': {
         const { bots } = await manager.status();

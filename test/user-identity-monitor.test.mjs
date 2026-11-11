@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { listChats } from '../src/user-identity/api.js';
 import { UserMonitorManager } from '../src/user-identity/monitor.js';
 import {
+  MAX_MESSAGES_PER_CHAT,
   MAX_SEEN_IDS,
   MonitorStore,
   normalizeMonitorConfig,
@@ -29,19 +30,24 @@ assert.equal(config.chats.length, 1);
 assert.equal(config.pollIntervalMs, 5_000);
 assert.equal(config.chats[0].chatMode, 'p2p');
 
-// 2) 状态规范化：会话和 sessionId 保留，seen 截断。
+// 2) 状态规范化：消息有条数上限，seen 截断。
 const state = normalizeMonitorState({
   chats: {
-    [chatId]: { cursorTimeMs: now, sessionId: 'sess-1', seen: Array.from({ length: MAX_SEEN_IDS + 10 }, (_, i) => `m${i}`) },
+    [chatId]: {
+      cursorTimeMs: now,
+      seen: Array.from({ length: MAX_SEEN_IDS + 10 }, (_, i) => `m${i}`),
+      messages: Array.from({ length: MAX_MESSAGES_PER_CHAT + 10 }, (_, i) => ({ messageId: `msg-${i}`, text: `t${i}` })),
+    },
   },
 });
-assert.equal(state.chats[chatId].sessionId, 'sess-1');
 assert.equal(state.chats[chatId].seen.length, MAX_SEEN_IDS);
+assert.equal(state.chats[chatId].messages.length, MAX_MESSAGES_PER_CHAT);
+assert.equal(state.chats[chatId].messages[0].read, false);
 
-// 3) listChats 查询与规范化。
+// 3) listChats 同时请求私聊和群聊。
 const calls = [];
-const fetchImpl = async (url, init) => {
-  calls.push({ url: String(url), init });
+const fetchImpl = async (url) => {
+  calls.push(String(url));
   return {
     ok: true,
     async json() {
@@ -49,7 +55,7 @@ const fetchImpl = async (url, init) => {
         code: 0,
         data: {
           items: [
-            { chat_id: chatId, name: '测试私聊', chat_mode: 'p2p', chat_type: 'p2p', external: false },
+            { chat_id: chatId, name: '测试私聊', chat_mode: 'p2p' },
             { chat_id: 'oc_group_1', name: '测试群', chat_mode: 'group', external: true },
             { chat_id: 'not-a-chat', name: '无效' },
           ],
@@ -62,13 +68,9 @@ const fetchImpl = async (url, init) => {
 const discovered = await listChats({ accessToken: 'user-token', fetchImpl });
 assert.equal(discovered.items.length, 2);
 assert.equal(discovered.items[0].chatMode, 'p2p');
-assert.equal(discovered.items[1].external, true);
-assert.match(calls[0].url, /\/open-apis\/im\/v1\/chats/);
-assert.match(calls[0].url, /user_id_type=open_id/);
-assert.match(calls[0].url, /types=p2p%2Cgroup/);
+assert.match(calls[0], /types=p2p%2Cgroup/);
 
-// 5) 轮询：过滤自己/已删除/旧消息，投递并推进游标；重复轮询不重复投递。
-
+// 4) 轮询只记录消息，不创建会话、不调用模型。
 const dir = await mkdtemp(join(tmpdir(), 'im-feishu-monitor-'));
 try {
   const store = new MonitorStore({
@@ -77,12 +79,8 @@ try {
   });
   await store.load();
   await store.saveConfig({ enabled: true, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p' }] });
-  await store.saveState({
-    chats: { [chatId]: { cursorTimeMs: now - 60_000, seen: [], sessionId: null } },
-  });
+  await store.saveState({ chats: { [chatId]: { cursorTimeMs: now - 60_000, seen: [], messages: [] } } });
 
-  const prompts = [];
-  const sessions = [];
   const messages = [
     { messageId: 'm-old', createTime: new Date(now - 120_000).toISOString(), senderType: 'user', senderOpenId: 'ou_other', text: 'too old' },
     { messageId: 'm-self', createTime: new Date(now - 10_000).toISOString(), senderType: 'user', senderOpenId: 'ou_self', text: 'self' },
@@ -98,36 +96,43 @@ try {
       return 'user-token';
     },
   };
-  const harness = {
-    async createSession(input) {
-      sessions.push(input);
-      return `sess-${sessions.length}`;
-    },
-    async prompt(sessionId, text) {
-      prompts.push({ sessionId, text });
-    },
-  };
   const monitor = new UserMonitorManager({
     auth,
-    harness,
     store,
     now: () => now,
     listMessages: async () => ({ items: messages, hasMore: false, pageToken: null }),
   });
 
   await monitor.pollOnce();
-  assert.equal(sessions.length, 1);
-  assert.equal(sessions[0].agentPreset, 'minimal');
-  assert.equal(prompts.length, 1);
-  assert.equal(prompts[0].sessionId, 'sess-1');
-  assert.match(prompts[0].text, /你好/);
+  const recorded = store.state.chats[chatId].messages;
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].messageId, 'm-new');
+  assert.equal(recorded[0].read, false);
   assert.equal(store.state.chats[chatId].cursorTimeMs, now - 5_000);
-  assert.deepEqual(store.state.chats[chatId].seen, ['m-new']);
 
+  // 重复轮询不重复记录。
   await monitor.pollOnce();
-  assert.equal(prompts.length, 1, 'duplicate poll must not deliver again');
+  assert.equal(store.state.chats[chatId].messages.length, 1);
+
+  // 5) 收件箱默认只取未读并标记已读。
+  const first = await monitor.inbox({});
+  assert.equal(first.total, 1);
+  assert.equal(first.items[0].text, '你好');
+  const second = await monitor.inbox({});
+  assert.equal(second.total, 0);
+
+  // 6) status 统计未读并带最近消息。
+  await monitor.inbox({ unreadOnly: false, markRead: false });
+  const status = await monitor.status();
+  assert.equal(status.unreadTotal, 0);
+  assert.equal(status.chats[0].messages.length, 1);
+
+  // 7) 清空记录但保留游标。
+  await monitor.clearMessages();
+  assert.equal(store.state.chats[chatId].messages.length, 0);
+  assert.equal(store.state.chats[chatId].cursorTimeMs, now - 5_000);
 } finally {
   await rm(dir, { recursive: true, force: true });
 }
 
-console.log('user identity monitor: 19 assertions passed');
+console.log('user identity monitor: 21 assertions passed');

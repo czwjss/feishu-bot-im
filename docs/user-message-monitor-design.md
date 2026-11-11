@@ -622,22 +622,24 @@ offline_access
 
 ### 阶段 1：只监听
 
-已实现：
+已实现（只记录，不调模型）：
 
-- 「分身」弹层内选择会话；
+- 「分身」弹层内选择会话（群聊 + 最近私聊）；
 - 以用户身份轮询选中会话；
 - 每会话游标 + message_id 去重；
 - 新增监听从当前时间开始，不回补历史；
-- 每个飞书会话绑定一个 `minimal` 预设的 DSH Worker Session；
-- 投递内容带会话、发送者、时间和不可信内容标记；
-- 不自动回复；提示词要求 Worker 只记录，不调用飞书发送工具。
-- 注意：分身工具已改为 Host 全局挂载，因此 Worker 的工具列表里仍可能看到 `feishu_avatar_*`；阶段 1 靠提示词约束，阶段 2 再加硬隔离。
+- 新消息只落到本地收件箱，**不创建会话、不调用模型、不自动回复**；
+- 每会话最多保留最近 50 条，正文截断 2000 字，文件 0600；
+- `feishu_avatar_inbox` 工具读取未读并标记已读；
+- 回复仍由 Agent 显式调用 `feishu_avatar_send`（用户本人身份），监听自身永不写飞书；
+- 设置页显示未读数、最近消息，支持全部已读和清空记录。
 
 实现文件：
 
 ```text
 src/user-identity/monitor.js
 src/user-identity/monitor-store.js
+src/user-identity/tools.js          feishu_avatar_inbox
 src/user-identity/api.js            listChats（types=p2p,group）
 client/identity.js                  MonitorPanel
 ```

@@ -184,7 +184,7 @@ var MESSAGES = Object.freeze({
   "\u6D88\u606F\u76D1\u542C": "Message monitoring",
   "\u505C\u6B62\u76D1\u542C": "Stop",
   "\u5F00\u59CB\u76D1\u542C": "Start",
-  "\u5B9A\u65F6\u68C0\u67E5\u5DF2\u9009\u4F1A\u8BDD\u7684\u65B0\u6D88\u606F\uFF0C\u5E76\u6295\u9012\u5230 DSH\u3002\u65B0\u589E\u76D1\u542C\u4ECE\u5F53\u524D\u65F6\u95F4\u5F00\u59CB\uFF0C\u4E0D\u56DE\u8865\u5386\u53F2\u3002": "Polls selected chats and delivers new messages to DSH. New monitors start at the current time and do not backfill history.",
+  "\u5B9A\u65F6\u68C0\u67E5\u5DF2\u9009\u4F1A\u8BDD\u7684\u65B0\u6D88\u606F\uFF0C\u8BB0\u5F55\u5230\u672C\u5730\u6536\u4EF6\u7BB1\u3002\u65B0\u589E\u76D1\u542C\u4ECE\u5F53\u524D\u65F6\u95F4\u5F00\u59CB\uFF0C\u4E0D\u56DE\u8865\u5386\u53F2\uFF1B\u4E0D\u8C03\u7528\u6A21\u578B\uFF0C\u4E5F\u4E0D\u81EA\u52A8\u56DE\u590D\u3002": "Polls selected chats and delivers new messages to DSH. New monitors start at the current time and do not backfill history.",
   "\u6B63\u5728\u8BFB\u53D6\u76D1\u542C\u72B6\u6001\u2026": "Loading monitor status\u2026",
   "\u76D1\u542C\u4E2D": "Watching",
   "\u5DF2\u6682\u505C": "Paused",
@@ -195,7 +195,11 @@ var MESSAGES = Object.freeze({
   "\u9009\u62E9\u4F1A\u8BDD": "Choose chats",
   "\u6DFB\u52A0": "Add",
   "\u624B\u52A8\u586B chat_id\uFF08oc_\u2026\uFF09": "Enter chat_id (oc_\u2026)",
-  "\u4F1A\u8BDD\u5217\u8868\u5DF2\u540C\u65F6\u5305\u542B\u7FA4\u804A\u548C\u6700\u8FD1\u79C1\u804A\uFF1B\u627E\u4E0D\u5230\u65F6\u53EF\u624B\u52A8\u586B chat_id\u3002": "The picker includes groups and recent direct chats; enter a chat_id manually if one is missing."
+  "\u4F1A\u8BDD\u5217\u8868\u5DF2\u540C\u65F6\u5305\u542B\u7FA4\u804A\u548C\u6700\u8FD1\u79C1\u804A\uFF1B\u627E\u4E0D\u5230\u65F6\u53EF\u624B\u52A8\u586B chat_id\u3002": "The picker includes groups and recent direct chats; enter a chat_id manually if one is missing.",
+  "\u6761\u672A\u8BFB": "unread",
+  "\u5168\u90E8\u5DF2\u8BFB": "Mark read",
+  "\u6E05\u7A7A\u8BB0\u5F55": "Clear",
+  "\u672A\u77E5": "Unknown"
 });
 function dictionaries() {
   const zh = {};
@@ -247,7 +251,10 @@ var API = {
   userMonitorAdd: "user.monitor.add",
   userMonitorRemove: "user.monitor.remove",
   userMonitorEnable: "user.monitor.enable",
-  userMonitorPoll: "user.monitor.poll"
+  userMonitorPoll: "user.monitor.poll",
+  userMonitorInbox: "user.monitor.inbox",
+  userMonitorRead: "user.monitor.read",
+  userMonitorClear: "user.monitor.clear"
 };
 var boundTranslate = null;
 var activeLocale = "";
@@ -635,6 +642,9 @@ function MonitorPanel({ connection }) {
       return value;
     });
   };
+  const act2 = async (label, operation) => act(label, operation);
+  const markRead = () => act2("read", () => rpc(connection, API.userMonitorRead, {}));
+  const clearAll = () => act2("clear", () => rpc(connection, API.userMonitorClear, {}));
   const chats = Array.isArray(monitor?.chats) ? monitor.chats : [];
   const monitored = new Set(chats.map((chat) => chat.chatId));
   const candidates = (available ?? []).filter((chat) => !monitored.has(chat.chatId));
@@ -700,8 +710,8 @@ function MonitorPanel({ connection }) {
       "p",
       { style: { ...S.hint, margin: "0 0 10px" } },
       t(
-        "\u5B9A\u65F6\u68C0\u67E5\u5DF2\u9009\u4F1A\u8BDD\u7684\u65B0\u6D88\u606F\uFF0C\u5E76\u6295\u9012\u5230 DSH\u3002\u65B0\u589E\u76D1\u542C\u4ECE\u5F53\u524D\u65F6\u95F4\u5F00\u59CB\uFF0C\u4E0D\u56DE\u8865\u5386\u53F2\u3002",
-        "Polls selected chats and delivers new messages to DSH. New monitors start at the current time and do not backfill history."
+        "\u5B9A\u65F6\u68C0\u67E5\u5DF2\u9009\u4F1A\u8BDD\u7684\u65B0\u6D88\u606F\uFF0C\u8BB0\u5F55\u5230\u672C\u5730\u6536\u4EF6\u7BB1\u3002\u65B0\u589E\u76D1\u542C\u4ECE\u5F53\u524D\u65F6\u95F4\u5F00\u59CB\uFF0C\u4E0D\u56DE\u8865\u5386\u53F2\uFF1B\u4E0D\u8C03\u7528\u6A21\u578B\uFF0C\u4E5F\u4E0D\u81EA\u52A8\u56DE\u590D\u3002",
+        "Polls selected chats into a local inbox. New monitors start at the current time and do not backfill; no model calls and no automatic replies."
       ),
       h2("br"),
       t(
@@ -729,6 +739,34 @@ function MonitorPanel({ connection }) {
         )
       ),
       chatRows,
+      monitor.unreadTotal > 0 ? h2(
+        "div",
+        { style: { display: "grid", gap: "6px", paddingTop: "6px", borderTop: "1px solid var(--dsw-alias-border-l1)" } },
+        h2(
+          "div",
+          { style: S.row },
+          h2("span", { style: S.badge("warn") }, `${monitor.unreadTotal} ${t("\u6761\u672A\u8BFB", "unread")}`),
+          h2(
+            "button",
+            { type: "button", className: "bxf-mini", disabled: busy === "read", onClick: () => void markRead() },
+            t("\u5168\u90E8\u5DF2\u8BFB", "Mark read")
+          ),
+          h2(
+            "button",
+            { type: "button", className: "bxf-mini", disabled: busy === "clear", onClick: () => void clearAll() },
+            t("\u6E05\u7A7A\u8BB0\u5F55", "Clear")
+          )
+        ),
+        chats.filter((chat) => (chat.messages ?? []).some((message) => !message.read)).map((chat) => h2(
+          "div",
+          { key: `m:${chat.chatId}`, style: { display: "grid", gap: "2px" } },
+          h2("div", { style: S.hint }, `${chat.name || chat.chatId}${chat.unread ? ` \xB7 ${chat.unread}` : ""}`),
+          (chat.messages ?? []).filter((message) => !message.read).slice(-3).map((message) => h2("div", {
+            key: message.messageId,
+            style: { fontSize: "12px", color: "var(--dsw-alias-label-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }
+          }, `${message.senderName || t("\u672A\u77E5", "Unknown")}\uFF1A${message.text}`))
+        ))
+      ) : null,
       h2(
         "div",
         { style: { ...S.row, marginTop: "4px" } },

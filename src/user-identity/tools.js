@@ -17,6 +17,7 @@ import {
 export const ME_TOOL_NAME = 'feishu_avatar_me';
 export const MESSAGES_TOOL_NAME = 'feishu_avatar_messages';
 export const SEND_TOOL_NAME = 'feishu_avatar_send';
+export const INBOX_TOOL_NAME = 'feishu_avatar_inbox';
 
 /**
  * 执行一次用户身份 API 调用；token 过期时刷新后重试一次。
@@ -331,10 +332,107 @@ export function createSendTool({ auth, fetchImpl }) {
   });
 }
 
-export function createUserIdentityTools({ auth, fetchImpl }) {
-  return [
+/**
+ * 监听收件箱：读取已记录的飞书新消息（轮询产生，不调用模型）。
+ * 默认只取未读并标记已读；回复仍用 feishu_avatar_send。
+ */
+export function createInboxTool({ monitor }) {
+  return Object.freeze({
+    name: INBOX_TOOL_NAME,
+    description: '读取飞书分身监听到的新消息（本地收件箱）。默认只返回未读并标记已读；'
+      + '回复时用 feishu_avatar_send 以你本人身份发送。没有配置监听时返回空列表。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        chatId: {
+          type: 'string',
+          description: '只看某个会话（oc_…）；省略则返回所有监听会话。',
+        },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 50,
+          default: 20,
+          description: '最多返回多少条，1–50，默认 20。',
+        },
+        unreadOnly: {
+          type: 'boolean',
+          default: true,
+          description: '只返回未读消息，默认 true。',
+        },
+        markRead: {
+          type: 'boolean',
+          default: true,
+          description: '返回后标记已读，避免重复处理，默认 true。',
+        },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          total: { type: 'integer' },
+          items: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                chatId: { type: 'string' },
+                chatName: { type: 'string' },
+                chatMode: { type: 'string' },
+                messageId: { type: 'string' },
+                senderName: { type: 'string' },
+                senderOpenId: { type: 'string' },
+                createTime: { type: 'string' },
+                text: { type: 'string' },
+              },
+              required: ['chatId', 'messageId', 'text'],
+            },
+          },
+        },
+        required: ['total', 'items'],
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.total === 0
+          ? '收件箱没有新消息'
+          : `${value.total} 条新消息：${value.items.slice(0, 5).map((item) => `${item.chatName || item.chatId} · ${item.senderName || '未知'}：${item.text.slice(0, 40)}`).join('；')}`,
+      }],
+    },
+    async execute(args) {
+      if (!monitor) return { total: 0, items: [] };
+      const result = await monitor.inbox({
+        chatId: typeof args?.chatId === 'string' ? args.chatId : '',
+        limit: args?.limit,
+        unreadOnly: args?.unreadOnly !== false,
+        markRead: args?.markRead !== false,
+      });
+      return {
+        total: result.total,
+        items: result.items.map((item) => ({
+          chatId: item.chatId,
+          chatName: item.chatName ?? '',
+          chatMode: item.chatMode ?? '',
+          messageId: item.messageId,
+          senderName: item.senderName ?? '',
+          senderOpenId: item.senderOpenId ?? '',
+          createTime: item.createTime ?? '',
+          text: item.text ?? '',
+        })),
+      };
+    },
+  });
+}
+
+export function createUserIdentityTools({ auth, fetchImpl, monitor = null }) {
+  const tools = [
     createMeTool({ auth, fetchImpl }),
     createMessagesTool({ auth, fetchImpl }),
     createSendTool({ auth, fetchImpl }),
   ];
+  if (monitor) tools.push(createInboxTool({ monitor }));
+  return tools;
 }

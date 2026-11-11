@@ -141,7 +141,7 @@ export const MESSAGES = Object.freeze({
   "消息监听": "Message monitoring",
   "停止监听": "Stop",
   "开始监听": "Start",
-  "定时检查已选会话的新消息，并投递到 DSH。新增监听从当前时间开始，不回补历史。": "Polls selected chats and delivers new messages to DSH. New monitors start at the current time and do not backfill history.",
+  "定时检查已选会话的新消息，记录到本地收件箱。新增监听从当前时间开始，不回补历史；不调用模型，也不自动回复。": "Polls selected chats and delivers new messages to DSH. New monitors start at the current time and do not backfill history.",
   "正在读取监听状态…": "Loading monitor status…",
   "监听中": "Watching",
   "已暂停": "Paused",
@@ -152,7 +152,11 @@ export const MESSAGES = Object.freeze({
   "选择会话": "Choose chats",
   "添加": "Add",
   "手动填 chat_id（oc_…）": "Enter chat_id (oc_…)",
-  "会话列表已同时包含群聊和最近私聊；找不到时可手动填 chat_id。": "The picker includes groups and recent direct chats; enter a chat_id manually if one is missing."
+  "会话列表已同时包含群聊和最近私聊；找不到时可手动填 chat_id。": "The picker includes groups and recent direct chats; enter a chat_id manually if one is missing.",
+  "条未读": "unread",
+  "全部已读": "Mark read",
+  "清空记录": "Clear",
+  "未知": "Unknown"
 });
 
 export function dictionaries() {
