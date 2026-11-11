@@ -313,4 +313,42 @@ try {
   }
 }
 
-console.log('user identity monitor: 47 assertions passed');
+// 12) 启动时清理过期的临时状态记录。
+{
+  const dir5 = await mkdtemp(join(tmpdir(), 'im-feishu-prune-'));
+  try {
+    const store5 = new MonitorStore({
+      configPath: join(dir5, 'monitor.json'),
+      statePath: join(dir5, 'monitor-state.json'),
+    });
+    await store5.load();
+    await store5.saveConfig({ enabled: false, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p' }] });
+    await store5.saveState({
+      chats: {
+        [chatId]: {
+          cursorTimeMs: now,
+          seen: [],
+          messages: [
+            { messageId: 'om_ack', text: '⏳ 已收到，正在处理…', createTime: new Date(now - 600_000).toISOString() },
+            { messageId: 'om_keep', text: '在的，你说。', createTime: new Date(now - 600_000).toISOString() },
+            { messageId: 'om_fresh', text: '⏳ 已收到，正在处理…', createTime: new Date(now - 5_000).toISOString() },
+          ],
+        },
+      },
+    });
+    const monitor5 = new UserMonitorManager({
+      auth: { async status() { return { authorization: { authorized: false } }; }, async requireAccessToken() { return 't'; } },
+      store: store5,
+      now: () => now,
+    });
+    monitor5.start();
+    monitor5.stop();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const kept = store5.state.chats[chatId].messages.map((message) => message.messageId);
+    assert.deepEqual(kept, ['om_keep', 'om_fresh'], 'stale transient status is pruned, fresh one stays');
+  } finally {
+    await rm(dir5, { recursive: true, force: true });
+  }
+}
+
+console.log('user identity monitor: 49 assertions passed');

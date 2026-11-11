@@ -20,6 +20,10 @@ import {
 } from './monitor-store.js';
 
 const MAX_MESSAGES_PER_POLL = 100;
+/** 往回多看一段，才能抓到卡片原地刷新的新文本。 */
+const REFRESH_LOOKBACK_MS = 120_000;
+/** 临时状态超过这个时间还留着就是噪音。 */
+const STALE_TRANSIENT_MS = 120_000;
 const MAX_DISCOVER_PAGES = 5;
 
 function stringOf(value) {
@@ -87,10 +91,31 @@ export class UserMonitorManager {
   /** 启动轮询；未启用时也保留定时器，便于 UI 打开后立即生效。 */
   start() {
     if (this.#disposed || this.#timer) return;
+    void this.#pruneStaleTransient();
     const interval = this.#store.config.pollIntervalMs;
     this.#timer = this.#setInterval(() => { void this.pollOnce(); }, interval);
     this.#timer?.unref?.();
     if (this.#store.config.enabled) void this.pollOnce();
+  }
+
+  /** 启动时清掉早该被最终答案取代的临时状态记录。 */
+  async #pruneStaleTransient() {
+    const now = this.#now();
+    const chats = { ...this.#store.state.chats };
+    let changed = false;
+    for (const [chatId, entry] of Object.entries(chats)) {
+      const messages = entry.messages ?? [];
+      const kept = messages.filter((message) => {
+        const created = Date.parse(message.createTime);
+        const stale = Number.isFinite(created) && now - created > STALE_TRANSIENT_MS;
+        return !(stale && this.#isTransientStatus(message.text));
+      });
+      if (kept.length !== messages.length) {
+        chats[chatId] = { ...entry, messages: kept };
+        changed = true;
+      }
+    }
+    if (changed) await this.#store.saveState({ ...this.#store.state, chats }).catch(() => undefined);
   }
 
   stop() {
@@ -523,7 +548,7 @@ export class UserMonitorManager {
       const result = await this.#listMessages({
         accessToken,
         chatId: chat.chatId,
-        startTime: current.cursorTimeMs - 1_000,
+        startTime: Math.min(current.cursorTimeMs - 1_000, this.#now() - REFRESH_LOOKBACK_MS),
         pageSize: 50,
         sort: 'asc',
       });
