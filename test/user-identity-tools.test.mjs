@@ -205,3 +205,10 @@ assert.match(sendTool.description, /不是机器人/);
 assert.match(messagesTool.description, /本人身份/);
 assert.match(messagesTool.description, /群聊或私聊/);
 console.log('im-feishu user identity tool identity: 7 assertions passed');
+
+// 每个分身工具都必须声明 output { schema, render }，否则工具注册会被 Host 拒绝。
+for (const tool of createUserIdentityTools({ auth: {}, monitor: { autoReply: {}, inbox: async () => ({ total: 0, items: [] }), createDraft: async () => ({}) } })) {
+  assert.ok(tool.output?.schema, `${tool.name} declares an output schema`);
+  assert.equal(typeof tool.output?.render, 'function', `${tool.name} declares a renderer`);
+}
+console.log('im-feishu user identity tool output: 14 assertions passed');

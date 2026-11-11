@@ -516,6 +516,24 @@ export function createReplyTool({ monitor }) {
       },
       required: ['token', 'text'],
     },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          sent: { type: 'boolean' },
+          messageId: { type: 'string' },
+          handled: { type: 'integer' },
+        },
+        required: ['sent', 'handled'],
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.sent
+          ? `已发送（${value.messageId || '无 id'}），处理 ${value.handled} 条消息`
+          : `未发送，处理 ${value.handled} 条消息`,
+      }],
+    },
     async execute(args) {
       const engine = monitor?.autoReply;
       if (!engine) throw new Error('自动回复未启用');
@@ -539,6 +557,21 @@ export function createSkipTool({ monitor }) {
         reason: { type: 'string', description: '为什么不需要回复，简短一句。' },
       },
       required: ['token'],
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          skipped: { type: 'boolean' },
+          handled: { type: 'integer' },
+        },
+        required: ['skipped', 'handled'],
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `本批不回复，处理 ${value.handled} 条消息`,
+      }],
     },
     async execute(args) {
       const engine = monitor?.autoReply;
