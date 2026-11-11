@@ -199,6 +199,7 @@ export function normalizeMonitorState(value) {
       cursorMessageId: cleanString(entry.cursorMessageId) || null,
       messages: Object.freeze(messages),
       sessionId: cleanString(entry.sessionId) || null,
+      sessionEpoch: cleanString(entry.sessionEpoch) || null,
       batch: Object.freeze({
         messageIds: Object.freeze(pendingIds),
         firstAt: cleanTime(batch.firstAt),

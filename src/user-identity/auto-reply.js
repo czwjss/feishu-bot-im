@@ -26,6 +26,13 @@ function stringOf(value) {
   return typeof value === 'string' ? value : '';
 }
 
+/**
+ * Worker 会话会缓存它创建时的工具表；工具集变化后必须换新会话，
+ * 否则旧会话里看不到 feishu_avatar_reply / feishu_avatar_skip。
+ * 改动 Worker 可用工具时同步提升这个值。
+ */
+export const WORKER_EPOCH = 'avatar-decision-tools-1';
+
 function tokenOf() {
   return `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -65,6 +72,7 @@ export class AutoReplyEngine {
   #debounceMs;
   #maxWaitMs;
   #timeoutMs;
+  #workerEpoch;
   #timers = new Map();
   #pending = new Map();
   #selfOpenId = '';
@@ -83,6 +91,7 @@ export class AutoReplyEngine {
     debounceMs = BATCH_DEBOUNCE_MS,
     maxWaitMs = BATCH_MAX_WAIT_MS,
     decisionTimeoutMs = DECISION_TIMEOUT_MS,
+    workerEpoch = WORKER_EPOCH,
   } = {}) {
     if (!store) throw new TypeError('AutoReplyEngine 需要 store');
     if (!harness) throw new TypeError('AutoReplyEngine 需要 harness');
@@ -101,6 +110,7 @@ export class AutoReplyEngine {
     this.#debounceMs = debounceMs;
     this.#maxWaitMs = maxWaitMs;
     this.#timeoutMs = decisionTimeoutMs;
+    this.#workerEpoch = workerEpoch;
   }
 
   get harness() {
@@ -203,10 +213,11 @@ export class AutoReplyEngine {
     await this.#patch(chat.chatId, { batch: { ...(entry.batch ?? {}), token } });
 
     let sessionId = entry.sessionId ?? null;
+    const epochStale = sessionId && entry.sessionEpoch !== this.#workerEpoch;
     try {
-      if (!sessionId) {
+      if (!sessionId || epochStale) {
         sessionId = await this.#harness.createSession({ agentPreset: chat.preset || 'standard' });
-        await this.#patch(chat.chatId, { sessionId });
+        await this.#patch(chat.chatId, { sessionId, sessionEpoch: this.#workerEpoch });
       }
       await this.#harness.prompt(sessionId, renderBatchPrompt({ chat, messages: targets, token }));
     } catch (error) {
@@ -220,6 +231,9 @@ export class AutoReplyEngine {
       this.#timers.delete(`t:${token}`);
       if (!this.#pending.delete(token)) return;
       this.#logger?.warn?.(`[im-feishu] ${chat.chatId} 自动回复决策超时，本批保留未读`);
+      void this.#patch(chat.chatId, {
+        batch: { ...(this.#store.state.chats[chat.chatId]?.batch ?? {}), token: null },
+      });
     }, this.#timeoutMs);
     timer?.unref?.();
     this.#timers.set(`t:${token}`, timer);

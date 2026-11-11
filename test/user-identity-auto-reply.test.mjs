@@ -127,6 +127,8 @@ try {
   const token = /批次令牌：(batch-[a-z0-9-]+)/.exec(prompts[0].text)?.[1];
   assert.ok(token, 'prompt carries a batch token');
 
+  assert.equal(store.state.chats[chatId].sessionEpoch, 'avatar-decision-tools-1', 'worker epoch recorded');
+
   // 2) Worker 决定回复 → 以本人身份发出，批次消息标记已读
   const result = await engine.reply({ token, text: '去，文档我一会儿发你' });
   assert.equal(result.messageIds.length, 2);
@@ -136,6 +138,27 @@ try {
   assert.ok(store.state.chats[chatId].messages.every((message) => message.read), 'batch marked as handled');
   assert.equal(store.state.chats[chatId].outbox.at(-1).messageId, 'om_auto_2');
   assert.equal(store.state.chats[chatId].batch.messageIds.length, 0);
+
+  // 2b) 工具集换了 epoch，旧的 Worker 会话不再复用
+  await store.saveState({
+    chats: {
+      [chatId]: {
+        ...store.state.chats[chatId],
+        sessionId: 'sess-old',
+        sessionEpoch: 'legacy',
+        messages: [{ messageId: 'om_epoch', senderName: '朋友', senderOpenId: 'ou_friend', senderType: 'user', text: '再看一眼', createTime: new Date(clock.now()).toISOString(), read: false }],
+        batch: { messageIds: ['om_epoch'], firstAt: clock.now(), lastAt: clock.now(), token: null },
+      },
+    },
+  });
+  await store.saveConfig({ enabled: true, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all', replyMode: 'auto' }] });
+  const epochChat = store.config.chats[0];
+  const sessionsBefore = sessions.length;
+  const epochToken = await engine.flush({ ...epochChat });
+  assert.ok(epochToken, 'stale-epoch batch is dispatched');
+  assert.equal(sessions.length, sessionsBefore + 1, 'a fresh worker session is created');
+  assert.notEqual(store.state.chats[chatId].sessionEpoch, 'legacy');
+  await engine.skip({ token: epochToken, reason: '测试' });
 
   // 3) 令牌只能用一次
   await assert.rejects(() => engine.reply({ token, text: '再来一条' }), /批次已失效/);
@@ -224,4 +247,4 @@ try {
   await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-console.log('user identity auto reply: 27 assertions passed');
+console.log('user identity auto reply: 30 assertions passed');
