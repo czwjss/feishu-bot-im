@@ -21,10 +21,10 @@
 - **审批与提问**：飞书里直接批准/拒绝或点选答案；
 - **文件收发**：图片、文件可发给机器人；机器人也能回传文件；
 - **上下文注入**：每条消息带上群名、发言者等来源信息，用户气泡保持干净；
-- **主动投递**：先用 `im_feishu_chats` 查机器人所在群和精确 chat id，再用 `im_feishu_send` 发送独立卡片或文件；文本卡片可通过 `title` 设置标题、`color` 设置标题颜色，省略 `chatId` 时发当前 Session 绑定的飞书群。
-- **Web 发飞书**：Web turn 通过 `im_feishu_send` 发送独立卡片/文件；Web 轮次不生成飞书流式卡片。
-- **人物查询**：`im_feishu_people` 按姓名模糊查询群成员并返回精确 open_id；群成员缓存 6 小时，可主动 refresh。
-- **历史查询**：`im_feishu_messages` 按群、话题和时间范围读取历史；可选本地关键词筛选，不是飞书全文搜索。
+- **主动投递**：先用 `feishu_bot_chats` 查机器人所在群和精确 chat id，再用 `feishu_bot_send` 发送独立卡片或文件；文本卡片可通过 `title` 设置标题、`color` 设置标题颜色，省略 `chatId` 时发当前 Session 绑定的飞书群。
+- **Web 发飞书**：Web turn 通过 `feishu_bot_send` 发送独立卡片/文件；Web 轮次不生成飞书流式卡片。
+- **人物查询**：`feishu_bot_people` 按姓名模糊查询群成员并返回精确 open_id；群成员缓存 6 小时，可主动 refresh。
+- **历史查询**：`feishu_bot_messages` 按群、话题和时间范围读取历史；可选本地关键词筛选，不是飞书全文搜索。
 - **用户身份（飞书分身）**：Host 默认挂载 `feishu_avatar_*` 工具，以你本人身份读群历史、按群或联系人发卡片/图片/文件；复用机器人应用，设备授权连接，不需要重定向 URL。
 - **分身消息监听（阶段 1）**：在「分身」弹层选择会话后，以用户身份轮询新消息并记录到本地收件箱（游标去重、含机器人消息、不调用模型、不自动回复）；`feishu_avatar_inbox` 读取未读，`feishu_avatar_draft` 提交草稿等确认；群聊默认只记录 @我/回复我，可改关键词。
 
@@ -71,6 +71,7 @@ feishu_avatar_me / feishu_avatar_messages / feishu_avatar_send
 子插件仍可保留，但已经是 no-op，不会重复注册。
 
 配置步骤、权限清单和错误码见 [docs/user-identity.md](docs/user-identity.md)。
+消息接入与回复的完整链路见 [docs/message-flow-architecture.html](docs/message-flow-architecture.html)。
 
 ## 常用命令
 
@@ -88,7 +89,7 @@ feishu_avatar_me / feishu_avatar_messages / feishu_avatar_send
 - 群内 @ 能力默认开启、@所有人默认禁止，可在群聊设置里调整；未知或非法的 open_id 会被擦除；
 - 群里要并行做多件事，用 `/topic` 给每个任务开一个话题；
 - 群内的 `/new`、`/stop`、调整配置与**审批按钮**默认需要管理白名单成员操作；普通任务和提问选择不受限制；
-- 把飞书聊天绑定到 Web 会话时，Web 侧任务不会向飞书推送卡片或审批；需要发消息时使用 `im_feishu_send`。
+- 把飞书聊天绑定到 Web 会话时，Web 侧任务不会向飞书推送卡片或审批；需要发消息时使用 `feishu_bot_send`。
 
 ### 群聊旁听
 
@@ -96,13 +97,13 @@ feishu_avatar_me / feishu_avatar_messages / feishu_avatar_send
 
 - 需要 `im:message.group_msg` 权限：可在飞书开发者后台开通，或点设置页的「补齐权限」扫码授权；未授权时机器人收不到非 @ 消息，旁听不会生效；
 - 默认保留最近 20 条，可设为 1-500；旁听缓冲按群聊和话题分别维护，只存在内存里，重启或重连后清空；
-- 注入格式为 `[2026-10-19 15:33:33.820 +08:00] 名称：内容`（时间自带时区，模型可直接引用）；需要 at 某人时先调用 `im_feishu_people` 查 open_id；
+- 注入格式为 `[2026-10-19 15:33:33.820 +08:00] 名称：内容`（时间自带时区，模型可直接引用）；需要 at 某人时先调用 `feishu_bot_people` 查 open_id；
 - **图片/文件只记占位符**（`[图片]`、`[文件：报告.pdf]`），不会下载任何媒体；旁听块会告诉模型“需要内容时请用户 @ 机器人重新发送”，模型会在回复里向你索取；
 - 旁听内容来自群成员，属于不可信输入；块头会提示模型只当背景信息，仍建议只把机器人放在可信群里使用。
 
 ### 查询历史消息
 
-- 用 `im_feishu_messages` 按群、话题、时间范围读取历史；
+- 用 `feishu_bot_messages` 按群、话题、时间范围读取历史；
 - 支持分页，单次最多返回 50 条；
 - 可选 `query` 在本次拉取范围内做本地关键词筛选，不是飞书全文搜索；
 - 机器人需要有 `im:message.group_msg` 权限；
@@ -111,8 +112,8 @@ feishu_avatar_me / feishu_avatar_messages / feishu_avatar_send
 ### 让机器人 at 人
 
 - 默认开启；涉及需要某人决策、批准、确认或选择时用 at 提及当事人，纯信息同步和闲聊不要 at，不确定具体当事人也不要 at；
-- 模型先调用 `im_feishu_people` 按姓名查询，拿到完整 open_id 后输出 `<at id=[open_id]></at>`，并完整替换占位符；禁止截断或保留占位符；
-- 旁听记录里的发送者只注入**名字**，不再携带 open_id；当前消息也不再注入 people 块；需要 at 时由 `im_feishu_people` 查精确 ID；
+- 模型先调用 `feishu_bot_people` 按姓名查询，拿到完整 open_id 后输出 `<at id=[open_id]></at>`，并完整替换占位符；禁止截断或保留占位符；
+- 旁听记录里的发送者只注入**名字**，不再携带 open_id；当前消息也不再注入 people 块；需要 at 时由 `feishu_bot_people` 查精确 ID；
 - 卡片里保持 `<at id=ou_xxx></at>`；文本降级时转成 `<at user_id="ou_xxx">名称</at>`；
 - 未知/非法 open_id、at 能力关闭、at 所有人被禁止时，标签会被**整段擦除**，不会误 at；
 - `at 所有人` 默认禁止，可在群聊设置里放开；提示词只说明“按需 at”，不写 at 所有人的禁令，是否允许由插件强制执行。

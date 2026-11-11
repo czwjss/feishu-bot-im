@@ -822,7 +822,7 @@ export class RuntimeManager {
     const bound = sessionId ? chatIdOfKey(runtime.chatKeyForSession(sessionId)) : null;
     const target = String(chatId ?? '').trim() || bound;
     if (!target) {
-      throw new Error(`没有 ${label}，且当前 Session 没有绑定飞书聊天；请先用 im_feishu_chats 查询`);
+      throw new Error(`没有 ${label}，且当前 Session 没有绑定飞书聊天；请先用 feishu_bot_chats 查询`);
     }
     return { runtime, target };
   }

@@ -5,7 +5,7 @@
 以**你本人**的飞书身份读消息、发消息。和机器人身份的区别：
 
 ```text
-机器人身份  tenant_access_token   im_feishu_*   群里显示「小金刚」
+机器人身份  tenant_access_token   feishu_bot_*   群里显示「小金刚」
 用户身份    user_access_token     feishu_avatar_* 群里显示「陈志文」
 ```
 

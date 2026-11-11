@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>飞书消息接入与回复架构</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #16181d;
+    --sub: #5b6572;
+    --line: #dfe3e8;
+    --bot: #3370ff;
+    --bot-soft: #eaf1ff;
+    --user: #00b96b;
+    --user-soft: #e6f9ef;
+    --dsh: #7c4dff;
+    --dsh-soft: #f0eaff;
+    --warn: #ff8800;
+    --warn-soft: #fff3e6;
+    --code: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 40px 24px 80px;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.3px; }
+  .lead { color: var(--sub); margin: 0 0 20px; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 28px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); background: #fff; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  h2 { font-size: 17px; margin: 34px 0 14px; display: flex; align-items: center; gap: 8px; }
+  h2 .tag { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 6px; letter-spacing: .02em; }
+  .lane { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 18px 8px; }
+  .lane.bot { border-top: 3px solid var(--bot); }
+  .lane.user { border-top: 3px solid var(--user); }
+  .lane.dsh { border-top: 3px solid var(--dsh); }
+  .step { display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; }
+  .num {
+    width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; color: #fff; background: var(--sub);
+  }
+  .bot .num { background: var(--bot); }
+  .user .num { background: var(--user); }
+  .dsh .num { background: var(--dsh); }
+  .box { padding-bottom: 6px; }
+  .title { font-weight: 600; }
+  .meta { color: var(--sub); font-size: 12.5px; }
+  code, .path {
+    font-family: var(--code); font-size: 12px; background: #f1f3f6;
+    padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line);
+  }
+  .arrow { margin: 2px 0 10px 16px; color: #b8c0cc; font-size: 18px; line-height: 1; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
+  .note {
+    background: var(--warn-soft); border: 1px solid #ffd7a8; border-left: 3px solid var(--warn);
+    border-radius: 10px; padding: 12px 14px; font-size: 13px; margin-top: 14px;
+  }
+  .note b { color: #a35a00; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #f2f4f7; font-size: 12px; color: var(--sub); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  .pill { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); background: #fff; white-space: nowrap; }
+  .pill.bot { color: var(--bot); border-color: #b9cdff; background: var(--bot-soft); }
+  .pill.user { color: #00794a; border-color: #a8e6c8; background: var(--user-soft); }
+  .pill.dsh { color: #5730c0; border-color: #d0c0ff; background: var(--dsh-soft); }
+  .footer { color: var(--sub); font-size: 12px; margin-top: 26px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>飞书消息接入与回复架构</h1>
+  <p class="lead">两条独立链路：机器人身份走事件推送，用户分身走轮询。它们在 DSH 里汇合到同一套 Agent 与会话上。</p>
+
+  <div class="legend">
+    <span class="chip"><span class="dot" style="background:#3370ff"></span>机器人身份（tenant_access_token / 事件推送）</span>
+    <span class="chip"><span class="dot" style="background:#00b96b"></span>用户分身（user_access_token / 轮询）</span>
+    <span class="chip"><span class="dot" style="background:#7c4dff"></span>DSH Host / Agent</span>
+  </div>
+
+  <!-- ============ 链路一：机器人 ============ -->
+  <h2>链路一　机器人身份：事件推送 <span class="tag" style="background:var(--bot-soft);color:var(--bot)">实时</span></h2>
+  <div class="lane bot">
+
+    <div class="step">
+      <div class="num">1</div>
+      <div class="box">
+        <div class="title">飞书长连接事件</div>
+        <div class="meta">
+          <span class="path">im.message.receive_v1</span> 群/私聊消息 ·
+          <span class="path">card.action.trigger</span> 卡片按钮
+          <br>入口 <code>src/feishu.js → startLongConnection</code>
+        </div>
+      </div>
+    </div>
+    <div class="arrow">▼</div>
+
+    <div class="step">
+      <div class="num">2</div>
+      <div class="box">
+        <div class="title">消息桥接与准入</div>
+        <div class="meta">
+          <code>src/bridge.js → handleMessage</code><br>
+          去重（<code>state.hasSeen</code>）→ 白名单/权限 → 是否被 @ 或引用机器人 → 未命中的进旁听缓冲
+        </div>
+      </div>
+    </div>
+    <div class="arrow">▼</div>
+
+    <div class="step">
+      <div class="num">3</div>
+      <div class="box">
+        <div class="title">引用与上下文组装</div>
+        <div class="meta">
+          拉父消息（含引用图片、卡片内嵌图片）→ 命中 <code>/命令</code> 直接执行 → 否则组装注入块：
+          引导语、来源、引用、旁听、同步
+        </div>
+      </div>
+    </div>
+    <div class="arrow">▼</div>
+
+    <div class="step">
+      <div class="num">4</div>
+      <div class="box">
+        <div class="title">投递到 DSH 会话</div>
+        <div class="meta">
+          <code>src/harness.js</code> → <code>session.prompt</code>；一个飞书会话 → 一个 DSH Session
+        </div>
+      </div>
+    </div>
+    <div class="arrow">▼</div>
+
+    <div class="step">
+      <div class="num">5</div>
+      <div class="box">
+        <div class="title">流式回写</div>
+        <div class="meta">
+          <code>agent/assistant-stream</code> → CardKit 卡片逐段更新（失败降级为普通卡片）→ 结束补最终态
+        </div>
+      </div>
+    </div>
+    <div class="arrow">▼</div>
+
+    <div class="step">
+      <div class="num">6</div>
+      <div class="box">
+        <div class="title">人工环节回传</div>
+        <div class="meta">
+          审批 / 选择题 → 飞书卡片按钮 → <code>card.action.trigger</code> → <code>bridge.onCardAction</code> → 回到会话继续
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============ 链路二：用户分身 ============ -->
+  <h2>链路二　用户分身：轮询收件箱 <span class="tag" style="background:var(--user-soft);color:#00794a">默认每 60 秒</span></h2>
+  <div class="lane user">
+
+    <div class="step">
+      <div class="num">1</div>
+      <div class="box">
+        <div class="title">定时轮询</div>
+        <div class="meta">
+          <code>src/user-identity/monitor.js → pollOnce</code><br>
+          窗口：<code>min(游标−1s, 现在−2min)</code>，每会话串行，单轮最多 100 条
+        </div>
+      </div>
+    </div>
+    <div class="arrow">▼</div>
+
+    <div class="step">
+      <div class="num">2</div>
+      <div class="box">
+        <div class="title">过滤与触发判断</div>
+        <div class="meta">
+          跳过：自己发的、系统消息、已删除 · 触发规则：私聊全收 / 群聊仅 @我·回复我 / 关键词<br>
+          被过滤的消息也会推进游标，不会每轮重判
+        </div>
+      </div>
+    </div>
+    <div class="arrow">▼</div>
+
+    <div class="step">
+      <div class="num">3</div>
+      <div class="box">
+        <div class="title">去重与噪点清理</div>
+        <div class="meta">
+          同一 <code>message_id</code> 原地刷新 → 更新旧记录，不新增未读 ·
+          「已收到/正在处理」超过 2 分钟自动丢弃 · 卡片正文拉平成可读文本，<code>&lt;at&gt;</code> 渲染成姓名
+        </div>
+      </div>
+    </div>
+    <div class="arrow">▼</div>
+
+    <div class="step">
+      <div class="num">4</div>
+      <div class="box">
+        <div class="title">本地收件箱</div>
+        <div class="meta">
+          <span class="path">~/.dsh/integrations/im-feishu/monitor-state.json</span>（0600，每会话 50 条）<br>
+          <b>不调用模型，不自动回复</b>
+        </div>
+      </div>
+    </div>
+    <div class="arrow">▼</div>
+
+    <div class="step">
+      <div class="num">5</div>
+      <div class="box">
+        <div class="title">未读提示注入</div>
+        <div class="meta">
+          <code>im-feishu-user:inbox</code> 系统提示段：只给数量与会话名，例如「飞书分身收件箱有 2 条未读：小金刚 2 条」
+        </div>
+      </div>
+    </div>
+    <div class="arrow">▼</div>
+
+    <div class="step">
+      <div class="num">6</div>
+      <div class="box">
+        <div class="title">Agent 读收件箱</div>
+        <div class="meta">
+          工具 <code>feishu_avatar_inbox</code>：默认只取未读并标记已读，可按会话过滤
+        </div>
+      </div>
+    </div>
+    <div class="arrow">▼</div>
+
+    <div class="step">
+      <div class="num">7</div>
+      <div class="box">
+        <div class="title">起草</div>
+        <div class="meta">
+          工具 <code>feishu_avatar_draft</code>：只落库成待确认草稿（30 分钟过期），不发送
+        </div>
+      </div>
+    </div>
+    <div class="arrow">▼</div>
+
+    <div class="step">
+      <div class="num">8</div>
+      <div class="box">
+        <div class="title">人工确认</div>
+        <div class="meta">
+          设置 → 飞书机器人 → 分身 → 消息监听 → 待确认草稿：<b>发送</b> / <b>忽略</b>（RPC）
+        </div>
+      </div>
+    </div>
+    <div class="arrow">▼</div>
+
+    <div class="step">
+      <div class="num">9</div>
+      <div class="box">
+        <div class="title">以本人身份发出</div>
+        <div class="meta">
+          有原消息则走 <span class="path">im/v1/messages/:id/reply</span> 保持引用，否则发到会话；
+          token 过期自动刷新一次<br>
+          用户明确说「直接发」时才跳过草稿，直接用 <code>feishu_avatar_send</code>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>为什么是轮询：</b>飞书的事件推送只发给应用（机器人），
+      个人身份拿不到「别人给我发的消息」的实时事件，所以分身只能按游标拉取。代价是延迟受轮询间隔约束。
+    </div>
+  </div>
+
+  <!-- ============ 汇合与出口 ============ -->
+  <h2>汇合点与出口</h2>
+  <div class="split">
+    <div class="lane dsh">
+      <div class="step">
+        <div class="num">A</div>
+        <div class="box">
+          <div class="title">同一套 DSH 能力</div>
+          <div class="meta">
+            两条链路最终都落到 DSH Agent：工具、技能、子代理、审批、会话持久化完全共用。
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="num">B</div>
+        <div class="box">
+          <div class="title">两种身份不能混用</div>
+          <div class="meta">
+            <span class="pill bot">feishu_bot_*</span> 群里显示「小金刚」<br>
+            <span class="pill user">feishu_avatar_*</span> 群里显示「陈志文」
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lane">
+      <div class="step">
+        <div class="num">C</div>
+        <div class="box">
+          <div class="title">出口清单</div>
+          <div class="meta">
+            <code>feishu_bot_send</code> 机器人发卡片/文件<br>
+            <code>feishu_avatar_send</code> 本人发卡片/图片/文件<br>
+            流式卡片由 bridge 自动更新，不占工具
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="num">D</div>
+        <div class="box">
+          <div class="title">设置页通道</div>
+          <div class="meta">
+            <code>client/identity.js</code> → <span class="path">POST /api/im-feishu</span> →
+            <code>src/rpc.js</code>：机器人管理、分身授权、监听与草稿
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 文件对照 ============ -->
+  <h2>关键文件</h2>
+  <table>
+    <thead>
+      <tr><th>职责</th><th>文件</th><th>身份</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>长连接与事件注册</td><td><code>src/feishu.js</code></td><td><span class="pill bot">机器人</span></td></tr>
+      <tr><td>消息处理、命令、引用、卡片动作</td><td><code>src/bridge.js</code></td><td><span class="pill bot">机器人</span></td></tr>
+      <tr><td>会话投递与流式</td><td><code>src/harness.js</code> · <code>src/turn.js</code></td><td><span class="pill dsh">DSH</span></td></tr>
+      <tr><td>轮询、去重、收件箱、草稿</td><td><code>src/user-identity/monitor.js</code></td><td><span class="pill user">分身</span></td></tr>
+      <tr><td>用户态配置与游标存储</td><td><code>src/user-identity/monitor-store.js</code></td><td><span class="pill user">分身</span></td></tr>
+      <tr><td>用户态 OpenAPI 封装（读消息 / 发消息 / 回复）</td><td><code>src/user-identity/api.js</code></td><td><span class="pill user">分身</span></td></tr>
+      <tr><td>工具定义（含 inbox / draft）</td><td><code>src/user-identity/tools.js</code></td><td><span class="pill user">分身</span></td></tr>
+      <tr><td>Host 挂载（工具 + 提示词段）</td><td><code>index.js</code> · <code>src/user-identity/contributions.js</code></td><td><span class="pill dsh">DSH</span></td></tr>
+      <tr><td>设置页 UI</td><td><code>client/identity.js</code></td><td><span class="pill dsh">Web</span></td></tr>
+    </tbody>
+  </table>
+
+  <p class="footer">
+    本地数据：<span class="path">~/.dsh/integrations/im-feishu/</span>
+    config.json · state-&lt;bot&gt;.json · user-token.json · monitor.json · monitor-state.json（均 0600，不含明文 token）
+  </p>
+
+</div>
+</body>
+</html>

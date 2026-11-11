@@ -211,7 +211,7 @@ Host 插件
   只做设置、OAuth、token
 
 普通群聊 Agent
-  只有 im_feishu_* 工具
+  只有 feishu_bot_* 工具
 
 我的飞书分身
   额外挂载 ./user-identity

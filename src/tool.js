@@ -4,11 +4,11 @@ import { formatEavesdropTime } from './eavesdrop.js';
 /**
  * Model-facing Feishu tools.
  *
- * `im_feishu_send` sends a standalone message/file. Feishu-origin replies are
+ * `feishu_bot_send` sends a standalone message/file. Feishu-origin replies are
  * streamed by the bridge itself, so there is deliberately no agent-facing
  * "reply with a card" tool.
  */
-export const SEND_TOOL_NAME = 'im_feishu_send';
+export const SEND_TOOL_NAME = 'feishu_bot_send';
 
 export function createSendTool({ send }) {
   return Object.freeze({
@@ -92,7 +92,7 @@ export function createSendTool({ send }) {
 }
 
 
-export const MESSAGES_TOOL_NAME = 'im_feishu_messages';
+export const MESSAGES_TOOL_NAME = 'feishu_bot_messages';
 
 export function createMessagesTool({ list }) {
   return Object.freeze({
@@ -207,7 +207,7 @@ export function createMessagesTool({ list }) {
 }
 
 
-export const CHATS_TOOL_NAME = 'im_feishu_chats';
+export const CHATS_TOOL_NAME = 'feishu_bot_chats';
 
 /** Discover the chats the bot belongs to, with bound Session markers. */
 export function createChatsTool({ list }) {
@@ -276,7 +276,7 @@ export function createChatsTool({ list }) {
 }
 
 
-export const PEOPLE_TOOL_NAME = 'im_feishu_people';
+export const PEOPLE_TOOL_NAME = 'feishu_bot_people';
 
 /** Resolve a group member's exact open_id without dumping the roster. */
 export function createPeopleTool({ find }) {
