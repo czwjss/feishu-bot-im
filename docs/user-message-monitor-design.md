@@ -631,7 +631,7 @@ offline_access
 - 机器人/应用消息同样记录（群里多是通知），只过滤系统消息和自己发的消息；
 - 新消息只落到本地收件箱，**不创建会话、不调用模型、不自动回复**；
 - 每会话最多保留最近 50 条，正文截断 2000 字，文件 0600；
-- `feishu_avatar_inbox` 工具读取未读并标记已读；
+- 未读直接在设置页的分身面板查看（收件箱工具不再暴露给模型）；
 - 回复仍由 Agent 显式调用 `feishu_avatar_send`（用户本人身份），监听自身永不写飞书；
 - 设置页显示未读数、最近消息，支持全部已读和清空记录；
 - 轮询间隔默认 60 秒，可在 `monitor.json` 的 `pollIntervalMs` 调整；
@@ -667,7 +667,7 @@ offline_access
 ```text
 src/user-identity/monitor.js
 src/user-identity/monitor-store.js
-src/user-identity/tools.js          feishu_avatar_inbox
+src/user-identity/tools.js          feishu_avatar_draft / reply / skip
 src/user-identity/api.js            listChats（types=p2p,group）
 client/identity.js                  MonitorPanel
 ```

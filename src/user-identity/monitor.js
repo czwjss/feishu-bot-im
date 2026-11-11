@@ -136,6 +136,14 @@ export class UserMonitorManager {
     return this.#autoReply;
   }
 
+  /** 该会话是否是某个监听会话的自动回复 Worker。 */
+  isAutoReplySession(sessionId) {
+    const needle = typeof sessionId === 'string' ? sessionId.trim() : '';
+    if (!needle) return false;
+    const chats = this.#store.state?.chats ?? {};
+    return Object.values(chats).some((entry) => entry?.sessionId === needle);
+  }
+
   /** 监听状态 + 每会话未读数和最近消息（受上限约束）。 */
   async status() {
     const auth = await this.#auth.status().catch(() => null);

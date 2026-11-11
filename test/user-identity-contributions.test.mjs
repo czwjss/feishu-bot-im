@@ -15,7 +15,7 @@ const ctx = {
       });
     }
     if (services.includes('tools')) {
-      callback({ tools: { register: (tool) => tools.push(tool) } });
+      callback({ tools: { register: (tool, options) => tools.push({ ...tool, options }) } });
     }
   },
 };
@@ -32,12 +32,11 @@ assert.deepEqual(tools.map((tool) => tool.name), [
   'feishu_avatar_send',
 ]);
 
-// 有监听时追加收件箱工具，并默认只返回未读。
-const inboxCalls = [];
+// 有监听时追加草稿与决策工具；收件箱工具不再注册。
 tools.length = 0;
 sections.length = 0;
 installUserIdentityContributions(ctx, {}, {
-  summary: () => '飞书分身收件箱有 1 条未读：测试私聊 1 条。',
+  isAutoReplySession: (sessionId) => sessionId === 'session-worker',
   async createDraft(input) {
     return { draftId: 'draft-1', chatId: input.chatId, status: 'pending', text: input.text };
   },
@@ -49,41 +48,32 @@ installUserIdentityContributions(ctx, {}, {
       return { skipped: true, messageIds: ['om_1'] };
     },
   },
-  async inbox(input) {
-    inboxCalls.push(input);
-    return {
-      total: 1,
-      items: [{
-        chatId: 'oc_test', chatName: '测试私聊', chatMode: 'p2p', messageId: 'om_1',
-        senderName: '同事', senderOpenId: 'ou_1', createTime: '2026-11-11T08:00:00.000Z', text: '你好',
-      }],
-    };
-  },
 });
 assert.deepEqual(tools.map((tool) => tool.name), [
   'feishu_avatar_me',
   'feishu_avatar_messages',
   'feishu_avatar_send',
-  'feishu_avatar_inbox',
   'feishu_avatar_draft',
   'feishu_avatar_reply',
   'feishu_avatar_skip',
 ]);
-assert.equal(sections.length, 2, 'inbox context is registered with the monitor');
-assert.equal(sections[1].name, 'im-feishu-user:inbox');
-assert.equal(sections[1].order, 121);
-assert.match(String(sections[1].text()), /1 条未读/);
-const draftTool = tools.at(-3);
-assert.equal(draftTool.name, 'feishu_avatar_draft');
+assert.equal(sections.length, 1, 'no unread summary is injected into other sessions');
+const draftTool = tools.find((tool) => tool.name === 'feishu_avatar_draft');
 const created = await draftTool.execute({ chatId: 'oc_test', text: '好的' });
 assert.equal(created.draftId, 'draft-1');
 assert.equal(created.status, 'pending');
-const inboxTool = tools.at(-4);
-assert.equal(inboxTool.parameters.properties.limit.maximum, 50);
-const value = await inboxTool.execute({});
-assert.equal(value.total, 1);
-assert.equal(value.items[0].text, '你好');
-assert.deepEqual(inboxCalls, [{ chatId: '', limit: undefined, unreadOnly: true, markRead: true }]);
+
+// 决策工具只对自动回复 Worker 会话可见。
+const replyTool = tools.find((tool) => tool.name === 'feishu_avatar_reply');
+const skipTool = tools.find((tool) => tool.name === 'feishu_avatar_skip');
+assert.equal(typeof replyTool.options?.when, 'function');
+assert.equal(typeof skipTool.options?.when, 'function');
+assert.equal(replyTool.options.when({ agent: { session: { id: 'session-worker' } } }), true);
+assert.equal(replyTool.options.when({ agent: { session: { id: 'session-other' } } }), false);
+assert.equal(tools.find((tool) => tool.name === 'feishu_avatar_send').options, undefined);
+
+// 收件箱工具已不再注册给模型。
+assert.equal(tools.some((tool) => tool.name === 'feishu_avatar_inbox'), false);
 console.log('user identity contributions: 26 assertions passed');
 
 const preset = await import('../src/user-identity/index.js');

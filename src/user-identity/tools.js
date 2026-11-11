@@ -339,6 +339,10 @@ export function createSendTool({ auth, fetchImpl }) {
  * 监听收件箱：读取已记录的飞书新消息（轮询产生，不调用模型）。
  * 默认只取未读并标记已读；回复仍用 feishu_avatar_send。
  */
+/**
+ * 收件箱工具保留实现但不注册：未读已经由监听的推送链路处理，
+ * 模型侧再暴露一个查询入口会污染其他会话的上下文。
+ */
 export function createInboxTool({ monitor }) {
   return Object.freeze({
     name: INBOX_TOOL_NAME,
@@ -589,7 +593,6 @@ export function createUserIdentityTools({ auth, fetchImpl, monitor = null }) {
     createSendTool({ auth, fetchImpl }),
   ];
   if (monitor) {
-    tools.push(createInboxTool({ monitor }));
     tools.push(createDraftTool({ monitor }));
     tools.push(createReplyTool({ monitor }));
     tools.push(createSkipTool({ monitor }));
