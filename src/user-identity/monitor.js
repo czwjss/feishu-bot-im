@@ -168,7 +168,6 @@ export class UserMonitorManager {
       chatMode: input.chatMode === 'p2p' ? 'p2p' : 'group',
       external: input.external === true,
     };
-    await this.#assertWatchable(chat);
     await this.#store.saveConfig({ chats: [...this.#store.config.chats, chat] });
     // 新增监听从当前时间开始，不回补历史。
     const state = { ...this.#store.state, chats: { ...this.#store.state.chats } };
@@ -295,27 +294,6 @@ export class UserMonitorManager {
     }
   }
 
-  /**
-   * 拒绝对“与机器人自己的私聊”开监听：那里只有你自己的消息和应用发出的卡片，
-   * 前者被当作自己过滤，后者不是用户消息，永远记录不到任何内容。
-   */
-  async #assertWatchable(chat) {
-    const accessToken = await this.#auth.requireAccessToken();
-    const result = await this.#listMessages({
-      accessToken,
-      chatId: chat.chatId,
-      pageSize: 20,
-      sort: 'desc',
-    }).catch(() => null);
-    if (!result) return;
-    const items = result.items ?? [];
-    if (chat.chatMode !== 'p2p') return;
-    const hasAppSender = items.some((item) => item.senderType && item.senderType !== 'user');
-    if (hasAppSender) {
-      throw new Error('这是与机器人自己的私聊：只有你的消息和机器人卡片，监听不会记录到新内容；请选择和其他人的私聊或群聊');
-    }
-  }
-
   /** 会话成员姓名表，每会话只取一次。 */
   async #namesFor(chatId, accessToken) {
     if (this.#nameCache.has(chatId)) return this.#nameCache.get(chatId);
@@ -357,7 +335,8 @@ export class UserMonitorManager {
       const eligible = [];
       for (const item of result.items) {
         if (!item.messageId || seen.has(item.messageId)) continue;
-        if (item.deleted || item.senderType !== 'user' || item.msgType === 'system') continue;
+        // 机器人/应用消息同样记录：群里常是通知，私聊里是对方机器人回复。
+        if (item.deleted || item.msgType === 'system') continue;
         if (selfOpenId && item.senderOpenId === selfOpenId) continue;
         const time = messageTime(item);
         if (time === null || time < current.cursorTimeMs) continue;
@@ -383,7 +362,8 @@ export class UserMonitorManager {
           ...nextMessages,
           {
             messageId: item.messageId,
-            senderName: item.senderName || names.get(item.senderOpenId) || '',
+            senderName: item.senderName || names.get(item.senderOpenId)
+              || (item.senderType === 'app' ? '机器人' : ''),
             senderOpenId: item.senderOpenId ?? '',
             createTime: item.createTime ?? new Date(time).toISOString(),
             text: item.text ?? `[${item.msgType || '消息'}]`,

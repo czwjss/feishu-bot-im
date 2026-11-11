@@ -110,21 +110,24 @@ try {
 
   await monitor.pollOnce();
   const recorded = store.state.chats[chatId].messages;
-  assert.equal(recorded.length, 1);
-  assert.equal(recorded[0].messageId, 'm-new');
-  assert.equal(recorded[0].read, false);
-  assert.equal(recorded[0].senderName, '同事', 'sender name resolved from chat members');
+  assert.equal(recorded.length, 2, 'user message + bot message are both recorded');
+  assert.deepEqual(recorded.map((m) => m.messageId), ['m-bot', 'm-new']);
+  const bot = recorded.find((m) => m.messageId === 'm-bot');
+  const fromColleague = recorded.find((m) => m.messageId === 'm-new');
+  assert.equal(bot.senderName, '机器人');
+  assert.equal(fromColleague.senderName, '同事', 'sender name resolved from chat members');
+  assert.equal(fromColleague.read, false);
   assert.deepEqual(nameCalls, [chatId]);
   assert.equal(store.state.chats[chatId].cursorTimeMs, now - 5_000);
 
   // 重复轮询不重复记录。
   await monitor.pollOnce();
-  assert.equal(store.state.chats[chatId].messages.length, 1);
+  assert.equal(store.state.chats[chatId].messages.length, 2);
 
   // 5) 收件箱默认只取未读并标记已读。
   const first = await monitor.inbox({});
-  assert.equal(first.total, 1);
-  assert.equal(first.items[0].text, '你好');
+  assert.equal(first.total, 2);
+  assert.deepEqual(first.items.map((item) => item.text), ['bot', '你好']);
   const second = await monitor.inbox({});
   assert.equal(second.total, 0);
 
@@ -132,41 +135,15 @@ try {
   await monitor.inbox({ unreadOnly: false, markRead: false });
   const status = await monitor.status();
   assert.equal(status.unreadTotal, 0);
-  assert.equal(status.chats[0].messages.length, 1);
+  assert.equal(status.chats[0].messages.length, 2);
 
   // 7) 清空记录但保留游标。
   await monitor.clearMessages();
   assert.equal(store.state.chats[chatId].messages.length, 0);
   assert.equal(store.state.chats[chatId].cursorTimeMs, now - 5_000);
 
-  // 8) 与机器人自己的私聊不允许监听。
-  const botStore = new MonitorStore({
-    configPath: join(dir, 'bot-monitor.json'),
-    statePath: join(dir, 'bot-state.json'),
-  });
-  await botStore.load();
-  const botMonitor = new UserMonitorManager({
-    auth,
-    store: botStore,
-    now: () => now,
-    listMessages: async () => ({
-      items: [
-        { messageId: 'om_self', createTime: new Date(now).toISOString(), senderType: 'user', senderOpenId: 'ou_self', text: '你好' },
-        { messageId: 'om_card', createTime: new Date(now).toISOString(), senderType: 'app', senderOpenId: 'cli_x', text: '[卡片]' },
-      ],
-      hasMore: false,
-      pageToken: null,
-    }),
-  });
-  await assert.rejects(
-    () => botMonitor.addChat({ chatId: 'oc_bot_chat', name: '小金刚', chatMode: 'p2p' }),
-    /与机器人自己的私聊/,
-  );
-  // 群聊即使有机器人消息也允许监听。
-  await botMonitor.addChat({ chatId: 'oc_group_ok', name: '群', chatMode: 'group' });
-  assert.equal(botStore.config.chats.length, 1);
 } finally {
   await rm(dir, { recursive: true, force: true });
 }
 
-console.log('user identity monitor: 25 assertions passed');
+console.log('user identity monitor: 22 assertions passed');
