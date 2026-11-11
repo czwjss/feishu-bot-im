@@ -148,13 +148,29 @@ export class UserMonitorManager {
 
   async discoverChats() {
     const accessToken = await this.#auth.requireAccessToken();
-    const result = await this.#listChats({ accessToken, types: 'p2p,group' });
-    return result.items.map((chat) => ({
-      chatId: chat.chatId,
-      name: chat.name || chat.chatId,
-      chatMode: chat.chatMode,
-      external: chat.external,
-    }));
+    const merged = new Map();
+    let pageToken = null;
+    for (let page = 0; page < 5; page += 1) {
+      const result = await this.#listChats({
+        accessToken,
+        types: 'p2p,group',
+        pageSize: 100,
+        pageToken,
+      });
+      for (const chat of result.items) {
+        if (!merged.has(chat.chatId)) {
+          merged.set(chat.chatId, {
+            chatId: chat.chatId,
+            name: chat.name || chat.chatId,
+            chatMode: chat.chatMode,
+            external: chat.external,
+          });
+        }
+      }
+      if (!result.hasMore || !result.pageToken) break;
+      pageToken = result.pageToken;
+    }
+    return [...merged.values()];
   }
 
 

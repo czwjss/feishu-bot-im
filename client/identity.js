@@ -87,7 +87,7 @@ const h = React.createElement;
         ? (candidates.length === 0
           ? h('p', { style: S.hint }, t('没有可添加的会话。', 'No chats available to add.'))
           : h('div', { style: { display: 'grid', gap: '4px', maxHeight: '220px', overflow: 'auto' } },
-            candidates.slice(0, 100).map((chat) => h('div', {
+            candidates.slice(0, 300).map((chat) => h('div', {
               key: chat.chatId,
               style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 0' },
             },

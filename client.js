@@ -665,7 +665,7 @@ function MonitorPanel({ connection }) {
   const candidateRows = available ? candidates.length === 0 ? h2("p", { style: S.hint }, t("\u6CA1\u6709\u53EF\u6DFB\u52A0\u7684\u4F1A\u8BDD\u3002", "No chats available to add.")) : h2(
     "div",
     { style: { display: "grid", gap: "4px", maxHeight: "220px", overflow: "auto" } },
-    candidates.slice(0, 100).map((chat) => h2(
+    candidates.slice(0, 300).map((chat) => h2(
       "div",
       {
         key: chat.chatId,
