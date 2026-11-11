@@ -1,8 +1,152 @@
 import React from 'react';
 
-import { API, S, rpc, t } from './shared.js';
+import { API, Panel, S, rpc, t } from './shared.js';
 
 const h = React.createElement;
+
+    function MonitorPanel({ connection }) {
+      const [monitor, setMonitor] = React.useState(null);
+      const [available, setAvailable] = React.useState(null);
+      const [manual, setManual] = React.useState('');
+      const [manualMode, setManualMode] = React.useState('p2p');
+      const [busy, setBusy] = React.useState('');
+      const [error, setError] = React.useState(null);
+
+      const load = React.useCallback(async () => {
+        try {
+          const value = await rpc(connection, API.userMonitorStatus, {});
+          setMonitor(value);
+          setError(null);
+          return value;
+        } catch (failure) {
+          setError(failure?.message ?? String(failure));
+          return null;
+        }
+      }, [connection]);
+
+      React.useEffect(() => { void load(); }, [load]);
+      React.useEffect(() => {
+        const timer = setInterval(() => { void load(); }, 10_000);
+        return () => clearInterval(timer);
+      }, [load]);
+
+      const act = async (label, operation) => {
+        setBusy(label);
+        setError(null);
+        try {
+          const value = await operation();
+          if (value) setMonitor(value);
+        } catch (failure) {
+          setError(failure?.message ?? String(failure));
+        } finally {
+          setBusy('');
+        }
+      };
+
+      const refreshChats = () => act('chats', async () => {
+        const value = await rpc(connection, API.userMonitorChats, {});
+        setAvailable(Array.isArray(value?.chats) ? value.chats : []);
+        return null;
+      });
+      const add = (chat) => act(`add:${chat.chatId}`, () => rpc(connection, API.userMonitorAdd, chat));
+      const remove = (chat) => act(`remove:${chat.chatId}`, () => rpc(connection, API.userMonitorRemove, { chatId: chat.chatId }));
+      const toggle = () => act('toggle', () => rpc(connection, API.userMonitorEnable, {
+        enabled: monitor?.enabled !== true,
+      }));
+      const poll = () => act('poll', () => rpc(connection, API.userMonitorPoll, {}));
+      const addManual = () => {
+        const chatId = manual.trim();
+        if (!chatId) return;
+        void act('manual', async () => {
+          const value = await rpc(connection, API.userMonitorAdd, { chatId, chatMode: manualMode });
+          setManual('');
+          return value;
+        });
+      };
+
+      const chats = Array.isArray(monitor?.chats) ? monitor.chats : [];
+      const monitored = new Set(chats.map((chat) => chat.chatId));
+      const candidates = (available ?? []).filter((chat) => !monitored.has(chat.chatId));
+      const formatTime = (ms) => (Number.isFinite(ms) && ms > 0 ? new Date(ms).toLocaleTimeString() : '—');
+
+      const chatRows = chats.length === 0
+        ? h('p', { style: S.hint }, t('还没有监听会话。点“选择会话”添加。', 'No monitored chats yet. Choose chats to add.'))
+        : chats.map((chat) => h('div', {
+          key: chat.chatId,
+          style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0', borderTop: '1px solid var(--dsw-alias-border-l1)' },
+        },
+        h('div', { style: { flex: 1, minWidth: 0 } },
+          h('div', { style: { fontSize: '13px' } }, chat.name || chat.chatId),
+          h('div', { style: S.hint },
+            `${chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group')} · ${chat.chatId}`,
+            chat.lastError ? h('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, ` · ${chat.lastError}`) : null)),
+        h('button', { type: 'button', className: 'bxf-mini', disabled: busy === `remove:${chat.chatId}`, onClick: () => void remove(chat) },
+          t('移除', 'Remove'))));
+
+      const candidateRows = available
+        ? (candidates.length === 0
+          ? h('p', { style: S.hint }, t('没有可添加的会话。', 'No chats available to add.'))
+          : h('div', { style: { display: 'grid', gap: '4px', maxHeight: '220px', overflow: 'auto' } },
+            candidates.slice(0, 100).map((chat) => h('div', {
+              key: chat.chatId,
+              style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 0' },
+            },
+            h('div', { style: { flex: 1, minWidth: 0 } },
+              h('div', { style: { fontSize: '13px' } }, chat.name || chat.chatId),
+              h('div', { style: S.hint }, chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group'))),
+            h('button', { type: 'button', className: 'bxf-mini', disabled: busy === `add:${chat.chatId}`, onClick: () => void add(chat) },
+              t('添加', 'Add'))))))
+        : null;
+
+      return h(Panel, {
+        title: t('消息监听', 'Message monitoring'),
+        defaultOpen: true,
+        action: h('button', {
+          type: 'button',
+          className: 'bxf-mini',
+          disabled: busy === 'toggle',
+          onClick: () => void toggle(),
+        }, monitor?.enabled ? t('停止监听', 'Stop') : t('开始监听', 'Start')),
+      },
+      h('p', { style: { ...S.hint, margin: '0 0 10px' } },
+        t('定时检查已选会话的新消息，并投递到 DSH。新增监听从当前时间开始，不回补历史。',
+          'Polls selected chats and delivers new messages to DSH. New monitors start at the current time and do not backfill history.'),
+        h('br'),
+        t('飞书群列表不包含单聊；单聊请手动填 chat_id。',
+          'The Feishu chat list does not include direct messages; enter a direct chat_id manually.')),
+      error ? h('div', { style: S.error }, error) : null,
+      !monitor
+        ? h('p', { style: S.hint }, t('正在读取监听状态…', 'Loading monitor status…'))
+        : h('div', { style: { display: 'grid', gap: '8px' } },
+          h('div', { style: S.row },
+            h('span', { style: S.badge(monitor.enabled ? 'ok' : 'muted') },
+              monitor.enabled ? t('监听中', 'Watching') : t('已暂停', 'Paused')),
+            h('span', { style: S.hint }, `${t('最后检查', 'Last check')}：${formatTime(chats[0]?.lastPollAt)}`),
+            h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'poll', onClick: () => void poll() },
+              t('立即检查', 'Check now'))),
+          chatRows,
+          h('div', { style: { ...S.row, marginTop: '4px' } },
+            h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'chats', onClick: () => void refreshChats() },
+              busy === 'chats' ? t('正在读取…', 'Loading…') : t('选择会话', 'Choose chats'))),
+          candidateRows,
+          h('div', { style: { ...S.row, marginTop: '4px' } },
+            h('input', {
+              style: { ...S.input, flex: 1, minWidth: 0 },
+              value: manual,
+              placeholder: t('手动填 chat_id（oc_…）', 'Enter chat_id (oc_…)'),
+              onChange: (event) => setManual(event.target.value),
+            }),
+            h('select', {
+              style: S.input,
+              value: manualMode,
+              onChange: (event) => setManualMode(event.target.value),
+            },
+            h('option', { value: 'p2p' }, t('私聊', 'Direct')),
+            h('option', { value: 'group' }, t('群聊', 'Group'))),
+            h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'manual' || !manual.trim(), onClick: addManual },
+              t('添加', 'Add')))));
+    }
+
 
     // ── 用户身份（飞书分身）────────────────────────────────────────────────
     // 不单独占设置页签：飞书机器人页右上角一个入口，点开只做授权/状态管理。
@@ -110,7 +254,8 @@ const h = React.createElement;
             h('button', { type: 'button', style: S.btn(), disabled: busy === 'refresh', onClick: () => void refreshToken() },
               busy === 'refresh' ? t('刷新中…', 'Refreshing…') : t('刷新 token', 'Refresh token')),
             h('button', { type: 'button', style: { ...S.btn(), color: 'var(--dsw-alias-state-error-primary)' }, disabled: busy === 'disconnect', onClick: () => void disconnect() },
-              confirmDisconnect ? t('确认断开？', 'Confirm disconnect?') : t('断开授权', 'Disconnect'))));
+              confirmDisconnect ? t('确认断开？', 'Confirm disconnect?') : t('断开授权', 'Disconnect'))),
+          h(MonitorPanel, { connection }));
       } else {
         body = h('div', { style: { display: 'grid', gap: '8px' } },
           h('div', { style: S.row },

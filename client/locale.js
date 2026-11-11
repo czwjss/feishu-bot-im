@@ -137,7 +137,22 @@ export const MESSAGES = Object.freeze({
   "红色": "Red",
   "绿色": "Green",
   "紫色": "Purple",
-  "橙色": "Orange"
+  "橙色": "Orange",
+  "消息监听": "Message monitoring",
+  "停止监听": "Stop",
+  "开始监听": "Start",
+  "定时检查已选会话的新消息，并投递到 DSH。新增监听从当前时间开始，不回补历史。": "Polls selected chats and delivers new messages to DSH. New monitors start at the current time and do not backfill history.",
+  "正在读取监听状态…": "Loading monitor status…",
+  "监听中": "Watching",
+  "已暂停": "Paused",
+  "最后检查": "Last check",
+  "立即检查": "Check now",
+  "还没有监听会话。点“选择会话”添加。": "No monitored chats yet. Choose chats to add.",
+  "没有可添加的会话。": "No chats available to add.",
+  "选择会话": "Choose chats",
+  "添加": "Add",
+  "手动填 chat_id（oc_…）": "Enter chat_id (oc_…)",
+  "飞书群列表不包含单聊；单聊请手动填 chat_id。": "The Feishu chat list does not include direct messages; enter a direct chat_id manually."
 });
 
 export function dictionaries() {

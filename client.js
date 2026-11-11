@@ -180,7 +180,22 @@ var MESSAGES = Object.freeze({
   "\u7EA2\u8272": "Red",
   "\u7EFF\u8272": "Green",
   "\u7D2B\u8272": "Purple",
-  "\u6A59\u8272": "Orange"
+  "\u6A59\u8272": "Orange",
+  "\u6D88\u606F\u76D1\u542C": "Message monitoring",
+  "\u505C\u6B62\u76D1\u542C": "Stop",
+  "\u5F00\u59CB\u76D1\u542C": "Start",
+  "\u5B9A\u65F6\u68C0\u67E5\u5DF2\u9009\u4F1A\u8BDD\u7684\u65B0\u6D88\u606F\uFF0C\u5E76\u6295\u9012\u5230 DSH\u3002\u65B0\u589E\u76D1\u542C\u4ECE\u5F53\u524D\u65F6\u95F4\u5F00\u59CB\uFF0C\u4E0D\u56DE\u8865\u5386\u53F2\u3002": "Polls selected chats and delivers new messages to DSH. New monitors start at the current time and do not backfill history.",
+  "\u6B63\u5728\u8BFB\u53D6\u76D1\u542C\u72B6\u6001\u2026": "Loading monitor status\u2026",
+  "\u76D1\u542C\u4E2D": "Watching",
+  "\u5DF2\u6682\u505C": "Paused",
+  "\u6700\u540E\u68C0\u67E5": "Last check",
+  "\u7ACB\u5373\u68C0\u67E5": "Check now",
+  "\u8FD8\u6CA1\u6709\u76D1\u542C\u4F1A\u8BDD\u3002\u70B9\u201C\u9009\u62E9\u4F1A\u8BDD\u201D\u6DFB\u52A0\u3002": "No monitored chats yet. Choose chats to add.",
+  "\u6CA1\u6709\u53EF\u6DFB\u52A0\u7684\u4F1A\u8BDD\u3002": "No chats available to add.",
+  "\u9009\u62E9\u4F1A\u8BDD": "Choose chats",
+  "\u6DFB\u52A0": "Add",
+  "\u624B\u52A8\u586B chat_id\uFF08oc_\u2026\uFF09": "Enter chat_id (oc_\u2026)",
+  "\u98DE\u4E66\u7FA4\u5217\u8868\u4E0D\u5305\u542B\u5355\u804A\uFF1B\u5355\u804A\u8BF7\u624B\u52A8\u586B chat_id\u3002": "The Feishu chat list does not include direct messages; enter a direct chat_id manually."
 });
 function dictionaries() {
   const zh = {};
@@ -226,7 +241,13 @@ var API = {
   userConnectBegin: "user.connect.begin",
   userConnectCancel: "user.connect.cancel",
   userDisconnect: "user.disconnect",
-  userRefresh: "user.refresh"
+  userRefresh: "user.refresh",
+  userMonitorStatus: "user.monitor.status",
+  userMonitorChats: "user.monitor.chats",
+  userMonitorAdd: "user.monitor.add",
+  userMonitorRemove: "user.monitor.remove",
+  userMonitorEnable: "user.monitor.enable",
+  userMonitorPoll: "user.monitor.poll"
 };
 var boundTranslate = null;
 var activeLocale = "";
@@ -555,6 +576,197 @@ var import_react3 = __toESM(require("react"), 1);
 // client/identity.js
 var import_react2 = __toESM(require("react"), 1);
 var h2 = import_react2.default.createElement;
+function MonitorPanel({ connection }) {
+  const [monitor, setMonitor] = import_react2.default.useState(null);
+  const [available, setAvailable] = import_react2.default.useState(null);
+  const [manual, setManual] = import_react2.default.useState("");
+  const [manualMode, setManualMode] = import_react2.default.useState("p2p");
+  const [busy, setBusy] = import_react2.default.useState("");
+  const [error, setError] = import_react2.default.useState(null);
+  const load = import_react2.default.useCallback(async () => {
+    try {
+      const value = await rpc(connection, API.userMonitorStatus, {});
+      setMonitor(value);
+      setError(null);
+      return value;
+    } catch (failure) {
+      setError(failure?.message ?? String(failure));
+      return null;
+    }
+  }, [connection]);
+  import_react2.default.useEffect(() => {
+    void load();
+  }, [load]);
+  import_react2.default.useEffect(() => {
+    const timer = setInterval(() => {
+      void load();
+    }, 1e4);
+    return () => clearInterval(timer);
+  }, [load]);
+  const act = async (label, operation) => {
+    setBusy(label);
+    setError(null);
+    try {
+      const value = await operation();
+      if (value) setMonitor(value);
+    } catch (failure) {
+      setError(failure?.message ?? String(failure));
+    } finally {
+      setBusy("");
+    }
+  };
+  const refreshChats = () => act("chats", async () => {
+    const value = await rpc(connection, API.userMonitorChats, {});
+    setAvailable(Array.isArray(value?.chats) ? value.chats : []);
+    return null;
+  });
+  const add = (chat) => act(`add:${chat.chatId}`, () => rpc(connection, API.userMonitorAdd, chat));
+  const remove = (chat) => act(`remove:${chat.chatId}`, () => rpc(connection, API.userMonitorRemove, { chatId: chat.chatId }));
+  const toggle = () => act("toggle", () => rpc(connection, API.userMonitorEnable, {
+    enabled: monitor?.enabled !== true
+  }));
+  const poll = () => act("poll", () => rpc(connection, API.userMonitorPoll, {}));
+  const addManual = () => {
+    const chatId = manual.trim();
+    if (!chatId) return;
+    void act("manual", async () => {
+      const value = await rpc(connection, API.userMonitorAdd, { chatId, chatMode: manualMode });
+      setManual("");
+      return value;
+    });
+  };
+  const chats = Array.isArray(monitor?.chats) ? monitor.chats : [];
+  const monitored = new Set(chats.map((chat) => chat.chatId));
+  const candidates = (available ?? []).filter((chat) => !monitored.has(chat.chatId));
+  const formatTime = (ms) => Number.isFinite(ms) && ms > 0 ? new Date(ms).toLocaleTimeString() : "\u2014";
+  const chatRows = chats.length === 0 ? h2("p", { style: S.hint }, t("\u8FD8\u6CA1\u6709\u76D1\u542C\u4F1A\u8BDD\u3002\u70B9\u201C\u9009\u62E9\u4F1A\u8BDD\u201D\u6DFB\u52A0\u3002", "No monitored chats yet. Choose chats to add.")) : chats.map((chat) => h2(
+    "div",
+    {
+      key: chat.chatId,
+      style: { display: "flex", alignItems: "center", gap: "8px", padding: "6px 0", borderTop: "1px solid var(--dsw-alias-border-l1)" }
+    },
+    h2(
+      "div",
+      { style: { flex: 1, minWidth: 0 } },
+      h2("div", { style: { fontSize: "13px" } }, chat.name || chat.chatId),
+      h2(
+        "div",
+        { style: S.hint },
+        `${chat.chatMode === "p2p" ? t("\u79C1\u804A", "Direct") : t("\u7FA4\u804A", "Group")} \xB7 ${chat.chatId}`,
+        chat.lastError ? h2("span", { style: { color: "var(--dsw-alias-state-error-primary)" } }, ` \xB7 ${chat.lastError}`) : null
+      )
+    ),
+    h2(
+      "button",
+      { type: "button", className: "bxf-mini", disabled: busy === `remove:${chat.chatId}`, onClick: () => void remove(chat) },
+      t("\u79FB\u9664", "Remove")
+    )
+  ));
+  const candidateRows = available ? candidates.length === 0 ? h2("p", { style: S.hint }, t("\u6CA1\u6709\u53EF\u6DFB\u52A0\u7684\u4F1A\u8BDD\u3002", "No chats available to add.")) : h2(
+    "div",
+    { style: { display: "grid", gap: "4px", maxHeight: "220px", overflow: "auto" } },
+    candidates.slice(0, 100).map((chat) => h2(
+      "div",
+      {
+        key: chat.chatId,
+        style: { display: "flex", alignItems: "center", gap: "8px", padding: "5px 0" }
+      },
+      h2(
+        "div",
+        { style: { flex: 1, minWidth: 0 } },
+        h2("div", { style: { fontSize: "13px" } }, chat.name || chat.chatId),
+        h2("div", { style: S.hint }, chat.chatMode === "p2p" ? t("\u79C1\u804A", "Direct") : t("\u7FA4\u804A", "Group"))
+      ),
+      h2(
+        "button",
+        { type: "button", className: "bxf-mini", disabled: busy === `add:${chat.chatId}`, onClick: () => void add(chat) },
+        t("\u6DFB\u52A0", "Add")
+      )
+    ))
+  ) : null;
+  return h2(
+    Panel,
+    {
+      title: t("\u6D88\u606F\u76D1\u542C", "Message monitoring"),
+      defaultOpen: true,
+      action: h2("button", {
+        type: "button",
+        className: "bxf-mini",
+        disabled: busy === "toggle",
+        onClick: () => void toggle()
+      }, monitor?.enabled ? t("\u505C\u6B62\u76D1\u542C", "Stop") : t("\u5F00\u59CB\u76D1\u542C", "Start"))
+    },
+    h2(
+      "p",
+      { style: { ...S.hint, margin: "0 0 10px" } },
+      t(
+        "\u5B9A\u65F6\u68C0\u67E5\u5DF2\u9009\u4F1A\u8BDD\u7684\u65B0\u6D88\u606F\uFF0C\u5E76\u6295\u9012\u5230 DSH\u3002\u65B0\u589E\u76D1\u542C\u4ECE\u5F53\u524D\u65F6\u95F4\u5F00\u59CB\uFF0C\u4E0D\u56DE\u8865\u5386\u53F2\u3002",
+        "Polls selected chats and delivers new messages to DSH. New monitors start at the current time and do not backfill history."
+      ),
+      h2("br"),
+      t(
+        "\u98DE\u4E66\u7FA4\u5217\u8868\u4E0D\u5305\u542B\u5355\u804A\uFF1B\u5355\u804A\u8BF7\u624B\u52A8\u586B chat_id\u3002",
+        "The Feishu chat list does not include direct messages; enter a direct chat_id manually."
+      )
+    ),
+    error ? h2("div", { style: S.error }, error) : null,
+    !monitor ? h2("p", { style: S.hint }, t("\u6B63\u5728\u8BFB\u53D6\u76D1\u542C\u72B6\u6001\u2026", "Loading monitor status\u2026")) : h2(
+      "div",
+      { style: { display: "grid", gap: "8px" } },
+      h2(
+        "div",
+        { style: S.row },
+        h2(
+          "span",
+          { style: S.badge(monitor.enabled ? "ok" : "muted") },
+          monitor.enabled ? t("\u76D1\u542C\u4E2D", "Watching") : t("\u5DF2\u6682\u505C", "Paused")
+        ),
+        h2("span", { style: S.hint }, `${t("\u6700\u540E\u68C0\u67E5", "Last check")}\uFF1A${formatTime(chats[0]?.lastPollAt)}`),
+        h2(
+          "button",
+          { type: "button", className: "bxf-mini", disabled: busy === "poll", onClick: () => void poll() },
+          t("\u7ACB\u5373\u68C0\u67E5", "Check now")
+        )
+      ),
+      chatRows,
+      h2(
+        "div",
+        { style: { ...S.row, marginTop: "4px" } },
+        h2(
+          "button",
+          { type: "button", className: "bxf-mini", disabled: busy === "chats", onClick: () => void refreshChats() },
+          busy === "chats" ? t("\u6B63\u5728\u8BFB\u53D6\u2026", "Loading\u2026") : t("\u9009\u62E9\u4F1A\u8BDD", "Choose chats")
+        )
+      ),
+      candidateRows,
+      h2(
+        "div",
+        { style: { ...S.row, marginTop: "4px" } },
+        h2("input", {
+          style: { ...S.input, flex: 1, minWidth: 0 },
+          value: manual,
+          placeholder: t("\u624B\u52A8\u586B chat_id\uFF08oc_\u2026\uFF09", "Enter chat_id (oc_\u2026)"),
+          onChange: (event) => setManual(event.target.value)
+        }),
+        h2(
+          "select",
+          {
+            style: S.input,
+            value: manualMode,
+            onChange: (event) => setManualMode(event.target.value)
+          },
+          h2("option", { value: "p2p" }, t("\u79C1\u804A", "Direct")),
+          h2("option", { value: "group" }, t("\u7FA4\u804A", "Group"))
+        ),
+        h2(
+          "button",
+          { type: "button", className: "bxf-mini", disabled: busy === "manual" || !manual.trim(), onClick: addManual },
+          t("\u6DFB\u52A0", "Add")
+        )
+      )
+    )
+  );
+}
 function UserIdentityModal({ connection, bot, status, error, onClose, onRefresh }) {
   const [busy, setBusy] = import_react2.default.useState("");
   const [notice, setNotice] = import_react2.default.useState(null);
@@ -687,7 +899,8 @@ function UserIdentityModal({ connection, bot, status, error, onClose, onRefresh 
           { type: "button", style: { ...S.btn(), color: "var(--dsw-alias-state-error-primary)" }, disabled: busy === "disconnect", onClick: () => void disconnect() },
           confirmDisconnect ? t("\u786E\u8BA4\u65AD\u5F00\uFF1F", "Confirm disconnect?") : t("\u65AD\u5F00\u6388\u6743", "Disconnect")
         )
-      )
+      ),
+      h2(MonitorPanel, { connection })
     );
   } else {
     body = h2(

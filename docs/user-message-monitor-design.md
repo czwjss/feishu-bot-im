@@ -1,6 +1,6 @@
 # 飞书分身：消息监听与回复设计方案
 
-状态：设计稿，暂不实现。  
+状态：阶段 1 已实现（只监听、投递 DSH、不回复）；阶段 2–4 仍按本文推进。
 可视化版本：[user-message-monitor-design.html](user-message-monitor-design.html)
 目标：在 DSH 运行期间，监听指定私聊和群聊的新消息，按规则生成回复，并支持人工确认或受限自动回复。
 
@@ -94,6 +94,9 @@ GET /im/v1/chats
 - 默认只加入候选列表；
 - 不自动开启监听；
 - 如果开启自动监听，新会话从“当前时间”开始，不回补历史。
+
+注意：飞书该接口只返回群聊，不返回单聊（`p2p`）。单聊没有可靠的列表接口，
+阶段 1 允许手动填写已知的 `oc_...` chat_id；后续再从历史消息/用户动作中补发现。
 
 ## 5. 轮询与游标
 
@@ -618,12 +621,32 @@ offline_access
 
 ### 阶段 1：只监听
 
-- 会话选择；
-- 轮询；
-- 游标；
-- 去重；
-- 投递到 DSH；
-- 不回复。
+已实现：
+
+- 「分身」弹层内选择会话；
+- 以用户身份轮询选中会话；
+- 每会话游标 + message_id 去重；
+- 新增监听从当前时间开始，不回补历史；
+- 每个飞书会话绑定一个 `minimal` 预设的 DSH Worker Session；
+- 投递内容带会话、发送者、时间和不可信内容标记；
+- 不自动回复；提示词要求 Worker 只记录，不调用飞书发送工具。
+- 注意：分身工具已改为 Host 全局挂载，因此 Worker 的工具列表里仍可能看到 `feishu_avatar_*`；阶段 1 靠提示词约束，阶段 2 再加硬隔离。
+
+实现文件：
+
+```text
+src/user-identity/monitor.js
+src/user-identity/monitor-store.js
+src/user-identity/api.js            listChats
+client/identity.js                  MonitorPanel
+```
+
+数据文件：
+
+```text
+<dataDir>/monitor.json
+<dataDir>/monitor-state.json
+```
 
 ### 阶段 2：草稿确认
 

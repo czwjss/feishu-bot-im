@@ -36,6 +36,12 @@ const RPC_ENDPOINT = 'im-feishu';
       userConnectCancel: 'user.connect.cancel',
       userDisconnect: 'user.disconnect',
       userRefresh: 'user.refresh',
+      userMonitorStatus: 'user.monitor.status',
+      userMonitorChats: 'user.monitor.chats',
+      userMonitorAdd: 'user.monitor.add',
+      userMonitorRemove: 'user.monitor.remove',
+      userMonitorEnable: 'user.monitor.enable',
+      userMonitorPoll: 'user.monitor.poll',
     };
 
     let boundTranslate = null;

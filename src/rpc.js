@@ -15,7 +15,7 @@ function fail(code, message) {
   return { ok: false, error: { code, message, details: {} } };
 }
 
-export function createRpcHandler({ manager, harness, version, userIdentity = null }) {
+export function createRpcHandler({ manager, harness, version, userIdentity = null, userMonitor = null }) {
   const runtimeOf = (input) => {
     const botId = input?.botId ?? manager.runtimes[0]?.botId;
     return manager.runtimeForBot(botId);
@@ -24,6 +24,11 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
   const requireUserIdentity = () => {
     if (!userIdentity) throw new Error('用户身份模块没有加载');
     return userIdentity;
+  };
+
+  const requireUserMonitor = () => {
+    if (!userMonitor) throw new Error('用户身份消息监听没有加载');
+    return userMonitor;
   };
 
   return async function handle(method, payload) {
@@ -186,6 +191,25 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
 
       case 'user.refresh':
         return ok(await requireUserIdentity().refresh());
+
+      case 'user.monitor.status':
+        return ok(await requireUserMonitor().status());
+
+      case 'user.monitor.chats':
+        return ok({ chats: await requireUserMonitor().discoverChats() });
+
+      case 'user.monitor.add':
+        return ok(await requireUserMonitor().addChat(input));
+
+      case 'user.monitor.remove':
+        return ok(await requireUserMonitor().removeChat(input.chatId));
+
+      case 'user.monitor.enable':
+        return ok(await requireUserMonitor().setEnabled(input.enabled === true));
+
+      case 'user.monitor.poll':
+        await requireUserMonitor().pollOnce();
+        return ok(await requireUserMonitor().status());
 
       // ── 兼容层：旧版单机器人设置页仍可工作 ─────────────────────────────
       case 'connection.status': {

@@ -20,6 +20,8 @@ import { UserIdentityConnect } from './src/user-identity/connect.js';
 import { UserIdentityManager } from './src/user-identity/manager.js';
 import { UserTokenStore } from './src/user-identity/token-store.js';
 import { installUserIdentityContributions } from './src/user-identity/contributions.js';
+import { UserMonitorManager } from './src/user-identity/monitor.js';
+import { MonitorStore, MONITOR_FILE, MONITOR_STATE_FILE } from './src/user-identity/monitor-store.js';
 
 export const name = 'feishu-bot-im';
 export const inject = ['connection', 'credentials', 'typertGateway'];
@@ -119,7 +121,20 @@ export async function apply(ctx, config = {}) {
   installUserIdentityContributions(ctx, userIdentityAuth);
   userIdentity.startKeepalive();
 
-  const handler = createRpcHandler({ manager, harness, version: pluginVersion, userIdentity });
+  const monitorStore = await new MonitorStore({
+    configPath: join(paths.root, MONITOR_FILE),
+    statePath: join(paths.root, MONITOR_STATE_FILE),
+  }).load();
+  const userMonitor = new UserMonitorManager({
+    auth: userIdentityAuth,
+    harness,
+    store: monitorStore,
+    logger,
+    defaultWorkspace: configStore.bots?.[0]?.workspace ?? '',
+  });
+  userMonitor.start();
+
+  const handler = createRpcHandler({ manager, harness, version: pluginVersion, userIdentity, userMonitor });
   ctx.effect(() => installRpc(ctx, handler), 'feishu-bot: management rpc');
 
   ctx.effect(() => ctx.on('session/event', (session, event) => {
@@ -157,6 +172,7 @@ export async function apply(ctx, config = {}) {
 
   ctx.effect(() => () => manager.dispose(), 'feishu-bot: runtimes');
   ctx.effect(() => () => userIdentity.dispose(), 'feishu-bot: user identity');
+  ctx.effect(() => () => userMonitor.dispose(), 'feishu-bot: user message monitor');
 
   try {
     await manager.start();

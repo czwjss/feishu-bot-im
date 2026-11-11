@@ -33,7 +33,16 @@ const harness = {
   workspaceBaseline: async () => ({ items: [] }),
 };
 
-const handle = createRpcHandler({ manager, harness, version: '0.4.1', userIdentity });
+const monitorCalls = [];
+const userMonitor = {
+  async status() { return { enabled: false, chats: [] }; },
+  async discoverChats() { return [{ chatId: 'oc_test', name: '测试', chatMode: 'p2p' }]; },
+  async addChat(input) { monitorCalls.push(['add', input]); return { enabled: false, chats: [input] }; },
+  async removeChat(chatId) { monitorCalls.push(['remove', chatId]); return { enabled: false, chats: [] }; },
+  async setEnabled(enabled) { monitorCalls.push(['enable', enabled]); return { enabled, chats: [] }; },
+  async pollOnce() { monitorCalls.push(['poll']); },
+};
+const handle = createRpcHandler({ manager, harness, version: '0.4.1', userIdentity, userMonitor });
 
 {
   const result = await handle('user.status', {});
@@ -52,8 +61,27 @@ const handle = createRpcHandler({ manager, harness, version: '0.4.1', userIdenti
 }
 
 {
+  const listed = await handle('user.monitor.chats', {});
+  assert.equal(listed.value.chats[0].chatId, 'oc_test');
+  await handle('user.monitor.add', { chatId: 'oc_test', name: '测试', chatMode: 'p2p' });
+  assert.deepEqual(monitorCalls.at(-1), ['add', { chatId: 'oc_test', name: '测试', chatMode: 'p2p' }]);
+  await handle('user.monitor.remove', { chatId: 'oc_test' });
+  assert.deepEqual(monitorCalls.at(-1), ['remove', 'oc_test']);
+  await handle('user.monitor.enable', { enabled: true });
+  assert.deepEqual(monitorCalls.at(-1), ['enable', true]);
+  await handle('user.monitor.poll', {});
+  assert.deepEqual(monitorCalls.at(-1), ['poll']);
+  assert.equal((await handle('user.monitor.status', {})).value.enabled, false);
+}
+
+{
   const noUser = createRpcHandler({ manager, harness, version: '0.4.1' });
   await assert.rejects(() => noUser('user.status', {}), /用户身份模块没有加载/);
 }
 
-console.log('im-feishu user identity rpc: 8 assertions passed');
+{
+  const noMonitor = createRpcHandler({ manager, harness, version: '0.4.1', userIdentity });
+  await assert.rejects(() => noMonitor('user.monitor.status', {}), /消息监听没有加载/);
+}
+
+console.log('im-feishu user identity rpc: 16 assertions passed');

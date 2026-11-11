@@ -134,6 +134,59 @@ export async function getUserInfo({ accessToken, fetchImpl, timeoutMs, signal } 
   return normalizeUserInfo(data);
 }
 
+/** 用户身份可见的会话（私聊/群聊）列表。 */
+export function normalizeChat(item) {
+  const source = item && typeof item === 'object' ? item : {};
+  const mode = stringOf(source.chat_mode);
+  return Object.freeze({
+    chatId: stringOf(source.chat_id),
+    name: stringOf(source.name),
+    description: stringOf(source.description),
+    chatMode: mode === 'p2p' ? 'p2p' : 'group',
+    chatType: stringOf(source.chat_type),
+    external: Boolean(source.external),
+    avatar: stringOf(source.avatar),
+    ownerId: stringOf(source.owner_id),
+    createTime: formatCreateTime(source.create_time),
+    lastMessageAt: formatCreateTime(source.last_message_time),
+  });
+}
+
+/**
+ * 列出授权用户能看到的会话。
+ * 用户身份没有个人收件箱事件推送，监听器先用这个接口发现会话。
+ */
+export async function listChats({
+  accessToken,
+  pageSize = 100,
+  pageToken,
+  fetchImpl,
+  timeoutMs,
+  signal,
+} = {}) {
+  const size = Math.min(100, Math.max(1, Number.parseInt(String(pageSize ?? 100), 10) || 100));
+  const query = {
+    user_id_type: 'open_id',
+    sort_type: 'ByActiveTimeDesc',
+    page_size: size,
+  };
+  if (typeof pageToken === 'string' && pageToken.trim()) query.page_token = pageToken.trim();
+  const data = await requestFeishu({
+    path: '/open-apis/im/v1/chats',
+    query,
+    accessToken,
+    fetchImpl,
+    timeoutMs,
+    signal,
+  });
+  const items = Array.isArray(data.items) ? data.items.map(normalizeChat) : [];
+  return Object.freeze({
+    items: Object.freeze(items.filter((item) => item.chatId && /^oc_[A-Za-z0-9_-]{4,}$/.test(item.chatId))),
+    hasMore: Boolean(data.has_more),
+    pageToken: stringOf(data.page_token) || null,
+  });
+}
+
 /**
  * 群聊 ID 校验：`oc_` 开头。分身不替用户猜群，只接受明确 ID。
  */
