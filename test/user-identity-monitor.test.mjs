@@ -346,9 +346,14 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 50));
     const kept = store5.state.chats[chatId].messages.map((message) => message.messageId);
     assert.deepEqual(kept, ['om_keep', 'om_fresh'], 'stale transient status is pruned, fresh one stays');
+
+    // 每轮轮询也要自愈：即使启动时没清理到，下一轮也会丢掉。
+    await monitor5.pollOnce();
+    const afterPoll = store5.state.chats[chatId].messages.map((message) => message.messageId);
+    assert.ok(!afterPoll.includes('om_ack'), 'poll prunes stale transient entries');
   } finally {
     await rm(dir5, { recursive: true, force: true });
   }
 }
 
-console.log('user identity monitor: 49 assertions passed');
+console.log('user identity monitor: 50 assertions passed');

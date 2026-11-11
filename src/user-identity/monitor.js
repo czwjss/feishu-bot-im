@@ -507,6 +507,13 @@ export class UserMonitorManager {
       || /正在处理[.…]*$/.test(value);
   }
 
+  /** 超过两分钟还留着的“已收到/正在处理”已经没有意义。 */
+  #isStaleTransient(message) {
+    if (!this.#isTransientStatus(message?.text)) return false;
+    const created = Date.parse(stringOf(message.createTime));
+    return Number.isFinite(created) && this.#now() - created > STALE_TRANSIENT_MS;
+  }
+
   /** 把 <at id=ou_x></at> 换成可读的 @姓名，读不到名字时保留 open_id。 */
   #renderAt(text, names) {
     return stringOf(text).replace(/<at\s+id=(ou_[A-Za-z0-9_-]+)\s*><\/at>/g, (match, openId) => {
@@ -525,7 +532,8 @@ export class UserMonitorManager {
 
   async #pollChat(chat, accessToken, selfOpenId) {
     const current = this.#store.state.chats[chat.chatId] ?? {};
-    const messages = current.messages ?? [];
+    // 每轮顺手丢掉过期的临时状态，避免历史残留一直占未读。
+    const messages = (current.messages ?? []).filter((message) => !this.#isStaleTransient(message));
     if (!Number.isFinite(current.cursorTimeMs)) {
       await this.#store.saveState({
         ...this.#store.state,
