@@ -13,8 +13,8 @@ export const SEND_TOOL_NAME = 'feishu_bot_send';
 export function createSendTool({ send }) {
   return Object.freeze({
     name: SEND_TOOL_NAME,
-    description: '立即发送一条独立卡片消息或文件到飞书群。'
-      + '飞书消息的回复会自动流式发送；不要用本工具重复回复当前飞书消息。',
+    description: '以机器人身份立即发送一条独立卡片或文件到飞书会话（群里显示机器人名称，不是你自己）。'
+      + '省略 chatId 时发到当前会话绑定的飞书群。',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -97,7 +97,8 @@ export const MESSAGES_TOOL_NAME = 'feishu_bot_messages';
 export function createMessagesTool({ list }) {
   return Object.freeze({
     name: MESSAGES_TOOL_NAME,
-    description: '读取飞书群历史消息，支持时间范围、分页和本次拉取范围内的本地关键词筛选；不是飞书全文搜索。',
+    description: '以机器人身份读取它所在会话的历史消息（群聊或私聊），支持时间范围、分页、话题，'
+      + '以及本次拉取范围内的本地关键词筛选；不是飞书全文搜索。',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -123,12 +124,18 @@ export function createMessagesTool({ list }) {
           description: '结束时间，ISO 8601，例如 2026-11-06T00:00:00+08:00。',
         },
         limit: {
-          type: 'number',
-          description: '返回条数，1-50，默认 20。',
+          type: 'integer',
+          minimum: 1,
+          maximum: 50,
+          default: 20,
+          description: '返回条数，1–50，默认 20。',
         },
         scanLimit: {
-          type: 'number',
-          description: '有 query 时最多扫描多少条，默认 200，最大 500。',
+          type: 'integer',
+          minimum: 1,
+          maximum: 500,
+          default: 200,
+          description: '有 query 时最多扫描多少条，1–500，默认 200。',
         },
         pageToken: {
           type: 'string',
@@ -136,7 +143,9 @@ export function createMessagesTool({ list }) {
         },
         order: {
           type: 'string',
-          description: 'newest（默认）或 oldest。',
+          enum: ['newest', 'oldest'],
+          default: 'newest',
+          description: '排序方向，默认 newest。',
         },
         query: {
           type: 'string',
@@ -213,7 +222,7 @@ export const CHATS_TOOL_NAME = 'feishu_bot_chats';
 export function createChatsTool({ list }) {
   return Object.freeze({
     name: CHATS_TOOL_NAME,
-    description: '列出机器人所在的飞书群，并标记已绑定的 Session。返回的 chatId 可用于发送。',
+    description: '列出机器人所在的飞书群，并标记已绑定的 Session；返回的 chatId 可直接用于发送或查历史。',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -282,7 +291,7 @@ export const PEOPLE_TOOL_NAME = 'feishu_bot_people';
 export function createPeopleTool({ find }) {
   return Object.freeze({
     name: PEOPLE_TOOL_NAME,
-    description: '按姓名模糊查询指定飞书群的成员，返回完整 open_id；写 <at> 标签前先调用。'
+    description: '按姓名模糊查询机器人所在群的成员，返回完整 open_id；写 <at> 标签前先调用。'
       + '成员缓存 6 小时。',
     parameters: {
       type: 'object',

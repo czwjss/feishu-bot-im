@@ -130,3 +130,22 @@ import {
 }
 
 console.log('tool: 38 assertions passed');
+
+// 机器人侧工具统一 feishu_bot_ 前缀，并在描述里写明身份，避免和 feishu_avatar_* 混淆。
+{
+  const stub = { send: async () => ({}), list: async () => [], find: async () => ({}) };
+  const tools = [
+    createSendTool(stub),
+    createMessagesTool(stub),
+    createChatsTool(stub),
+    createPeopleTool(stub),
+  ];
+  assert.ok(tools.every((tool) => tool.name.startsWith('feishu_bot_')), 'bot tools share the feishu_bot_ prefix');
+  assert.deepEqual(tools.map((tool) => tool.name), [
+    SEND_TOOL_NAME, MESSAGES_TOOL_NAME, CHATS_TOOL_NAME, PEOPLE_TOOL_NAME,
+  ]);
+  assert.ok(tools[0].description.includes('机器人身份'), 'bot send states its identity');
+  assert.ok(tools[1].description.includes('机器人身份'), 'bot messages states its identity');
+  assert.ok(!tools[0].description.includes('授权用户本人的身份'), 'bot tools never claim the user identity');
+}
+console.log('feishu tool naming: 4 assertions passed');

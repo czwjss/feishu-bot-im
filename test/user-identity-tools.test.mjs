@@ -192,3 +192,16 @@ assert.match(cardText, /报告/);
 assert.match(cardText, /发布完成/);
 assert.ok(!cardText.includes('[卡片]'), 'card text must not fall back to the placeholder');
 console.log('im-feishu user identity card text: 3 assertions passed');
+
+// 分身工具必须在描述里写明“本人身份”，并说明不是机器人。
+const identityTools = createUserIdentityTools({ auth: {} });
+for (const tool of identityTools) {
+  assert.ok(tool.name.startsWith('feishu_avatar_'), `${tool.name} keeps the avatar prefix`);
+}
+const sendTool = identityTools.find((tool) => tool.name === 'feishu_avatar_send');
+const messagesTool = identityTools.find((tool) => tool.name === 'feishu_avatar_messages');
+assert.match(sendTool.description, /本人身份/);
+assert.match(sendTool.description, /不是机器人/);
+assert.match(messagesTool.description, /本人身份/);
+assert.match(messagesTool.description, /群聊或私聊/);
+console.log('im-feishu user identity tool identity: 7 assertions passed');
