@@ -195,7 +195,7 @@ var MESSAGES = Object.freeze({
   "\u9009\u62E9\u4F1A\u8BDD": "Choose chats",
   "\u6DFB\u52A0": "Add",
   "\u624B\u52A8\u586B chat_id\uFF08oc_\u2026\uFF09": "Enter chat_id (oc_\u2026)",
-  "\u98DE\u4E66\u7FA4\u5217\u8868\u4E0D\u5305\u542B\u5355\u804A\uFF1B\u5355\u804A\u8BF7\u624B\u52A8\u586B chat_id\u3002": "The Feishu chat list does not include direct messages; enter a direct chat_id manually."
+  "\u98DE\u4E66\u7FA4\u5217\u8868\u4E0D\u542B\u5355\u804A\uFF1B\u4F1A\u901A\u8FC7\u6D88\u606F\u641C\u7D22\u8865\u5145\u6700\u8FD1\u5355\u804A\uFF0C\u627E\u4E0D\u5230\u518D\u624B\u52A8\u586B chat_id\u3002": "The Feishu chat list excludes direct messages; recent direct chats are added via message search, otherwise enter a chat_id manually."
 });
 function dictionaries() {
   const zh = {};
@@ -705,8 +705,8 @@ function MonitorPanel({ connection }) {
       ),
       h2("br"),
       t(
-        "\u98DE\u4E66\u7FA4\u5217\u8868\u4E0D\u5305\u542B\u5355\u804A\uFF1B\u5355\u804A\u8BF7\u624B\u52A8\u586B chat_id\u3002",
-        "The Feishu chat list does not include direct messages; enter a direct chat_id manually."
+        "\u98DE\u4E66\u7FA4\u5217\u8868\u4E0D\u542B\u5355\u804A\uFF1B\u4F1A\u901A\u8FC7\u6D88\u606F\u641C\u7D22\u8865\u5145\u6700\u8FD1\u5355\u804A\uFF0C\u627E\u4E0D\u5230\u518D\u624B\u52A8\u586B chat_id\u3002",
+        "The Feishu chat list excludes direct messages; recent direct chats are added via message search, otherwise enter a chat_id manually."
       )
     ),
     error ? h2("div", { style: S.error }, error) : null,

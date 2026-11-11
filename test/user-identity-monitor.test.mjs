@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { listChats } from '../src/user-identity/api.js';
+import { listChats, searchP2pChats } from '../src/user-identity/api.js';
 import { UserMonitorManager } from '../src/user-identity/monitor.js';
 import {
   MAX_SEEN_IDS,
@@ -66,7 +66,36 @@ assert.equal(discovered.items[1].external, true);
 assert.match(calls[0].url, /\/open-apis\/im\/v1\/chats/);
 assert.match(calls[0].url, /user_id_type=open_id/);
 
-// 4) 轮询：过滤自己/已删除/旧消息，投递并推进游标；重复轮询不重复投递。
+// 4) 搜索消息补充私聊 chat_id：同一会话去重，只返回摘要。
+const searchCalls = [];
+const searchFetch = async (url, init) => {
+  searchCalls.push({ url: String(url), body: JSON.parse(init.body) });
+  return {
+    ok: true,
+    async json() {
+      return {
+        code: 0,
+        data: {
+          items: [
+            { display_info: '<h>王妍</h>\n王妍: 你好', meta_data: { chat_id: 'oc_p2p_1', is_p2p_chat: true } },
+            { display_info: '王妍\n陈志文: 在', meta_data: { chat_id: 'oc_p2p_1', is_p2p_chat: true } },
+            { display_info: '群聊', meta_data: { chat_id: 'oc_group_1', is_p2p_chat: false } },
+          ],
+          has_more: false,
+        },
+      };
+    },
+  };
+};
+const p2p = await searchP2pChats({ accessToken: 'user-token', fetchImpl: searchFetch });
+assert.equal(p2p.items.length, 1);
+assert.equal(p2p.items[0].chatId, 'oc_p2p_1');
+assert.equal(p2p.items[0].chatMode, 'p2p');
+assert.match(searchCalls[0].url, /\/open-apis\/im\/v1\/messages\/search/);
+assert.equal(searchCalls[0].body.filter.chat_type, 'p2p');
+
+// 5) 轮询：过滤自己/已删除/旧消息，投递并推进游标；重复轮询不重复投递。
+
 const dir = await mkdtemp(join(tmpdir(), 'im-feishu-monitor-'));
 try {
   const store = new MonitorStore({
@@ -128,4 +157,4 @@ try {
   await rm(dir, { recursive: true, force: true });
 }
 
-console.log('user identity monitor: 18 assertions passed');
+console.log('user identity monitor: 24 assertions passed');
