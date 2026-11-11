@@ -160,6 +160,7 @@ export async function listChats({
   accessToken,
   pageSize = 100,
   pageToken,
+  types = 'p2p,group',
   fetchImpl,
   timeoutMs,
   signal,
@@ -168,6 +169,7 @@ export async function listChats({
   const query = {
     user_id_type: 'open_id',
     sort_type: 'ByActiveTimeDesc',
+    types,
     page_size: size,
   };
   if (typeof pageToken === 'string' && pageToken.trim()) query.page_token = pageToken.trim();
@@ -184,63 +186,6 @@ export async function listChats({
     items: Object.freeze(items.filter((item) => item.chatId && /^oc_[A-Za-z0-9_-]{4,}$/.test(item.chatId))),
     hasMore: Boolean(data.has_more),
     pageToken: stringOf(data.page_token) || null,
-  });
-}
-
-function cleanSearchTitle(value) {
-  const text = stringOf(value).replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-  return text.split('\n').map((line) => line.trim()).find(Boolean) ?? '';
-}
-
-/**
- * 通过消息搜索发现最近私聊的 chat_id。
- *
- * `/im/v1/chats` 明确不返回单聊；搜索接口的 filter.chat_type=p2p 可以补上。
- * 只返回会话摘要，不把消息正文交给调用方。
- */
-export async function searchP2pChats({
-  accessToken,
-  pageSize = 30,
-  maxPages = 5,
-  fetchImpl,
-  timeoutMs,
-  signal,
-} = {}) {
-  const size = Math.min(30, Math.max(1, Number.parseInt(String(pageSize ?? 30), 10) || 30));
-  const pages = Math.min(10, Math.max(1, Number.parseInt(String(maxPages ?? 5), 10) || 5));
-  const found = new Map();
-  let pageToken = null;
-  let hasMore = false;
-  for (let page = 0; page < pages; page += 1) {
-    const data = await requestFeishu({
-      path: '/open-apis/im/v1/messages/search',
-      method: 'POST',
-      query: { page_size: size, user_id_type: 'open_id', page_token: pageToken || undefined },
-      body: { query: '', filter: { chat_type: 'p2p' } },
-      accessToken,
-      fetchImpl,
-      timeoutMs,
-      signal,
-    });
-    for (const item of Array.isArray(data.items) ? data.items : []) {
-      const meta = item?.meta_data && typeof item.meta_data === 'object' ? item.meta_data : {};
-      const chatId = stringOf(meta.chat_id);
-      if (meta.is_p2p_chat !== true) continue;
-      if (!/^oc_[A-Za-z0-9_-]{4,}$/.test(chatId) || found.has(chatId)) continue;
-      found.set(chatId, Object.freeze({
-        chatId,
-        name: cleanSearchTitle(item.display_info) || chatId,
-        chatMode: 'p2p',
-        external: false,
-      }));
-    }
-    hasMore = Boolean(data.has_more);
-    pageToken = stringOf(data.page_token) || null;
-    if (!hasMore || !pageToken) break;
-  }
-  return Object.freeze({
-    items: Object.freeze([...found.values()]),
-    hasMore,
   });
 }
 

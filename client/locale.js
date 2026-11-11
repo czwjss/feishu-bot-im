@@ -152,7 +152,7 @@ export const MESSAGES = Object.freeze({
   "选择会话": "Choose chats",
   "添加": "Add",
   "手动填 chat_id（oc_…）": "Enter chat_id (oc_…)",
-  "飞书群列表不含单聊；会通过消息搜索补充最近单聊，找不到再手动填 chat_id。": "The Feishu chat list excludes direct messages; recent direct chats are added via message search, otherwise enter a chat_id manually."
+  "会话列表已同时包含群聊和最近私聊；找不到时可手动填 chat_id。": "The picker includes groups and recent direct chats; enter a chat_id manually if one is missing."
 });
 
 export function dictionaries() {

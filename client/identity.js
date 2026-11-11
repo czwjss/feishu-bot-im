@@ -112,8 +112,8 @@ const h = React.createElement;
         t('定时检查已选会话的新消息，并投递到 DSH。新增监听从当前时间开始，不回补历史。',
           'Polls selected chats and delivers new messages to DSH. New monitors start at the current time and do not backfill history.'),
         h('br'),
-        t('飞书群列表不含单聊；会通过消息搜索补充最近单聊，找不到再手动填 chat_id。',
-          'The Feishu chat list excludes direct messages; recent direct chats are added via message search, otherwise enter a chat_id manually.')),
+        t('会话列表已同时包含群聊和最近私聊；找不到时可手动填 chat_id。',
+          'The picker includes groups and recent direct chats; enter a chat_id manually if one is missing.')),
       error ? h('div', { style: S.error }, error) : null,
       !monitor
         ? h('p', { style: S.hint }, t('正在读取监听状态…', 'Loading monitor status…'))

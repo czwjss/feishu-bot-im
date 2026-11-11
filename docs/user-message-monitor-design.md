@@ -95,10 +95,9 @@ GET /im/v1/chats
 - 不自动开启监听；
 - 如果开启自动监听，新会话从“当前时间”开始，不回补历史。
 
-注意：飞书该接口只返回群聊，不返回单聊（`p2p`）。阶段 1 额外调用
-`POST /im/v1/messages/search`，用空 query + `filter.chat_type=p2p` 搜索最近私聊，
-从 `meta_data.chat_id` 补出单聊会话；仍然保留手动填写已知 `oc_...` chat_id 的入口。
-搜索只取会话摘要，不把消息正文交给监听配置。
+注意：默认查询只返回群聊；阶段 1 在 `GET /im/v1/chats` 上带
+`types=p2p,group`，同时拉取单聊和群聊（社区实现验证过该参数）。
+仍保留手动填写已知 `oc_...` chat_id 的入口，处理未出现在列表里的边缘会话。
 
 ## 5. 轮询与游标
 
@@ -639,7 +638,7 @@ offline_access
 ```text
 src/user-identity/monitor.js
 src/user-identity/monitor-store.js
-src/user-identity/api.js            listChats / searchP2pChats
+src/user-identity/api.js            listChats（types=p2p,group）
 client/identity.js                  MonitorPanel
 ```
 

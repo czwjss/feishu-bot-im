@@ -5,7 +5,7 @@
  * 每个飞书会话绑定一个 DSH Worker Session；Worker 用 minimal 预设，
  * 不挂飞书发送工具，避免监听路径直接写飞书。
  */
-import { listChats, listMessages, searchP2pChats } from './api.js';
+import { listChats, listMessages } from './api.js';
 import {
   MAX_MONITOR_CHATS,
   MAX_SEEN_IDS,
@@ -66,7 +66,6 @@ export class UserMonitorManager {
   #defaultWorkspace;
   #listMessages;
   #listChats;
-  #searchP2pChats;
 
   constructor({
     auth,
@@ -76,7 +75,6 @@ export class UserMonitorManager {
     defaultWorkspace = '',
     listMessages: listMessagesImpl = listMessages,
     listChats: listChatsImpl = listChats,
-    searchP2pChats: searchP2pChatsImpl = searchP2pChats,
     now = Date.now,
     setInterval: setIntervalImpl = setInterval,
     clearInterval: clearIntervalImpl = clearInterval,
@@ -94,7 +92,6 @@ export class UserMonitorManager {
     this.#defaultWorkspace = stringOf(defaultWorkspace);
     this.#listMessages = listMessagesImpl;
     this.#listChats = listChatsImpl;
-    this.#searchP2pChats = searchP2pChatsImpl;
   }
 
   get store() {
@@ -151,34 +148,15 @@ export class UserMonitorManager {
 
   async discoverChats() {
     const accessToken = await this.#auth.requireAccessToken();
-    const groups = await this.#listChats({ accessToken });
-    const merged = new Map();
-    for (const chat of groups.items) {
-      merged.set(chat.chatId, {
-        chatId: chat.chatId,
-        name: chat.name || chat.chatId,
-        chatMode: chat.chatMode,
-        external: chat.external,
-      });
-    }
-    // 群列表接口不返回 p2p；消息搜索用于补最近私聊。
-    try {
-      const p2p = await this.#searchP2pChats({ accessToken });
-      for (const chat of p2p.items) {
-        if (!merged.has(chat.chatId)) {
-          merged.set(chat.chatId, {
-            chatId: chat.chatId,
-            name: chat.name || chat.chatId,
-            chatMode: 'p2p',
-            external: false,
-          });
-        }
-      }
-    } catch (error) {
-      this.#logger?.warn?.('[im-feishu] 私聊发现失败，只返回群列表', error?.message ?? error);
-    }
-    return [...merged.values()];
+    const result = await this.#listChats({ accessToken, types: 'p2p,group' });
+    return result.items.map((chat) => ({
+      chatId: chat.chatId,
+      name: chat.name || chat.chatId,
+      chatMode: chat.chatMode,
+      external: chat.external,
+    }));
   }
+
 
   async addChat(input = {}) {
     const chatId = stringOf(input.chatId).trim();
