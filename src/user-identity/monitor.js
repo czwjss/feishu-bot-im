@@ -471,6 +471,17 @@ export class UserMonitorManager {
     return false;
   }
 
+  /**
+   * 机器人临时状态文案（“已收到 / 正在处理”）：同一轮回答里会被最终消息取代，
+   * 记录后一旦出现同一发送者的新消息就丢掉，避免一次回答占两三条未读。
+   */
+  #isTransientStatus(text) {
+    const value = stringOf(text);
+    if (!value || value.length > 40) return false;
+    return /^(⏳|🕐|⏱)?\s*(已收到|正在处理|处理中|正在思考|思考中)/.test(value)
+      || /正在处理[.…]*$/.test(value);
+  }
+
   /** 把 <at id=ou_x></at> 换成可读的 @姓名，读不到名字时保留 open_id。 */
   #renderAt(text, names) {
     return stringOf(text).replace(/<at\s+id=(ou_[A-Za-z0-9_-]+)\s*><\/at>/g, (match, openId) => {
@@ -519,13 +530,25 @@ export class UserMonitorManager {
       const seen = new Set(current.seen ?? []);
       const eligible = [];
       const skipped = [];
+      const storedById = new Map(messages.map((message) => [message.messageId, message]));
       for (const item of result.items) {
-        if (!item.messageId || seen.has(item.messageId)) continue;
+        if (!item.messageId) continue;
+        const time = messageTime(item);
+        if (time === null) continue;
+        // 卡片在原地刷新：同一个 message_id 出现新文本时更新旧记录，不新增未读。
+        const existing = storedById.get(item.messageId);
+        if (existing) {
+          const nextText = this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, await this.#namesFor(chat.chatId, accessToken));
+          if (nextText && nextText !== existing.text) {
+            eligible.push({ item, time, updateOf: item.messageId, nextText });
+          }
+          continue;
+        }
+        if (seen.has(item.messageId)) continue;
         // 机器人/应用消息同样记录：群里常是通知，私聊里是对方机器人回复。
         if (item.deleted || item.msgType === 'system') continue;
         if (selfOpenId && item.senderOpenId === selfOpenId) continue;
-        const time = messageTime(item);
-        if (time === null || time < current.cursorTimeMs) continue;
+        if (time < current.cursorTimeMs) continue;
         if (!(await this.#accepts(chat, item, accessToken, selfOpenId))) {
           // 不记录，但游标照常推进，避免重复判断同一条消息。
           seen.add(item.messageId);
@@ -545,14 +568,17 @@ export class UserMonitorManager {
       let cursorMessageId = current.cursorMessageId ?? null;
       let lastDeliveredAt = current.lastDeliveredAt ?? null;
       let nextMessages = messages;
-      for (const { item, time } of eligible) {
+      for (const { item, time, updateOf, nextText } of eligible) {
         seen.add(item.messageId);
         cursorTimeMs = time;
         cursorMessageId = item.messageId;
         lastDeliveredAt = this.#now();
-        nextMessages = [
-          ...nextMessages,
-          {
+        if (updateOf) {
+          nextMessages = nextMessages.map((message) => (
+            message.messageId === updateOf ? { ...message, text: nextText, read: false } : message
+          ));
+        } else {
+          const entry = {
             messageId: item.messageId,
             senderName: item.senderName || names.get(item.senderOpenId)
               || (item.senderType === 'app' ? '机器人' : ''),
@@ -560,25 +586,16 @@ export class UserMonitorManager {
             createTime: item.createTime ?? new Date(time).toISOString(),
             text: this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, names),
             read: false,
-          },
-        ].slice(-MAX_MESSAGES_PER_CHAT);
-        // 每条消息落盘后立即保存；失败时不会重复记录同一批。
-        await this.#store.saveState({
-          ...this.#store.state,
-          chats: {
-            ...this.#store.state.chats,
-            [chat.chatId]: {
-              ...current,
-              cursorTimeMs,
-              cursorMessageId,
-              messages: nextMessages,
-              seen: [...seen].slice(-MAX_SEEN_IDS),
-              lastPollAt: this.#now(),
-              lastDeliveredAt,
-              lastError: null,
-            },
-          },
-        });
+          };
+          // 同一发送者的上一条临时状态被这条取代，直接丢掉，避免重复未读。
+          if (item.senderType && item.senderType !== 'user') {
+            const last = nextMessages[nextMessages.length - 1];
+            if (last && last.senderOpenId === entry.senderOpenId && this.#isTransientStatus(last.text)) {
+              nextMessages = nextMessages.slice(0, -1);
+            }
+          }
+          nextMessages = [...nextMessages, entry].slice(-MAX_MESSAGES_PER_CHAT);
+        }
       }
 
       // 被过滤的消息也要推进游标，否则每轮都会重新判断同一条。

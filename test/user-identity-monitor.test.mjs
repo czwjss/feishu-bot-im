@@ -257,4 +257,60 @@ try {
   }
 }
 
-console.log('user identity monitor: 41 assertions passed');
+// 11) 同一 message_id 原地刷新时更新旧记录，不新增未读。
+{
+  const dir4 = await mkdtemp(join(tmpdir(), 'im-feishu-refresh-'));
+  try {
+    const store4 = new MonitorStore({
+      configPath: join(dir4, 'monitor.json'),
+      statePath: join(dir4, 'monitor-state.json'),
+    });
+    await store4.load();
+    await store4.saveConfig({ enabled: true, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p' }] });
+    await store4.saveState({ chats: { [chatId]: { cursorTimeMs: now - 60_000, seen: [], messages: [] } } });
+
+    let text = '⏳ 已收到，正在处理…';
+    const auth4 = {
+      async status() { return { authorization: { authorized: true, user: { openId: 'ou_self' } } }; },
+      async requireAccessToken() { return 'user-token'; },
+    };
+    const monitor4 = new UserMonitorManager({
+      auth: auth4,
+      store: store4,
+      now: () => now,
+      chatMemberNames: async () => new Map(),
+      listMessages: async () => ({
+        items: [{
+          messageId: 'om_card',
+          createTime: new Date(now - 5_000).toISOString(),
+          senderType: 'app',
+          senderOpenId: 'cli_app',
+          text,
+        }],
+        hasMore: false,
+        pageToken: null,
+      }),
+    });
+
+    await monitor4.pollOnce();
+    assert.equal(store4.state.chats[chatId].messages.length, 1);
+    assert.match(store4.state.chats[chatId].messages[0].text, /正在处理/);
+    await monitor4.inbox({ markRead: false });
+    await store4.saveState({
+      ...store4.state,
+      chats: { ...store4.state.chats, [chatId]: { ...store4.state.chats[chatId], seen: [] } },
+    });
+
+    // 同一个 message_id 变成最终答案：更新那一条，不新增。
+    text = '在的，你说。';
+    await monitor4.pollOnce();
+    const refreshed = store4.state.chats[chatId].messages;
+    assert.equal(refreshed.length, 1, 'card refresh updates in place');
+    assert.equal(refreshed[0].text, '在的，你说。');
+    assert.equal(refreshed[0].read, false, 'updated card becomes unread again');
+  } finally {
+    await rm(dir4, { recursive: true, force: true });
+  }
+}
+
+console.log('user identity monitor: 47 assertions passed');
