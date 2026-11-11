@@ -199,7 +199,11 @@ var MESSAGES = Object.freeze({
   "\u6761\u672A\u8BFB": "unread",
   "\u5168\u90E8\u5DF2\u8BFB": "Mark read",
   "\u6E05\u7A7A\u8BB0\u5F55": "Clear",
-  "\u672A\u77E5": "Unknown"
+  "\u672A\u77E5": "Unknown",
+  "\u5168\u90E8\u6D88\u606F": "All messages",
+  "\u4EC5@\u6211/\u56DE\u590D\u6211": "Mentions & replies",
+  "\u5173\u952E\u8BCD": "Keywords",
+  "\u5173\u952E\u8BCD\uFF0C\u7528\u9017\u53F7\u5206\u9694": "Keywords, comma separated"
 });
 function dictionaries() {
   const zh = {};
@@ -252,6 +256,7 @@ var API = {
   userMonitorRemove: "user.monitor.remove",
   userMonitorEnable: "user.monitor.enable",
   userMonitorPoll: "user.monitor.poll",
+  userMonitorChatSet: "user.monitor.chat.set",
   userMonitorInbox: "user.monitor.inbox",
   userMonitorRead: "user.monitor.read",
   userMonitorClear: "user.monitor.clear"
@@ -629,6 +634,7 @@ function MonitorPanel({ connection }) {
   });
   const add = (chat) => act(`add:${chat.chatId}`, () => rpc(connection, API.userMonitorAdd, chat));
   const remove = (chat) => act(`remove:${chat.chatId}`, () => rpc(connection, API.userMonitorRemove, { chatId: chat.chatId }));
+  const setChat = (chat, patch) => act(`mode:${chat.chatId}`, () => rpc(connection, API.userMonitorChatSet, { chatId: chat.chatId, ...patch }));
   const toggle = () => act("toggle", () => rpc(connection, API.userMonitorEnable, {
     enabled: monitor?.enabled !== true
   }));
@@ -666,6 +672,27 @@ function MonitorPanel({ connection }) {
         chat.lastError ? h2("span", { style: { color: "var(--dsw-alias-state-error-primary)" } }, ` \xB7 ${chat.lastError}`) : null
       )
     ),
+    h2(
+      "select",
+      {
+        style: { ...S.input, width: "auto", height: "28px", fontSize: "12px" },
+        value: chat.mode ?? (chat.chatMode === "p2p" ? "all" : "mention"),
+        disabled: busy === `mode:${chat.chatId}`,
+        onChange: (event) => void setChat(chat, { mode: event.target.value })
+      },
+      h2("option", { value: "all" }, t("\u5168\u90E8\u6D88\u606F", "All")),
+      h2("option", { value: "mention" }, t("\u4EC5@\u6211/\u56DE\u590D\u6211", "Mentions & replies")),
+      h2("option", { value: "keyword" }, t("\u5173\u952E\u8BCD", "Keywords"))
+    ),
+    chat.mode === "keyword" ? h2("input", {
+      style: { ...S.input, width: "140px", height: "28px", fontSize: "12px" },
+      defaultValue: (chat.keywords ?? []).join("\uFF0C"),
+      placeholder: t("\u5173\u952E\u8BCD\uFF0C\u7528\u9017\u53F7\u5206\u9694", "Keywords, comma separated"),
+      onBlur: (event) => {
+        const keywords = event.target.value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
+        void setChat(chat, { keywords });
+      }
+    }) : null,
     h2(
       "button",
       { type: "button", className: "bxf-mini", disabled: busy === `remove:${chat.chatId}`, onClick: () => void remove(chat) },

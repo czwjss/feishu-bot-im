@@ -50,6 +50,7 @@ const h = React.createElement;
       });
       const add = (chat) => act(`add:${chat.chatId}`, () => rpc(connection, API.userMonitorAdd, chat));
       const remove = (chat) => act(`remove:${chat.chatId}`, () => rpc(connection, API.userMonitorRemove, { chatId: chat.chatId }));
+      const setChat = (chat, patch) => act(`mode:${chat.chatId}`, () => rpc(connection, API.userMonitorChatSet, { chatId: chat.chatId, ...patch }));
       const toggle = () => act('toggle', () => rpc(connection, API.userMonitorEnable, {
         enabled: monitor?.enabled !== true,
       }));
@@ -84,6 +85,26 @@ const h = React.createElement;
           h('div', { style: S.hint },
             `${chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group')} · ${chat.chatId}`,
             chat.lastError ? h('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, ` · ${chat.lastError}`) : null)),
+        h('select', {
+          style: { ...S.input, width: 'auto', height: '28px', fontSize: '12px' },
+          value: chat.mode ?? (chat.chatMode === 'p2p' ? 'all' : 'mention'),
+          disabled: busy === `mode:${chat.chatId}`,
+          onChange: (event) => void setChat(chat, { mode: event.target.value }),
+        },
+        h('option', { value: 'all' }, t('全部消息', 'All')),
+        h('option', { value: 'mention' }, t('仅@我/回复我', 'Mentions & replies')),
+        h('option', { value: 'keyword' }, t('关键词', 'Keywords'))),
+        chat.mode === 'keyword'
+          ? h('input', {
+            style: { ...S.input, width: '140px', height: '28px', fontSize: '12px' },
+            defaultValue: (chat.keywords ?? []).join('，'),
+            placeholder: t('关键词，用逗号分隔', 'Keywords, comma separated'),
+            onBlur: (event) => {
+              const keywords = event.target.value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
+              void setChat(chat, { keywords });
+            },
+          })
+          : null,
         h('button', { type: 'button', className: 'bxf-mini', disabled: busy === `remove:${chat.chatId}`, onClick: () => void remove(chat) },
           t('移除', 'Remove'))));
 

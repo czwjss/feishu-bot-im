@@ -156,7 +156,11 @@ export const MESSAGES = Object.freeze({
   "条未读": "unread",
   "全部已读": "Mark read",
   "清空记录": "Clear",
-  "未知": "Unknown"
+  "未知": "Unknown",
+  "全部消息": "All messages",
+  "仅@我/回复我": "Mentions & replies",
+  "关键词": "Keywords",
+  "关键词，用逗号分隔": "Keywords, comma separated"
 });
 
 export function dictionaries() {

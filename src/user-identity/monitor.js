@@ -6,11 +6,13 @@
  * 由 `feishu_avatar_inbox` 工具交给 Agent，或直接回复。
  * 回复仍走 `feishu_avatar_send`（用户本人身份），监听本身不写飞书。
  */
-import { chatMemberNames, listChats, listMessages } from './api.js';
+import { chatMemberNames, getMessage, listChats, listMessages } from './api.js';
 import {
   MAX_MONITOR_CHATS,
   MAX_MESSAGES_PER_CHAT,
   MAX_SEEN_IDS,
+  normalizeKeywords,
+  normalizeMonitorChat,
   normalizeMonitorConfig,
   normalizeMonitorState,
 } from './monitor-store.js';
@@ -40,7 +42,9 @@ export class UserMonitorManager {
   #listMessages;
   #listChats;
   #chatMemberNames;
+  #getMessage;
   #nameCache = new Map();
+  #parentSender = new Map();
 
   constructor({
     auth,
@@ -49,6 +53,7 @@ export class UserMonitorManager {
     listMessages: listMessagesImpl = listMessages,
     listChats: listChatsImpl = listChats,
     chatMemberNames: chatMemberNamesImpl = chatMemberNames,
+    getMessage: getMessageImpl = getMessage,
     now = Date.now,
     setInterval: setIntervalImpl = setInterval,
     clearInterval: clearIntervalImpl = clearInterval,
@@ -64,6 +69,7 @@ export class UserMonitorManager {
     this.#listMessages = listMessagesImpl;
     this.#listChats = listChatsImpl;
     this.#chatMemberNames = chatMemberNamesImpl;
+    this.#getMessage = getMessageImpl;
   }
 
   get store() {
@@ -314,6 +320,58 @@ export class UserMonitorManager {
     }
   }
 
+  /** 更新单个会话的触发规则。 */
+  async setChat(chatId, patch = {}) {
+    const id = stringOf(chatId).trim();
+    if (!this.#store.config.chats.some((chat) => chat.chatId === id)) {
+      throw new Error('这个会话不在监听列表里');
+    }
+    const chats = this.#store.config.chats.map((chat) => {
+      if (chat.chatId !== id) return chat;
+      return normalizeMonitorChat({
+        ...chat,
+        mode: patch.mode === undefined ? chat.mode : patch.mode,
+        keywords: patch.keywords === undefined ? chat.keywords : patch.keywords,
+      });
+    });
+    await this.#store.saveConfig({ chats });
+    return this.status();
+  }
+
+  /** 父消息发送者（用于判断“回复我”），带缓存。 */
+  async #parentSenderOf(messageId, accessToken) {
+    if (!messageId) return null;
+    const cached = this.#parentSender.get(messageId);
+    if (cached !== undefined) return cached;
+    const parent = await this.#getMessage({ accessToken, messageId }).catch(() => null);
+    const sender = parent?.senderOpenId ?? null;
+    if (this.#parentSender.size > 500) this.#parentSender.clear();
+    this.#parentSender.set(messageId, sender);
+    return sender;
+  }
+
+  /**
+   * 触发判断。
+   * all：全部；mention：@我 或 回复我；keyword：命中关键词、@我 或 回复我。
+   */
+  async #accepts(chat, item, accessToken, selfOpenId) {
+    const mode = chat.mode ?? (chat.chatMode === 'p2p' ? 'all' : 'mention');
+    if (mode === 'all') return true;
+    const mentioned = Boolean(selfOpenId)
+      && (item.mentions ?? []).some((mention) => mention.openId === selfOpenId);
+    if (mentioned) return true;
+    if (item.parentId && selfOpenId) {
+      const parentSender = await this.#parentSenderOf(item.parentId, accessToken);
+      if (parentSender && parentSender === selfOpenId) return true;
+    }
+    if (mode === 'keyword') {
+      const keywords = chat.keywords ?? [];
+      const text = stringOf(item.text).toLowerCase();
+      return keywords.some((keyword) => text.includes(keyword.toLowerCase()));
+    }
+    return false;
+  }
+
   /** 会话成员姓名表，每会话只取一次。 */
   async #namesFor(chatId, accessToken) {
     if (this.#nameCache.has(chatId)) return this.#nameCache.get(chatId);
@@ -353,6 +411,7 @@ export class UserMonitorManager {
       });
       const seen = new Set(current.seen ?? []);
       const eligible = [];
+      const skipped = [];
       for (const item of result.items) {
         if (!item.messageId || seen.has(item.messageId)) continue;
         // 机器人/应用消息同样记录：群里常是通知，私聊里是对方机器人回复。
@@ -360,6 +419,12 @@ export class UserMonitorManager {
         if (selfOpenId && item.senderOpenId === selfOpenId) continue;
         const time = messageTime(item);
         if (time === null || time < current.cursorTimeMs) continue;
+        if (!(await this.#accepts(chat, item, accessToken, selfOpenId))) {
+          // 不记录，但游标照常推进，避免重复判断同一条消息。
+          seen.add(item.messageId);
+          skipped.push({ item, time });
+          continue;
+        }
         eligible.push({ item, time });
         if (eligible.length >= MAX_MESSAGES_PER_POLL) break;
       }
@@ -409,21 +474,30 @@ export class UserMonitorManager {
         });
       }
 
-      if (eligible.length === 0) {
-        await this.#store.saveState({
-          ...this.#store.state,
-          chats: {
-            ...this.#store.state.chats,
-            [chat.chatId]: {
-              ...current,
-              messages,
-              seen: [...seen].slice(-MAX_SEEN_IDS),
-              lastPollAt: this.#now(),
-              lastError: null,
-            },
-          },
-        });
+      // 被过滤的消息也要推进游标，否则每轮都会重新判断同一条。
+      const lastSkipped = skipped.length > 0 ? skipped[skipped.length - 1] : null;
+      if (lastSkipped && lastSkipped.time > cursorTimeMs) {
+        cursorTimeMs = lastSkipped.time;
+        cursorMessageId = lastSkipped.item.messageId;
       }
+
+      // 统一收尾：即使本轮只记录了部分消息，也要把游标推到最新的已处理消息。
+      await this.#store.saveState({
+        ...this.#store.state,
+        chats: {
+          ...this.#store.state.chats,
+          [chat.chatId]: {
+            ...current,
+            cursorTimeMs,
+            cursorMessageId,
+            messages: nextMessages,
+            seen: [...seen].slice(-MAX_SEEN_IDS),
+            lastPollAt: this.#now(),
+            lastDeliveredAt,
+            lastError: null,
+          },
+        },
+      });
     } catch (error) {
       this.#logger?.warn?.('[im-feishu] 消息监听轮询失败', chat.chatId, error?.message ?? error);
       const latest = this.#store.state.chats[chat.chatId] ?? current;

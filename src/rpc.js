@@ -211,6 +211,12 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
         await requireUserMonitor().pollOnce();
         return ok(await requireUserMonitor().status());
 
+      case 'user.monitor.chat.set':
+        return ok(await requireUserMonitor().setChat(input.chatId, {
+          mode: input.mode,
+          keywords: input.keywords,
+        }));
+
       case 'user.monitor.inbox':
         return ok(await requireUserMonitor().inbox(input));
 

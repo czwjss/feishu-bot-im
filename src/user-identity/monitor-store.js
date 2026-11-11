@@ -18,6 +18,8 @@ export const MAX_MONITOR_CHATS = 20;
 export const MAX_SEEN_IDS = 500;
 export const MAX_MESSAGES_PER_CHAT = 50;
 export const MAX_MESSAGE_TEXT = 2_000;
+export const MAX_KEYWORDS = 10;
+export const TRIGGER_MODES = Object.freeze(['all', 'mention', 'keyword']);
 export const MIN_POLL_INTERVAL_MS = 5_000;
 export const MAX_POLL_INTERVAL_MS = 60_000;
 
@@ -34,15 +36,36 @@ function chatKey(chatId) {
   return /^oc_[A-Za-z0-9_-]{4,}$/.test(chatId) ? chatId : '';
 }
 
+export function normalizeKeywords(value) {
+  const list = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/[,，\n]/) : [];
+  const keywords = [];
+  for (const item of list) {
+    const keyword = cleanString(item).slice(0, 30);
+    if (!keyword || keywords.includes(keyword)) continue;
+    keywords.push(keyword);
+    if (keywords.length >= MAX_KEYWORDS) break;
+  }
+  return Object.freeze(keywords);
+}
+
+/** 默认触发规则：私聊全收，群聊只在 @我 / 回复我 时记录。 */
+function defaultMode(chatMode) {
+  return chatMode === 'p2p' ? 'all' : 'mention';
+}
+
 export function normalizeMonitorChat(value) {
   const source = value && typeof value === 'object' ? value : {};
   const chatId = chatKey(cleanString(source.chatId));
   if (!chatId) return null;
+  const chatMode = source.chatMode === 'p2p' ? 'p2p' : 'group';
+  const mode = TRIGGER_MODES.includes(source.mode) ? source.mode : defaultMode(chatMode);
   return Object.freeze({
     chatId,
     name: cleanString(source.name),
-    chatMode: source.chatMode === 'p2p' ? 'p2p' : 'group',
+    chatMode,
     external: source.external === true,
+    mode,
+    keywords: normalizeKeywords(source.keywords),
   });
 }
 

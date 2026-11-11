@@ -303,12 +303,26 @@ export function extractMessageText(item) {
   }
 }
 
+function normalizeMentions(source) {
+  const list = Array.isArray(source.mentions) ? source.mentions : [];
+  const mentions = [];
+  const seen = new Set();
+  for (const item of list) {
+    const openId = stringOf(item?.id?.open_id) || stringOf(item?.id);
+    if (!openId || seen.has(openId)) continue;
+    seen.add(openId);
+    mentions.push(Object.freeze({ openId, name: stringOf(item?.name) }));
+  }
+  return Object.freeze(mentions);
+}
+
 export function normalizeMessage(item) {
   const source = item && typeof item === 'object' ? item : {};
   const sender = source.sender && typeof source.sender === 'object' ? source.sender : {};
   return Object.freeze({
     messageId: stringOf(source.message_id),
     parentId: stringOf(source.parent_id),
+    rootId: stringOf(source.root_id),
     chatId: stringOf(source.chat_id),
     msgType: stringOf(source.msg_type),
     createTime: formatCreateTime(source.create_time),
@@ -316,8 +330,31 @@ export function normalizeMessage(item) {
     senderName: stringOf(sender.name),
     senderType: stringOf(sender.sender_type),
     deleted: Boolean(source.deleted),
+    mentions: normalizeMentions(source),
     text: extractMessageText(source),
   });
+}
+
+/** 单条消息（用于判断“回复我”的父消息发送者）。 */
+export async function getMessage({
+  accessToken,
+  messageId,
+  fetchImpl,
+  timeoutMs,
+  signal,
+} = {}) {
+  const id = stringOf(messageId).trim();
+  if (!id) throw new Error('messageId 不能为空');
+  const data = await requestFeishu({
+    path: `/open-apis/im/v1/messages/${encodeURIComponent(id)}`,
+    query: { card_msg_content_type: 'user_card_content' },
+    accessToken,
+    fetchImpl,
+    timeoutMs,
+    signal,
+  });
+  const items = Array.isArray(data.items) ? data.items : [];
+  return items.length > 0 ? normalizeMessage(items[0]) : null;
 }
 
 /**
