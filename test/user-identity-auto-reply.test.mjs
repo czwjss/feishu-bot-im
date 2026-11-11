@@ -59,7 +59,7 @@ try {
   const harness = {
     async createSession(input) {
       sessions.push(input);
-      return 'sess-auto-1';
+      return `sess-auto-${sessions.length}`;
     },
     async prompt(sessionId, text) {
       prompts.push({ sessionId, text });
@@ -242,9 +242,38 @@ try {
   });
   assert.equal(await engine.flush({ ...botChat }), null, 'second bot batch within 10 minutes is throttled');
 
+  // 8) Worker 会话被归档时换新会话，旧会话不再复用。
+  const archived = new Set([store.state.chats[chatId].sessionId]);
+  const guardedEngine = new AutoReplyEngine({
+    store,
+    harness,
+    auth,
+    sessionGuard: { isArchived: (id) => archived.has(id), exists: () => true },
+    now: clock.now,
+    setTimeout: clock.setTimeout.bind(clock),
+    clearTimeout: clock.clearTimeout.bind(clock),
+    sendCard: async () => ({ messageId: 'om_g1' }),
+    replyCard: async () => ({ messageId: 'om_g2' }),
+  });
+  await store.saveState({
+    chats: {
+      [chatId]: {
+        ...store.state.chats[chatId],
+        messages: [{ messageId: 'om_arch', senderName: '朋友', senderOpenId: 'ou_friend', senderType: 'user', text: '归档后还能回吗', createTime: new Date(clock.now()).toISOString(), read: false }],
+        batch: { messageIds: ['om_arch'], firstAt: clock.now(), lastAt: clock.now(), token: null },
+      },
+    },
+  });
+  const sessionsBeforeArchive = sessions.length;
+  const archiveToken = await guardedEngine.flush({ ...store.config.chats[0] });
+  assert.ok(archiveToken, 'archived worker does not block dispatch');
+  assert.equal(sessions.length, sessionsBeforeArchive + 1, 'a replacement worker session is created');
+  assert.ok(!archived.has(store.state.chats[chatId].sessionId), 'stored session points at the new worker');
+  await guardedEngine.skip({ token: archiveToken, reason: '测试' });
+
 } finally {
   await tick();
   await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-console.log('user identity auto reply: 30 assertions passed');
+console.log('user identity auto reply: 34 assertions passed');

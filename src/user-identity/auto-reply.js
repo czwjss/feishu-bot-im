@@ -73,6 +73,8 @@ export class AutoReplyEngine {
   #maxWaitMs;
   #timeoutMs;
   #workerEpoch;
+  #sessionGuard;
+  #workerSessions = new Set();
   #timers = new Map();
   #pending = new Map();
   #selfOpenId = '';
@@ -92,6 +94,7 @@ export class AutoReplyEngine {
     maxWaitMs = BATCH_MAX_WAIT_MS,
     decisionTimeoutMs = DECISION_TIMEOUT_MS,
     workerEpoch = WORKER_EPOCH,
+    sessionGuard = null,
   } = {}) {
     if (!store) throw new TypeError('AutoReplyEngine 需要 store');
     if (!harness) throw new TypeError('AutoReplyEngine 需要 harness');
@@ -111,6 +114,7 @@ export class AutoReplyEngine {
     this.#maxWaitMs = maxWaitMs;
     this.#timeoutMs = decisionTimeoutMs;
     this.#workerEpoch = workerEpoch;
+    this.#sessionGuard = sessionGuard;
   }
 
   get harness() {
@@ -214,16 +218,25 @@ export class AutoReplyEngine {
 
     let sessionId = entry.sessionId ?? null;
     const epochStale = sessionId && entry.sessionEpoch !== this.#workerEpoch;
+    const unusable = sessionId ? this.#sessionUsable(sessionId) === false : false;
     try {
-      if (!sessionId || epochStale) {
+      if (!sessionId || epochStale || unusable) {
+        if (unusable) this.#logger?.warn?.(`[im-feishu] ${chat.chatId} 的 Worker 会话已不可用，重建`);
         sessionId = await this.#harness.createSession({ agentPreset: chat.preset || 'standard' });
+        this.#workerSessions.add(sessionId);
         await this.#patch(chat.chatId, { sessionId, sessionEpoch: this.#workerEpoch });
       }
+      this.#workerSessions.add(sessionId);
       await this.#harness.prompt(sessionId, renderBatchPrompt({ chat, messages: targets, token }));
     } catch (error) {
       this.#pending.delete(token);
       this.#logger?.warn?.('[im-feishu] 自动回复派发失败', chat.chatId, error?.message ?? error);
-      await this.#patch(chat.chatId, { batch: { ...(entry.batch ?? {}), token: null } });
+      // 会话被归档/删除或失效时清掉指针，下一批重建。
+      await this.#patch(chat.chatId, {
+        batch: { ...(entry.batch ?? {}), token: null },
+        sessionId: null,
+        sessionEpoch: null,
+      });
       return null;
     }
 
@@ -231,8 +244,11 @@ export class AutoReplyEngine {
       this.#timers.delete(`t:${token}`);
       if (!this.#pending.delete(token)) return;
       this.#logger?.warn?.(`[im-feishu] ${chat.chatId} 自动回复决策超时，本批保留未读`);
+      // 超时通常意味着 Worker 被归档或卡住，换一个会话重试。
       void this.#patch(chat.chatId, {
         batch: { ...(this.#store.state.chats[chat.chatId]?.batch ?? {}), token: null },
+        sessionId: null,
+        sessionEpoch: null,
       });
     }, this.#timeoutMs);
     timer?.unref?.();
@@ -279,6 +295,21 @@ export class AutoReplyEngine {
 
   async #authToken() {
     return this.#auth.requireAccessToken();
+  }
+
+  /** Worker 会话是否还能跑模型步骤；null 表示无法判断。 */
+  #sessionUsable(sessionId) {
+    if (this.#workerSessions.has(sessionId)) return true;
+    const guard = this.#sessionGuard;
+    if (!guard) return null;
+    if (guard.isArchived?.(sessionId)) return false;
+    if (guard.exists?.(sessionId) === false) return false;
+    return null;
+  }
+
+  /** 该会话是否由自动回复创建（含刚创建、尚未落盘的）。 */
+  isWorkerSession(sessionId) {
+    return this.#workerSessions.has(sessionId);
   }
 
   #takePending(token) {

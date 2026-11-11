@@ -124,10 +124,29 @@ export async function apply(ctx, config = {}) {
     configPath: join(paths.root, MONITOR_FILE),
     statePath: join(paths.root, MONITOR_STATE_FILE),
   }).load();
+  // 归档/删除的 Worker 会话不能再跑模型步骤，派发前必须换新会话。
+  const sessionGuard = {
+    isArchived: (sessionId) => {
+      try {
+        return ctx.workspaceRegistry?.archivedSessionIds?.includes(sessionId) === true;
+      } catch {
+        return false;
+      }
+    },
+    exists: (sessionId) => {
+      try {
+        return Boolean(ctx.sessions?.get?.(sessionId));
+      } catch {
+        return true;
+      }
+    },
+  };
+
   const userMonitor = new UserMonitorManager({
     auth: userIdentityAuth,
     store: monitorStore,
     harness,
+    sessionGuard,
     logger,
   });
   installUserIdentityContributions(ctx, userIdentityAuth, userMonitor);

@@ -60,6 +60,7 @@ export class UserMonitorManager {
     auth,
     store,
     harness = null,
+    sessionGuard = null,
     autoReply = null,
     logger = null,
     listMessages: listMessagesImpl = listMessages,
@@ -85,6 +86,7 @@ export class UserMonitorManager {
           store,
           harness,
           auth,
+          sessionGuard,
           sendCard: sendCardImpl,
           replyCard: replyCardImpl,
           logger,
@@ -140,6 +142,7 @@ export class UserMonitorManager {
   isAutoReplySession(sessionId) {
     const needle = typeof sessionId === 'string' ? sessionId.trim() : '';
     if (!needle) return false;
+    if (this.#autoReply?.isWorkerSession?.(needle)) return true;
     const chats = this.#store.state?.chats ?? {};
     return Object.values(chats).some((entry) => entry?.sessionId === needle);
   }
