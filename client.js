@@ -212,6 +212,7 @@ var MESSAGES = Object.freeze({
   "\u53EA\u8BB0\u5F55": "Record only",
   "\u751F\u6210\u8349\u7A3F": "Draft",
   "\u81EA\u52A8\u56DE\u590D": "Auto reply",
+  "\u81EA\u52A8\u56DE\u590D\uFF08\u542B\u673A\u5668\u4EBA\uFF09": "Auto reply (bots too)",
   "\u5F85\u5904\u7406": "pending",
   "\u4E0A\u6B21\u81EA\u52A8\u56DE\u590D": "last auto"
 });
@@ -725,14 +726,18 @@ function MonitorPanel({ connection }) {
       "select",
       {
         style: { ...S.input, width: "auto", height: "28px", fontSize: "12px" },
-        value: chat.replyMode ?? "watch",
+        value: chat.replyMode === "auto" && chat.replyToBots ? "auto-bots" : chat.replyMode ?? "watch",
         disabled: busy === `mode:${chat.chatId}`,
         title: t("\u5904\u7406\u65B9\u5F0F", "Handling"),
-        onChange: (event) => void setChat(chat, { replyMode: event.target.value })
+        onChange: (event) => {
+          const value = event.target.value;
+          void setChat(chat, value === "auto-bots" ? { replyMode: "auto", replyToBots: true } : { replyMode: value, replyToBots: false });
+        }
       },
       h2("option", { value: "watch" }, t("\u53EA\u8BB0\u5F55", "Record only")),
       h2("option", { value: "draft" }, t("\u751F\u6210\u8349\u7A3F", "Draft")),
-      h2("option", { value: "auto" }, t("\u81EA\u52A8\u56DE\u590D", "Auto reply"))
+      h2("option", { value: "auto" }, t("\u81EA\u52A8\u56DE\u590D", "Auto reply")),
+      h2("option", { value: "auto-bots" }, t("\u81EA\u52A8\u56DE\u590D\uFF08\u542B\u673A\u5668\u4EBA\uFF09", "Auto reply (bots too)"))
     ),
     h2(
       "button",

@@ -475,6 +475,7 @@ export class UserMonitorManager {
         mode: patch.mode === undefined ? chat.mode : patch.mode,
         keywords: patch.keywords === undefined ? chat.keywords : patch.keywords,
         replyMode: patch.replyMode === undefined ? chat.replyMode : patch.replyMode,
+        replyToBots: patch.replyToBots === undefined ? chat.replyToBots : patch.replyToBots,
         preset: patch.preset === undefined ? chat.preset : patch.preset,
       });
     });

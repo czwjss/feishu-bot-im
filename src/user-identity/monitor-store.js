@@ -82,6 +82,8 @@ export function normalizeMonitorChat(value) {
     keywords: normalizeKeywords(source.keywords),
     replyMode: REPLY_MODES.includes(source.replyMode) ? source.replyMode : 'watch',
     preset: cleanString(source.preset),
+    /** 是否允许“只有机器人消息”的批次触发自动回复（默认关，仅用于测试）。 */
+    replyToBots: source.replyToBots === true,
   });
 }
 

@@ -169,6 +169,7 @@ export const MESSAGES = Object.freeze({
   "只记录": "Record only",
   "生成草稿": "Draft",
   "自动回复": "Auto reply",
+  "自动回复（含机器人）": "Auto reply (bots too)",
   "待处理": "pending",
   "上次自动回复": "last auto"
 });

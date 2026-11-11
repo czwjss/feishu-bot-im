@@ -185,9 +185,43 @@ try {
   });
   assert.match(prompt, /批次令牌：batch-abc/);
   assert.match(prompt, /不可信/);
+  // 7) 显式允许时，机器人批次可以触发一次自动回复，但十分钟内只放行一次。
+  await store.saveConfig({
+    enabled: true,
+    chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all', replyMode: 'auto', replyToBots: true }],
+  });
+  const botChat = store.config.chats[0];
+  await store.saveState({
+    chats: {
+      [chatId]: {
+        cursorTimeMs: clock.now() - 60_000,
+        seen: [],
+        messages: [{ messageId: 'om_bot_2', senderName: '机器人', senderOpenId: 'cli_app', senderType: 'app', text: '机器人通知', createTime: new Date(clock.now()).toISOString(), read: false }],
+        batch: { messageIds: ['om_bot_2'], firstAt: clock.now(), lastAt: clock.now() },
+        sessionId: 'sess-auto-1',
+        outbox: [],
+      },
+    },
+  });
+  const botToken = await engine.flush({ ...botChat });
+  assert.ok(botToken, 'bot batch dispatches when explicitly allowed');
+  await engine.reply({ token: botToken, text: '收到' });
+  assert.equal(sent.length, 2, 'reply sent once for the bot batch');
+
+  await store.saveState({
+    chats: {
+      [chatId]: {
+        ...store.state.chats[chatId],
+        messages: [{ messageId: 'om_bot_3', senderName: '机器人', senderOpenId: 'cli_app', senderType: 'app', text: '机器人又说', createTime: new Date(clock.now()).toISOString(), read: false }],
+        batch: { messageIds: ['om_bot_3'], firstAt: clock.now(), lastAt: clock.now() },
+      },
+    },
+  });
+  assert.equal(await engine.flush({ ...botChat }), null, 'second bot batch within 10 minutes is throttled');
+
 } finally {
   await tick();
   await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-console.log('user identity auto reply: 23 assertions passed');
+console.log('user identity auto reply: 27 assertions passed');

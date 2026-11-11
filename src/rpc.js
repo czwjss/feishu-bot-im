@@ -216,6 +216,7 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
           mode: input.mode,
           keywords: input.keywords,
           replyMode: input.replyMode,
+          replyToBots: input.replyToBots,
           preset: input.preset,
         }));
 

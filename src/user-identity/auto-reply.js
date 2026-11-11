@@ -168,14 +168,21 @@ export class AutoReplyEngine {
     const ids = entry.batch?.messageIds ?? [];
     if (ids.length === 0) return null;
     const batchMessages = (entry.messages ?? []).filter((message) => ids.includes(message.messageId));
-    // 只有机器人/应用消息时不自动回复，避免和机器人互相刷屏。
+    // 只有机器人/应用消息时默认不自动回复，避免和机器人互相刷屏。
     const messages = batchMessages.filter((message) => message.senderType !== 'app');
-    if (batchMessages.length > 0 && messages.length === 0) {
+    const botOnly = batchMessages.length > 0 && messages.length === 0;
+    if (botOnly && chat.replyToBots !== true) {
       this.#logger?.info?.(`[im-feishu] ${chat.chatId} 本批只有机器人消息，跳过自动回复`);
       await this.#patch(chat.chatId, { batch: { messageIds: [], firstAt: null, lastAt: null, token: null } });
       return null;
     }
-    if (messages.length === 0) {
+    if (botOnly && this.#autoRepliesSince(chat.chatId, 10 * 60_000) > 0) {
+      this.#logger?.info?.(`[im-feishu] ${chat.chatId} 十分钟内已自动回复过机器人，跳过本轮`);
+      await this.#patch(chat.chatId, { batch: { messageIds: [], firstAt: null, lastAt: null, token: null } });
+      return null;
+    }
+    const targets = botOnly ? batchMessages : messages;
+    if (targets.length === 0) {
       await this.#patch(chat.chatId, { batch: { messageIds: [], firstAt: null, lastAt: null, token: null } });
       return null;
     }
@@ -185,7 +192,7 @@ export class AutoReplyEngine {
     }
 
     const token = tokenOf();
-    const replyTarget = [...messages].reverse()
+    const replyTarget = [...targets].reverse()
       .find((message) => !this.#selfOpenId || message.senderOpenId !== this.#selfOpenId);
     this.#pending.set(token, {
       chatId: chat.chatId,
@@ -201,7 +208,7 @@ export class AutoReplyEngine {
         sessionId = await this.#harness.createSession({ agentPreset: chat.preset || 'standard' });
         await this.#patch(chat.chatId, { sessionId });
       }
-      await this.#harness.prompt(sessionId, renderBatchPrompt({ chat, messages, token }));
+      await this.#harness.prompt(sessionId, renderBatchPrompt({ chat, messages: targets, token }));
     } catch (error) {
       this.#pending.delete(token);
       this.#logger?.warn?.('[im-feishu] 自动回复派发失败', chat.chatId, error?.message ?? error);
@@ -295,7 +302,11 @@ export class AutoReplyEngine {
   }
 
   #autoRepliesLastHour(chatId) {
-    const since = this.#now() - 60 * 60_000;
+    return this.#autoRepliesSince(chatId, 60 * 60_000);
+  }
+
+  #autoRepliesSince(chatId, windowMs) {
+    const since = this.#now() - windowMs;
     return (this.#store.state.chats[chatId]?.outbox ?? [])
       .filter((item) => item.at > since && item.source === 'auto')
       .length;

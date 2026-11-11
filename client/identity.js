@@ -123,14 +123,20 @@ const h = React.createElement;
           : null,
         h('select', {
           style: { ...S.input, width: 'auto', height: '28px', fontSize: '12px' },
-          value: chat.replyMode ?? 'watch',
+          value: chat.replyMode === 'auto' && chat.replyToBots ? 'auto-bots' : (chat.replyMode ?? 'watch'),
           disabled: busy === `mode:${chat.chatId}`,
           title: t('处理方式', 'Handling'),
-          onChange: (event) => void setChat(chat, { replyMode: event.target.value }),
+          onChange: (event) => {
+            const value = event.target.value;
+            void setChat(chat, value === 'auto-bots'
+              ? { replyMode: 'auto', replyToBots: true }
+              : { replyMode: value, replyToBots: false });
+          },
         },
         h('option', { value: 'watch' }, t('只记录', 'Record only')),
         h('option', { value: 'draft' }, t('生成草稿', 'Draft')),
-        h('option', { value: 'auto' }, t('自动回复', 'Auto reply'))),
+        h('option', { value: 'auto' }, t('自动回复', 'Auto reply')),
+        h('option', { value: 'auto-bots' }, t('自动回复（含机器人）', 'Auto reply (bots too)'))),
         h('button', { type: 'button', className: 'bxf-mini', disabled: busy === `remove:${chat.chatId}`, onClick: () => void remove(chat) },
           t('移除', 'Remove'))));
 
