@@ -18,6 +18,13 @@ export function installUserIdentityContributions(ctx, auth, monitor = null) {
       order: 141,
       text: USER_IDENTITY_POLICY,
     });
+    if (monitor) {
+      promptCtx.systemPrompt.context({
+        name: 'im-feishu-user:inbox',
+        order: 121,
+        text: () => monitor.summary(),
+      });
+    }
   });
 
   ctx.inject(['tools'], (toolCtx) => {

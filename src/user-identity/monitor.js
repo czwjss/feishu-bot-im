@@ -126,6 +126,26 @@ export class UserMonitorManager {
     };
   }
 
+  /**
+   * 注入用的未读摘要；没有未读时返回空串。
+   * 只给计数和会话名，不把正文塞进 system prompt。
+   */
+  summary() {
+    const unread = [];
+    for (const chat of this.#store.config.chats) {
+      const entry = this.#store.state.chats[chat.chatId] ?? {};
+      const count = (entry.messages ?? []).filter((message) => !message.read).length;
+      if (count > 0) unread.push({ name: chat.name || chat.chatId, count });
+    }
+    if (unread.length === 0) return '';
+    const total = unread.reduce((sum, item) => sum + item.count, 0);
+    const detail = unread.slice(0, 5)
+      .map((item) => `${item.name} ${item.count} 条`)
+      .join('、');
+    return `飞书分身收件箱有 ${total} 条未读：${detail}。用 feishu_avatar_inbox 查看；`
+      + '需要回复时用 feishu_avatar_send，以用户本人身份发送。';
+  }
+
   /** 候选会话：群聊 + 最近私聊。 */
   async discoverChats() {
     const accessToken = await this.#auth.requireAccessToken();
