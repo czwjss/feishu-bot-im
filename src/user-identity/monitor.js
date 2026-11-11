@@ -471,6 +471,14 @@ export class UserMonitorManager {
     return false;
   }
 
+  /** 把 <at id=ou_x></at> 换成可读的 @姓名，读不到名字时保留 open_id。 */
+  #renderAt(text, names) {
+    return stringOf(text).replace(/<at\s+id=(ou_[A-Za-z0-9_-]+)\s*><\/at>/g, (match, openId) => {
+      const name = names.get(openId);
+      return name ? `@${name}` : `@${openId}`;
+    });
+  }
+
   /** 会话成员姓名表，每会话只取一次。 */
   async #namesFor(chatId, accessToken) {
     if (this.#nameCache.has(chatId)) return this.#nameCache.get(chatId);
@@ -550,7 +558,7 @@ export class UserMonitorManager {
               || (item.senderType === 'app' ? '机器人' : ''),
             senderOpenId: item.senderOpenId ?? '',
             createTime: item.createTime ?? new Date(time).toISOString(),
-            text: item.text ?? `[${item.msgType || '消息'}]`,
+            text: this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, names),
             read: false,
           },
         ].slice(-MAX_MESSAGES_PER_CHAT);

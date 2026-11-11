@@ -86,7 +86,7 @@ try {
     { messageId: 'm-self', createTime: new Date(now - 10_000).toISOString(), senderType: 'user', senderOpenId: 'ou_self', text: 'self' },
     { messageId: 'm-deleted', createTime: new Date(now - 9_000).toISOString(), senderType: 'user', senderOpenId: 'ou_other', deleted: true, text: 'deleted' },
     { messageId: 'm-bot', createTime: new Date(now - 8_000).toISOString(), senderType: 'app', senderOpenId: 'ou_bot', text: 'bot' },
-    { messageId: 'm-new', createTime: new Date(now - 5_000).toISOString(), senderType: 'user', senderOpenId: 'ou_other', text: '你好' },
+    { messageId: 'm-new', createTime: new Date(now - 5_000).toISOString(), senderType: 'user', senderOpenId: 'ou_other', text: '<at id=ou_other></at> 你好' },
   ];
   const auth = {
     async status() {
@@ -117,6 +117,7 @@ try {
   assert.equal(bot.senderName, '机器人');
   assert.equal(fromColleague.senderName, '同事', 'sender name resolved from chat members');
   assert.equal(fromColleague.read, false);
+  assert.equal(fromColleague.text, '@同事 你好', 'at tag is rendered as a readable name');
   assert.deepEqual(nameCalls, [chatId]);
   assert.equal(store.state.chats[chatId].cursorTimeMs, now - 5_000);
 
@@ -127,7 +128,7 @@ try {
   // 5) 收件箱默认只取未读并标记已读。
   const first = await monitor.inbox({});
   assert.equal(first.total, 2);
-  assert.deepEqual(first.items.map((item) => item.text), ['bot', '你好']);
+  assert.deepEqual(first.items.map((item) => item.text), ['bot', '@同事 你好']);
   const second = await monitor.inbox({});
   assert.equal(second.total, 0);
 
