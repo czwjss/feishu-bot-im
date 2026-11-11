@@ -43,7 +43,6 @@ const RPC_ENDPOINT = 'im-feishu';
       userMonitorEnable: 'user.monitor.enable',
       userMonitorPoll: 'user.monitor.poll',
       userMonitorChatSet: 'user.monitor.chat.set',
-      userMonitorDrafts: 'user.monitor.drafts',
       userMonitorDraftSend: 'user.monitor.draft.send',
       userMonitorDraftIgnore: 'user.monitor.draft.ignore',
       userMonitorInbox: 'user.monitor.inbox',

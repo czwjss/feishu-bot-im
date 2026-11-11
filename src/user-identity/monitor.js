@@ -91,31 +91,10 @@ export class UserMonitorManager {
   /** 启动轮询；未启用时也保留定时器，便于 UI 打开后立即生效。 */
   start() {
     if (this.#disposed || this.#timer) return;
-    void this.#pruneStaleTransient();
     const interval = this.#store.config.pollIntervalMs;
     this.#timer = this.#setInterval(() => { void this.pollOnce(); }, interval);
     this.#timer?.unref?.();
     if (this.#store.config.enabled) void this.pollOnce();
-  }
-
-  /** 启动时清掉早该被最终答案取代的临时状态记录。 */
-  async #pruneStaleTransient() {
-    const now = this.#now();
-    const chats = { ...this.#store.state.chats };
-    let changed = false;
-    for (const [chatId, entry] of Object.entries(chats)) {
-      const messages = entry.messages ?? [];
-      const kept = messages.filter((message) => {
-        const created = Date.parse(message.createTime);
-        const stale = Number.isFinite(created) && now - created > STALE_TRANSIENT_MS;
-        return !(stale && this.#isTransientStatus(message.text));
-      });
-      if (kept.length !== messages.length) {
-        chats[chatId] = { ...entry, messages: kept };
-        changed = true;
-      }
-    }
-    if (changed) await this.#store.saveState({ ...this.#store.state, chats }).catch(() => undefined);
   }
 
   stop() {
@@ -162,17 +141,25 @@ export class UserMonitorManager {
         }
         : null,
       chats,
+      drafts: this.#effectiveDrafts(),
     };
   }
 
-  /** 待确认草稿（pending + 最近已处理），过期自动标 expired。 */
-  async drafts() {
+  /** 按 TTL 计算草稿的有效状态（不落盘，供 status/summary 共用）。 */
+  #effectiveDrafts() {
     const now = this.#now();
-    const drafts = (this.#store.state.drafts ?? []).map((draft) => (
+    return (this.#store.state.drafts ?? []).map((draft) => (
       draft.status === 'pending' && now - draft.createdAt > DRAFT_TTL_MS
         ? { ...draft, status: 'expired' }
         : draft
     ));
+  }
+
+  /** 待确认草稿（含最近已处理），过期标 expired 并落盘一次。 */
+  async drafts() {
+    const drafts = this.#effectiveDrafts();
+    const changed = drafts.some((draft, index) => draft.status !== (this.#store.state.drafts?.[index]?.status));
+    if (changed) await this.#store.saveState({ ...this.#store.state, drafts });
     return { drafts };
   }
 
@@ -270,7 +257,7 @@ export class UserMonitorManager {
     const detail = unread.slice(0, 5)
       .map((item) => `${item.name} ${item.count} 条`)
       .join('、');
-    const pending = (this.#store.state.drafts ?? []).filter((draft) => draft.status === 'pending').length;
+    const pending = this.#effectiveDrafts().filter((draft) => draft.status === 'pending').length;
     const draftNote = pending > 0 ? `另有 ${pending} 条待确认草稿。` : '';
     return `飞书分身收件箱有 ${total} 条未读：${detail}。${draftNote}`
       + '用 feishu_avatar_inbox 查看；回复草稿用 feishu_avatar_draft 提交，等用户确认后再发。';
@@ -516,7 +503,8 @@ export class UserMonitorManager {
 
   /** 把 <at id=ou_x></at> 换成可读的 @姓名，读不到名字时保留 open_id。 */
   #renderAt(text, names) {
-    return stringOf(text).replace(/<at\s+id=(ou_[A-Za-z0-9_-]+)\s*><\/at>/g, (match, openId) => {
+    return stringOf(text).replace(/<at\s+id=([A-Za-z0-9_-]+)\s*><\/at>/g, (match, openId) => {
+      if (openId === 'all') return '@所有人';
       const name = names.get(openId);
       return name ? `@${name}` : `@${openId}`;
     });
@@ -564,6 +552,12 @@ export class UserMonitorManager {
       const eligible = [];
       const skipped = [];
       const storedById = new Map(messages.map((message) => [message.messageId, message]));
+      // 成员姓名表每轮只取一次，供刷新比对和渲染共用。
+      let names = null;
+      const namesOf = async () => {
+        names ??= await this.#namesFor(chat.chatId, accessToken);
+        return names;
+      };
       for (const item of result.items) {
         if (!item.messageId) continue;
         const time = messageTime(item);
@@ -571,7 +565,7 @@ export class UserMonitorManager {
         // 卡片在原地刷新：同一个 message_id 出现新文本时更新旧记录，不新增未读。
         const existing = storedById.get(item.messageId);
         if (existing) {
-          const nextText = this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, await this.#namesFor(chat.chatId, accessToken));
+          const nextText = this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, await namesOf());
           if (nextText && nextText !== existing.text) {
             eligible.push({ item, time, updateOf: item.messageId, nextText });
           }
@@ -592,10 +586,7 @@ export class UserMonitorManager {
         if (eligible.length >= MAX_MESSAGES_PER_POLL) break;
       }
 
-      let names = new Map();
-      if (eligible.some(({ item }) => !item.senderName)) {
-        names = await this.#namesFor(chat.chatId, accessToken);
-      }
+      const roster = names ?? (eligible.some(({ item }) => !item.senderName) ? await namesOf() : new Map());
 
       let cursorTimeMs = current.cursorTimeMs;
       let cursorMessageId = current.cursorMessageId ?? null;
@@ -613,11 +604,11 @@ export class UserMonitorManager {
         } else {
           const entry = {
             messageId: item.messageId,
-            senderName: item.senderName || names.get(item.senderOpenId)
+            senderName: item.senderName || roster.get(item.senderOpenId)
               || (item.senderType === 'app' ? '机器人' : ''),
             senderOpenId: item.senderOpenId ?? '',
             createTime: item.createTime ?? new Date(time).toISOString(),
-            text: this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, names),
+            text: this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, roster),
             read: false,
           };
           // 同一发送者的上一条临时状态被这条取代，直接丢掉，避免重复未读。

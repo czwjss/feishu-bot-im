@@ -261,7 +261,6 @@ var API = {
   userMonitorEnable: "user.monitor.enable",
   userMonitorPoll: "user.monitor.poll",
   userMonitorChatSet: "user.monitor.chat.set",
-  userMonitorDrafts: "user.monitor.drafts",
   userMonitorDraftSend: "user.monitor.draft.send",
   userMonitorDraftIgnore: "user.monitor.draft.ignore",
   userMonitorInbox: "user.monitor.inbox",
@@ -608,8 +607,7 @@ function MonitorPanel({ connection }) {
       const value = await rpc(connection, API.userMonitorStatus, {});
       setMonitor(value);
       setError(null);
-      const inbox = await rpc(connection, API.userMonitorDrafts, {}).catch(() => null);
-      if (inbox) setDrafts(Array.isArray(inbox.drafts) ? inbox.drafts : []);
+      setDrafts(Array.isArray(value?.drafts) ? value.drafts : []);
       return value;
     } catch (failure) {
       setError(failure?.message ?? String(failure));
@@ -630,9 +628,10 @@ function MonitorPanel({ connection }) {
     setError(null);
     try {
       const value = await operation();
-      if (value) setMonitor(value);
-      const inbox = await rpc(connection, API.userMonitorDrafts, {}).catch(() => null);
-      if (inbox) setDrafts(Array.isArray(inbox.drafts) ? inbox.drafts : []);
+      if (value) {
+        setMonitor(value);
+        setDrafts(Array.isArray(value.drafts) ? value.drafts : []);
+      }
     } catch (failure) {
       setError(failure?.message ?? String(failure));
     } finally {

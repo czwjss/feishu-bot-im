@@ -322,7 +322,7 @@ try {
       statePath: join(dir5, 'monitor-state.json'),
     });
     await store5.load();
-    await store5.saveConfig({ enabled: false, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p' }] });
+    await store5.saveConfig({ enabled: true, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p' }] });
     await store5.saveState({
       chats: {
         [chatId]: {
@@ -337,20 +337,18 @@ try {
       },
     });
     const monitor5 = new UserMonitorManager({
-      auth: { async status() { return { authorization: { authorized: false } }; }, async requireAccessToken() { return 't'; } },
+      auth: {
+        async status() { return { authorization: { authorized: true, user: { openId: 'ou_self' } } }; },
+        async requireAccessToken() { return 't'; },
+      },
       store: store5,
       now: () => now,
+      listMessages: async () => ({ items: [], hasMore: false, pageToken: null }),
     });
-    monitor5.start();
-    monitor5.stop();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // 清理发生在每轮轮询，所以直接跑一轮即可。
+    await monitor5.pollOnce();
     const kept = store5.state.chats[chatId].messages.map((message) => message.messageId);
     assert.deepEqual(kept, ['om_keep', 'om_fresh'], 'stale transient status is pruned, fresh one stays');
-
-    // 每轮轮询也要自愈：即使启动时没清理到，下一轮也会丢掉。
-    await monitor5.pollOnce();
-    const afterPoll = store5.state.chats[chatId].messages.map((message) => message.messageId);
-    assert.ok(!afterPoll.includes('om_ack'), 'poll prunes stale transient entries');
   } finally {
     await rm(dir5, { recursive: true, force: true });
   }

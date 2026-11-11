@@ -18,8 +18,7 @@ const h = React.createElement;
           const value = await rpc(connection, API.userMonitorStatus, {});
           setMonitor(value);
           setError(null);
-          const inbox = await rpc(connection, API.userMonitorDrafts, {}).catch(() => null);
-          if (inbox) setDrafts(Array.isArray(inbox.drafts) ? inbox.drafts : []);
+          setDrafts(Array.isArray(value?.drafts) ? value.drafts : []);
           return value;
         } catch (failure) {
           setError(failure?.message ?? String(failure));
@@ -38,9 +37,10 @@ const h = React.createElement;
         setError(null);
         try {
           const value = await operation();
-          if (value) setMonitor(value);
-          const inbox = await rpc(connection, API.userMonitorDrafts, {}).catch(() => null);
-          if (inbox) setDrafts(Array.isArray(inbox.drafts) ? inbox.drafts : []);
+          if (value) {
+            setMonitor(value);
+            setDrafts(Array.isArray(value.drafts) ? value.drafts : []);
+          }
         } catch (failure) {
           setError(failure?.message ?? String(failure));
         } finally {
