@@ -10,5 +10,5 @@ export const inject = [];
 /** 旧版预设可能仍挂载该子插件；保留 no-op 以兼容已保存的预设。 */
 export async function apply(ctx) {
   const logger = typeof ctx.logger === 'function' ? ctx.logger('im-feishu-user') : null;
-  logger?.warn?.('[im-feishu] User identity tools are now mounted by the Host plugin; the preset sub-plugin is a no-op.');
+  logger?.warn?.('[im-feishu] 用户身份工具已由 Host 默认挂载，预设子插件已停用。');
 }
