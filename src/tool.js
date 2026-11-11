@@ -172,6 +172,7 @@ export function createMessagesTool({ list }) {
               additionalProperties: false,
               properties: {
                 messageId: { type: 'string' },
+                at: { type: 'number' },
                 time: { type: 'string' },
                 senderId: { type: 'string' },
                 senderName: { type: 'string' },
@@ -179,7 +180,7 @@ export function createMessagesTool({ list }) {
                 text: { type: 'string' },
                 threadId: { type: 'string' },
               },
-              required: ['messageId', 'time', 'senderId', 'senderName', 'type', 'text', 'threadId'],
+              required: ['messageId', 'at', 'time', 'senderId', 'senderName', 'type', 'text', 'threadId'],
             },
           },
         },

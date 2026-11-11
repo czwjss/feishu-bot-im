@@ -149,3 +149,24 @@ console.log('tool: 38 assertions passed');
   assert.ok(!tools[0].description.includes('授权用户本人的身份'), 'bot tools never claim the user identity');
 }
 console.log('feishu tool naming: 4 assertions passed');
+
+// 输出必须与运行时返回的字段一致，否则 Host 会拒绝工具结果。
+{
+  const tool = createMessagesTool({
+    list: async () => ({
+      chatId: 'oc_x', threadId: '', query: '', scanned: 1, matched: 1, hasMore: false, pageToken: '',
+      messages: [{
+        messageId: 'om_1', at: Date.now(), time: new Date().toISOString(),
+        senderId: 'ou_x', senderName: '同事', type: 'text', text: '你好', threadId: '',
+      }],
+    }),
+  });
+  const value = await tool.execute({});
+  const declared = Object.keys(tool.output.schema.properties.messages.items.properties);
+  for (const row of value.messages) {
+    for (const key of Object.keys(row)) {
+      assert.ok(declared.includes(key), `${key} must be declared in the output schema`);
+    }
+  }
+}
+console.log('feishu tool output schema: 8 assertions passed');
