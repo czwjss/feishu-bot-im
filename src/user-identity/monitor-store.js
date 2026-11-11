@@ -22,6 +22,7 @@ export const MAX_KEYWORDS = 10;
 export const MAX_DRAFTS = 20;
 export const DRAFT_TTL_MS = 30 * 60_000;
 export const TRIGGER_MODES = Object.freeze(['all', 'mention', 'keyword']);
+export const DEFAULT_POLL_INTERVAL_MS = 60_000;
 export const MIN_POLL_INTERVAL_MS = 5_000;
 export const MAX_POLL_INTERVAL_MS = 60_000;
 
@@ -87,7 +88,7 @@ export function normalizeMonitorConfig(value) {
     enabled: source.enabled === true,
     pollIntervalMs: Number.isFinite(interval)
       ? Math.min(MAX_POLL_INTERVAL_MS, Math.max(MIN_POLL_INTERVAL_MS, Math.trunc(interval)))
-      : 8_000,
+      : DEFAULT_POLL_INTERVAL_MS,
     chats: Object.freeze(chats),
   });
 }
