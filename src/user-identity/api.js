@@ -8,6 +8,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, resolve } from 'node:path';
 
 import { normalizeCardColor, noticeCard } from '../cards.js';
+import { interactiveTextOfContent } from '../message-text.js';
 import { FeishuApiError, describeApiCode } from './errors.js';
 
 export const FEISHU_API_ORIGIN = 'https://open.feishu.cn';
@@ -289,7 +290,8 @@ export function extractMessageText(item) {
     case 'sticker':
       return '[表情]';
     case 'interactive':
-      return '[卡片]';
+      // 卡片默认只拿到精简投影；调用方传 card_msg_content_type 时才拿到原始卡片。
+      return interactiveTextOfContent(content) || '[卡片]';
     case 'share_chat':
       return '[群名片]';
     case 'share_user':
@@ -340,6 +342,8 @@ export async function listMessages({
     container_id: containerId,
     page_size: size,
     sort_type: sort === 'asc' ? 'ByCreateTimeAsc' : 'ByCreateTimeDesc',
+    // 卡片默认返回精简投影；要原始卡片 JSON 才读得到正文。
+    card_msg_content_type: 'user_card_content',
   };
   const start = toEpochSeconds(startTime, 'startTime');
   const end = toEpochSeconds(endTime, 'endTime');

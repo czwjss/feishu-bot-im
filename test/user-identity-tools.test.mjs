@@ -181,3 +181,14 @@ function fakeFetch(handler) {
 }
 
 console.log('im-feishu user identity tools: 41 assertions passed');
+
+// 卡片消息读取原始卡片 JSON 后应展平为可读文本。
+import { extractMessageText } from '../src/user-identity/api.js';
+const cardText = extractMessageText({
+  msg_type: 'interactive',
+  body: { content: JSON.stringify({ title: { content: '报告' }, elements: [{ tag: 'markdown', content: '**发布完成**' }] }) },
+});
+assert.match(cardText, /报告/);
+assert.match(cardText, /发布完成/);
+assert.ok(!cardText.includes('[卡片]'), 'card text must not fall back to the placeholder');
+console.log('im-feishu user identity card text: 3 assertions passed');
