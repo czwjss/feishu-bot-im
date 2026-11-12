@@ -137,6 +137,7 @@ export function configPaths(config = {}) {
   const root = integrationDir(config);
   return {
     root,
+    home: resolve(config.dshHome ?? process.env.DSH_HOME ?? join(homedir(), '.dsh')),
     config: resolve(config.configPath ?? join(root, 'config.json')),
     state: (botId) => resolve(join(root, `state-${botId}.json`)),
   };

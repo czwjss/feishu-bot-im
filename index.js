@@ -142,11 +142,23 @@ export async function apply(ctx, config = {}) {
     },
   };
 
+  // Worker 未指定工作区时，跟随 DSH 的默认工作区，避免会话落在「未分组」。
+  const readDefaultWorkspaceId = async () => {
+    try {
+      const raw = JSON.parse(await readFile(join(paths.home, 'storages', 'workspace.json'), 'utf8'));
+      const id = raw?.global?.defaultWorkspaceId;
+      return typeof id === 'string' && id ? id : null;
+    } catch {
+      return null;
+    }
+  };
+
   const userMonitor = new UserMonitorManager({
     auth: userIdentityAuth,
     store: monitorStore,
     harness,
     sessionGuard,
+    defaultWorkspaceId: readDefaultWorkspaceId,
     logger,
   });
   installUserIdentityContributions(ctx, userIdentityAuth);

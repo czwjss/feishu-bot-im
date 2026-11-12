@@ -57,6 +57,7 @@ export class AutoReplyEngine {
   #setTimeout;
   #clearTimeout;
   #sessionGuard;
+  #defaultWorkspaceId;
   #debounceMs;
   #maxWaitMs;
   #timers = new Map();
@@ -70,6 +71,7 @@ export class AutoReplyEngine {
     setTimeout: setTimeoutImpl = setTimeout,
     clearTimeout: clearTimeoutImpl = clearTimeout,
     sessionGuard = null,
+    defaultWorkspaceId = null,
     debounceMs = BATCH_DEBOUNCE_MS,
     maxWaitMs = BATCH_MAX_WAIT_MS,
   } = {}) {
@@ -82,6 +84,7 @@ export class AutoReplyEngine {
     this.#setTimeout = setTimeoutImpl;
     this.#clearTimeout = clearTimeoutImpl;
     this.#sessionGuard = sessionGuard;
+    this.#defaultWorkspaceId = defaultWorkspaceId;
     this.#debounceMs = debounceMs;
     this.#maxWaitMs = maxWaitMs;
   }
@@ -195,7 +198,7 @@ export class AutoReplyEngine {
     ]);
   }
 
-  /** session.create 的目标：优先工作区 id，其次路径换 id，最后退回 cwd。 */
+  /** session.create 的目标：显式配置优先，否则落在默认工作区。 */
   async #workerTarget(chat) {
     const worker = this.#store.config.worker ?? {};
     const request = { agentPreset: chat.preset || worker.preset || DEFAULT_WORKER_PRESET };
@@ -205,9 +208,18 @@ export class AutoReplyEngine {
     }
     if (worker.workspacePath) {
       const workspaceId = await this.#harness.ensureWorkspace?.(worker.workspacePath).catch(() => null);
-      if (workspaceId) request.workspaceId = workspaceId;
-      else request.cwd = worker.workspacePath;
+      if (workspaceId) {
+        request.workspaceId = workspaceId;
+        return request;
+      }
+      request.cwd = worker.workspacePath;
+      return request;
     }
+    // 没配置时跟随 DSH 的默认工作区，避免会话落在「未分组」。
+    const fallback = await Promise.resolve(
+      typeof this.#defaultWorkspaceId === 'function' ? this.#defaultWorkspaceId() : this.#defaultWorkspaceId,
+    ).catch(() => null);
+    if (fallback) request.workspaceId = fallback;
     return request;
   }
 

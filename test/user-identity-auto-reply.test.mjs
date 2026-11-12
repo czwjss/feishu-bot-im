@@ -235,6 +235,37 @@ try {
   assert.equal(sessions.at(-1).workspaceId, 'ws_feishu', 'worker joins the configured workspace');
   assert.equal(store.state.chats[chatId].workerConfigKey, JSON.stringify(['ws_feishu', 'standard']));
 
+  // 7b) 未配置工作区时落到 DSH 默认工作区，而不是「未分组」
+  {
+    const fallbackStore = new MonitorStore({
+      configPath: join(dir, 'fallback-monitor.json'),
+      statePath: join(dir, 'fallback-state.json'),
+    });
+    await fallbackStore.load();
+    await fallbackStore.saveConfig({ enabled: true, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all', replyMode: 'auto' }] });
+    const created = [];
+    const fallbackEngine = new AutoReplyEngine({
+      store: fallbackStore,
+      harness: { async createSession(input) { created.push(input); return 'sess-default-ws'; }, async prompt() {} },
+      defaultWorkspaceId: () => 'ws_default',
+      now: clock.now,
+      setTimeout: clock.setTimeout.bind(clock),
+      clearTimeout: clock.clearTimeout.bind(clock),
+    });
+    await fallbackStore.saveState({
+      chats: {
+        [chatId]: {
+          cursorTimeMs: clock.now(),
+          seen: [],
+          messages: [userMessage('om_default_ws', '默认工作区')],
+          batch: { messageIds: ['om_default_ws'], firstAt: clock.now(), lastAt: clock.now() },
+        },
+      },
+    });
+    assert.ok(await fallbackEngine.flush({ ...fallbackStore.config.chats[0] }));
+    assert.equal(created[0].workspaceId, 'ws_default', 'worker joins the default workspace when unset');
+  }
+
   // 8) 归档的 Worker 会被换掉
   const archived = new Set([store.state.chats[chatId].sessionId]);
   const guarded = new AutoReplyEngine({
@@ -275,4 +306,4 @@ try {
   await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-console.log('user identity auto reply: 32 assertions passed');
+console.log('user identity auto reply: 34 assertions passed');

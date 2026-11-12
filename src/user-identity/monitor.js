@@ -55,6 +55,7 @@ export class UserMonitorManager {
     store,
     harness = null,
     sessionGuard = null,
+    defaultWorkspaceId = null,
     autoReply = null,
     logger = null,
     listMessages: listMessagesImpl = listMessages,
