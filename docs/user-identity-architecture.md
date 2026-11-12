@@ -2,7 +2,7 @@
 
 > 可视化架构图：[user-identity-architecture.html](user-identity-architecture.html)
 
-> 历史分析快照（基线：`v0.4.1` / `dfddda4`）。当前实现已经提交；`feishu_avatar_*` 工具现由 Host 默认注册，旧预设子插件为 no-op。scope/RPC/token 策略以 [user-identity.md](user-identity.md) 和 [feishu-scopes.md](feishu-scopes.md) 为准。
+> 历史分析快照（基线：`v0.4.1` / `dfddda4`）。当前实现已经提交；`feishu_avatar_*` 工具现由 Host 默认注册，插件不再提供预设。scope/RPC/token 策略以 [user-identity.md](user-identity.md) 和 [feishu-scopes.md](feishu-scopes.md) 为准。
 
 ## 1. 本地变更快照
 
@@ -146,7 +146,7 @@ flowchart LR
   end
 
   subgraph Preset[Agent 预设：我的飞书分身]
-    Tools[user-identity 子插件\nfeishu_avatar_* 工具]
+    Tools[Host 默认注册\nfeishu_avatar_* 工具]
   end
 
   subgraph Files[本地数据]
@@ -329,7 +329,7 @@ resolveIdentityApp()
 ```text
 方向：已并入飞书机器人产品
 Host：设置、OAuth、token、RPC
-Preset：user-identity 子插件，仅注册 feishu_avatar_* 工具
+Host：默认注册 feishu_avatar_* 工具，无需预设
 OAuth：Device Flow，无需 redirect URI
 问题：不是功能没做，而是 Host 与 Preset 状态没有收敛成单一来源
 ```

@@ -66,15 +66,7 @@ POST accounts.feishu.cn/oauth/v3/token
 ## 3. 默认挂载
 
 `feishu_avatar_*` 工具由 Host 的 `feishu-bot-im` 插件全局注册，**默认即挂载**，
-不需要修改任何 Agent 预设。
-
-旧版本要求挂载的子插件：
-
-```text
-@czwjss/feishu-bot-im/user-identity
-```
-
-现在保留为兼容 no-op；已有预设不必删除，也不会重复注册工具。
+不需要修改任何 Agent 预设，插件也不提供预设。
 
 ## 4. 工具
 

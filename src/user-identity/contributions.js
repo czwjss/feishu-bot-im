@@ -3,7 +3,7 @@
  *
  * 规则文案统一在 `src/policy.js` 的 FEISHU_POLICY 里，由 Host 注册一次，
  * 机器人和分身共用，这里不再单独注册 policy section。
- * Host 默认调用，因此不需要在 Agent 预设里再挂 `./user-identity` 子插件。
+ * Host 默认调用，因此不需要在 Agent 预设里再挂任何子插件。
  */
 import { appendFile } from 'node:fs/promises';
 import { homedir } from 'node:os';

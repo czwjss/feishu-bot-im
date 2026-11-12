@@ -7,10 +7,7 @@
     ".": "./index.js",
     "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
-    "./icon": "./icon.svg",
-    "./user-identity": "./src/user-identity/index.js",
-    "./user-identity/icon": "./src/user-identity/icon.svg",
-    "./user-identity/locale/*.json": "./src/user-identity/locale/*.json"
+    "./icon": "./icon.svg"
   },
   "files": [
     "index.js",

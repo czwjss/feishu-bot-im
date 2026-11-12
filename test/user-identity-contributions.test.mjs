@@ -42,9 +42,4 @@ assert.deepEqual(tools.map((tool) => tool.name), [
 assert.equal(sections.length, 0, 'no extra prompt section is registered');
 console.log('user identity contributions: 16 assertions passed');
 
-const preset = await import('../src/user-identity/index.js');
-assert.deepEqual(preset.inject, []);
-const warnings = [];
-await preset.apply({ logger: () => ({ warn: (message) => warnings.push(message) }) });
-assert.match(warnings[0], /Host/);
-console.log('user identity legacy preset: 3 assertions passed');
+console.log('user identity tools only: 16 assertions passed');

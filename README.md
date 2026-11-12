@@ -67,8 +67,7 @@ feishu_avatar_me / feishu_avatar_messages / feishu_avatar_send
 ```
 
 这些工具由 Host 的 `feishu-bot-im` 插件**默认注册**，和其他 Host 工具一样
-无需修改 Agent 预设。旧预设里的 `@czwjss/feishu-bot-im/user-identity`
-子插件仍可保留，但已经是 no-op，不会重复注册。
+无需修改 Agent 预设；插件不提供预设。
 
 配置步骤、权限清单和错误码见 [docs/user-identity.md](docs/user-identity.md)。
 监听与自动回复的设计见 [docs/user-message-monitor-design.md](docs/user-message-monitor-design.md)，机器人侧入站流程见 [docs/bot-inbound-flow.html](docs/bot-inbound-flow.html)。
