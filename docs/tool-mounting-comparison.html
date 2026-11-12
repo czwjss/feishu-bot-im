@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>飞书分身 Worker 工具挂载方式对比</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #16181d;
+    --sub: #5b6572;
+    --line: #dfe3e8;
+    --global: #8a93a3;
+    --global-soft: #eef0f3;
+    --when: #ff8800;
+    --when-soft: #fff3e6;
+    --scope: #00b96b;
+    --scope-soft: #e6f9ef;
+    --preset: #3370ff;
+    --preset-soft: #eaf1ff;
+    --code: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 24px 80px; background: var(--bg); color: var(--ink);
+    font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  h1 { font-size: 25px; margin: 0 0 6px; letter-spacing: -0.3px; }
+  .lead { color: var(--sub); margin: 0 0 8px; }
+  .sub-lead { color: var(--sub); font-size: 13px; margin: 0 0 28px; }
+  h2 { font-size: 17px; margin: 36px 0 14px; }
+  h3 { font-size: 14px; margin: 0 0 6px; }
+  .cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .cards { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px 18px 14px; border-top: 3px solid var(--global);
+  }
+  .card.a { border-top-color: var(--global); }
+  .card.b { border-top-color: var(--when); }
+  .card.c { border-top-color: var(--scope); box-shadow: 0 0 0 2px var(--scope-soft); }
+  .card.d { border-top-color: var(--preset); }
+  .badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; margin-left: 8px; vertical-align: 2px; }
+  .a .badge { background: var(--global-soft); color: #4d5666; }
+  .b .badge { background: var(--when-soft); color: #a85a00; }
+  .c .badge { background: var(--scope-soft); color: #007a46; }
+  .d .badge { background: var(--preset-soft); color: #1a4fbd; }
+  .desc { color: var(--sub); font-size: 12.5px; margin: 4px 0 12px; }
+  .stack { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .layer {
+    border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px;
+    font-size: 12.5px; background: #fbfcfd; display: flex; justify-content: space-between; gap: 10px;
+  }
+  .layer .who { color: var(--sub); font-size: 11.5px; }
+  .layer.hot { background: var(--scope-soft); border-color: #bfe8d2; }
+  .layer.dim { opacity: .55; }
+  .layer .tool { font-family: var(--code); font-size: 11.5px; }
+  ul.tight { margin: 6px 0 0; padding-left: 18px; }
+  ul.tight li { margin: 2px 0; font-size: 12.5px; color: var(--sub); }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 13px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #f9fafb; font-size: 12.5px; color: var(--sub); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  td.good { color: #007a46; font-weight: 600; }
+  td.mid { color: #a85a00; font-weight: 600; }
+  td.bad { color: #c0392b; font-weight: 600; }
+  .flow { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+  .step { display: grid; grid-template-columns: 30px 1fr; gap: 12px; align-items: start; padding-bottom: 10px; }
+  .num {
+    width: 24px; height: 24px; border-radius: 7px; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; color: #fff; background: var(--scope);
+  }
+  .step .title { font-weight: 600; }
+  .step .meta { color: var(--sub); font-size: 12.5px; }
+  .arrow { color: #b8c0cc; font-size: 15px; margin: -6px 0 4px 12px; }
+  code {
+    font-family: var(--code); font-size: 12px; background: #f1f3f6;
+    padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line);
+  }
+  .note {
+    background: #fffdf5; border: 1px solid #f0e0b8; border-radius: 12px;
+    padding: 14px 16px; font-size: 13px; color: #6b5417;
+  }
+  .note strong { color: #4a3908; }
+  .verdict {
+    background: var(--scope-soft); border: 1px solid #bfe8d2; border-radius: 12px;
+    padding: 14px 16px; font-size: 13px;
+  }
+  .foot { color: var(--sub); font-size: 12px; margin-top: 28px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>飞书分身 Worker 的工具挂载方式</h1>
+  <p class="lead">同一个目标：<code>feishu_avatar_reply</code> / <code>feishu_avatar_skip</code> 只在自动回复的 Worker 会话里存在。</p>
+  <p class="sub-lead">四种可行做法，按「实现成本 → 隔离精度」排列。</p>
+
+  <h2>四种做法各自的工具落点</h2>
+  <div class="cards">
+
+    <section class="card a">
+      <h3>A · 全局注册<span class="badge">最省事</span></h3>
+      <p class="desc">注册进 Host 的 tools 注册表，所有 Agent 都能看到。</p>
+      <div class="stack">
+        <div class="layer"><span>Host registry</span><span class="who">reply / skip</span></div>
+        <div class="layer"><span>你的主会话</span><span class="tool">看得见 ✗ 不该有</span></div>
+        <div class="layer"><span>Worker 会话</span><span class="tool">看得见</span></div>
+        <div class="layer"><span>任意子 Agent</span><span class="tool">看得见 ✗</span></div>
+      </div>
+      <ul class="tight">
+        <li>零时序问题，代码最短</li>
+        <li>工具会污染所有会话的提示词</li>
+      </ul>
+    </section>
+
+    <section class="card b">
+      <h3>B · 全局注册 + 条件<span class="badge">上一版</span></h3>
+      <p class="desc"><code>register(def, { when })</code>，每个模型步骤按 <code>agent</code> 求值。</p>
+      <div class="stack">
+        <div class="layer"><span>Host registry</span><span class="who">reply / skip + when 条件</span></div>
+        <div class="layer"><span>你的主会话</span><span class="tool">when=false → 不可见</span></div>
+        <div class="layer hot"><span>Worker 会话</span><span class="tool">when=true → 可见</span></div>
+        <div class="layer"><span>任意子 Agent</span><span class="tool">when=false → 不可见</span></div>
+      </div>
+      <ul class="tight">
+        <li>DSH 官方支持的条件工具</li>
+        <li>可见性依赖插件状态文件，状态坏了 Worker 就瞎</li>
+      </ul>
+    </section>
+
+    <section class="card c">
+      <h3>C · Agent 作用域<span class="badge">当前</span></h3>
+      <p class="desc">拿到 Worker 自己的 <code>agent.ctx</code>，把工具注册进它的作用域。</p>
+      <div class="stack">
+        <div class="layer"><span>Host registry</span><span class="who">只有通用工具</span></div>
+        <div class="layer"><span>你的主会话</span><span class="tool">看不到</span></div>
+        <div class="layer hot"><span>Worker 会话 scope</span><span class="tool">reply / skip 归它所有</span></div>
+        <div class="layer"><span>任意子 Agent</span><span class="tool">看不到</span></div>
+      </div>
+      <ul class="tight">
+        <li>Agent 销毁，注册自动回收</li>
+        <li>需要等 Agent 就绪，多一层时序</li>
+      </ul>
+    </section>
+
+    <section class="card d">
+      <h3>D · 预设作用域<span class="badge">最正统</span></h3>
+      <p class="desc">单独做一个 Worker 预设，工具由预设里的插件注册。</p>
+      <div class="stack">
+        <div class="layer"><span>Host registry</span><span class="who">只有通用工具</span></div>
+        <div class="layer"><span>你的主会话</span><span class="tool">看不到</span></div>
+        <div class="layer hot"><span>worker 预设 → 所有 Worker</span><span class="tool">reply / skip</span></div>
+        <div class="layer"><span>其他预设</span><span class="tool">看不到</span></div>
+      </div>
+      <ul class="tight">
+        <li>声明式，配置里就能看懂</li>
+        <li>要拆模块 + 预设包，成本最高</li>
+      </ul>
+    </section>
+
+  </div>
+
+  <h2>对比</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>维度</th>
+        <th>A 全局</th>
+        <th>B 全局 + when</th>
+        <th>C Agent 作用域</th>
+        <th>D 预设作用域</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>隔离精度</td>
+        <td class="bad">无</td>
+        <td class="mid">按 Agent</td>
+        <td class="good">按 Agent 实例</td>
+        <td class="good">按预设分组</td>
+      </tr>
+      <tr>
+        <td>其他会话提示词开销</td>
+        <td class="bad">有（schema 常驻）</td>
+        <td class="good">无</td>
+        <td class="good">无</td>
+        <td class="good">无</td>
+      </tr>
+      <tr>
+        <td>依赖插件运行态</td>
+        <td class="good">否</td>
+        <td class="bad">是（状态文件）</td>
+        <td class="mid">是（会话 id 判定）</td>
+        <td class="good">否</td>
+      </tr>
+      <tr>
+        <td>时序要求</td>
+        <td class="good">无</td>
+        <td class="good">无</td>
+        <td class="mid">等 Agent 就绪</td>
+        <td class="good">无</td>
+      </tr>
+      <tr>
+        <td>回收方式</td>
+        <td>插件卸载时</td>
+        <td class="mid">条件翻转 / 插件卸载</td>
+        <td class="good">Agent 销毁自动回收</td>
+        <td class="good">预设卸载</td>
+      </tr>
+      <tr>
+        <td>插件卸载安全</td>
+        <td class="good">简单</td>
+        <td class="good">简单</td>
+        <td class="mid">需逐个 try/catch</td>
+        <td class="good">简单</td>
+      </tr>
+      <tr>
+        <td>实现规模</td>
+        <td class="good">约 10 行</td>
+        <td class="mid">约 20 行</td>
+        <td class="mid">约 80 行</td>
+        <td class="bad">新模块 + 预设包</td>
+      </tr>
+      <tr>
+        <td>出事时排查难度</td>
+        <td class="good">低</td>
+        <td class="mid">中（要看状态）</td>
+        <td class="mid">中（要看时序）</td>
+        <td class="good">低</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>当前实现的实际路径</h2>
+  <div class="flow">
+    <div class="step"><div class="num">1</div><div>
+      <div class="title">批次攒够，准备派发</div>
+      <div class="meta">monitor 把 messages 交给 AutoReplyEngine</div>
+    </div></div>
+    <div class="arrow">↓</div>
+
+    <div class="step"><div class="num">2</div><div>
+      <div class="title">确认 Worker 会话可用</div>
+      <div class="meta">归档 / 不存在 / epoch 不匹配 → 新建会话</div>
+    </div></div>
+    <div class="arrow">↓</div>
+
+    <div class="step"><div class="num">3</div><div>
+      <div class="title">等待 Agent 就绪</div>
+      <div class="meta"><code>ctx.agents.get(sessionId)</code> 轮询，最多 3 秒</div>
+    </div></div>
+    <div class="arrow">↓</div>
+
+    <div class="step"><div class="num">4</div><div>
+      <div class="title">挂载决策工具</div>
+      <div class="meta"><code>agent.ctx.tools.register(reply / skip)</code>，按会话去重</div>
+    </div></div>
+    <div class="arrow">↓</div>
+
+    <div class="step"><div class="num">5</div><div>
+      <div class="title">投递任务</div>
+      <div class="meta">prompt 里带会话信息、这批消息、批次令牌</div>
+    </div></div>
+    <div class="arrow">↓</div>
+
+    <div class="step"><div class="num">6</div><div>
+      <div class="title">Worker 决策</div>
+      <div class="meta">只认 reply / skip 两种调用；超时 180 秒放弃</div>
+    </div></div>
+    <div class="arrow">↓</div>
+
+    <div class="step"><div class="num">7</div><div>
+      <div class="title">Host 发送</div>
+      <div class="meta">校验令牌、频率 → 以本人身份发送 → 标记已处理</div>
+    </div></div>
+  </div>
+
+  <h2>结论</h2>
+  <div class="verdict">
+    <p><strong>C 是当前最合适的折中。</strong>隔离精度已经到「只有 Worker 能看见」，实现成本在一个文件里可控，不需要拆预设包。</p>
+    <p style="margin-bottom:0">如果以后 Worker 长成「多工具助手」（比如还要读文档、查日程），再迁到 <strong>D 预设作用域</strong>：那时候工具清单本身就该由预设声明，而不是由 Host 插件临时挂。</p>
+  </div>
+
+  <div class="note" style="margin-top:16px">
+    <p style="margin-top:0"><strong>C 仍有三个真实风险，已做兜底：</strong></p>
+    <ul class="tight" style="color:#6b5417">
+      <li>Agent 就绪慢 → <code>ensure</code> 最多等 3 秒，超时就照常投递，Agent 创建事件到了再补挂；</li>
+      <li>插件卸载时作用域注册还在 → 逐个 <code>try/catch</code> 释放，失败只记日志；</li>
+      <li>Worker 会话被归档 → 派发前检查，命中就重建会话。</li>
+    </ul>
+  </div>
+
+  <p class="foot">对应提交：<code>9f7df35</code> 改为 Agent 作用域 · <code>b3b387c</code> 修复安装空转与卸载异常 · <code>a7f043e</code> 归档后重建</p>
+
+</div>
+</body>
+</html>
