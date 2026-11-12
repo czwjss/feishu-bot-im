@@ -638,20 +638,20 @@ offline_access
 - 触发规则（阶段 1 的 A）：私聊默认全收，群聊默认只收 @我 / 回复我，也可改成关键词模式；
 - 草稿确认（阶段 2 的 B）：`feishu_avatar_draft` 只创建草稿，用户在设置页点「发送」才以本人身份发出，30 分钟过期。
 
-### 消息状态：未读 / 已回复 / 已跳过
+### 消息状态：未读 / 已处理
 
-每条消息除 `read` 外还记录处理结果，避免「已自动回复」和「只是看过」混在一起：
+每条消息记录一个处理结果，避免「已自动处理」和「只是看过」混在一起：
 
 | 字段 | 含义 |
 |---|---|
-| `outcome` | `replied` / `skipped` / 空（未处理） |
-| `handledAt` | 自动处理时间 |
-| `replyMessageId` | 自动回复发出的消息 id |
+| `outcome` | `dispatched`（已派发给 Worker）/ 空（未处理） |
+| `handledAt` | 派发时间 |
 
-- 批次被自动处理（回复或跳过）后，消息立即 `read: true` 并写入 outcome，不再计入未读；
+- 批次派发成功后，消息立即 `read: true` 并写入 outcome，不再计入未读；
+- 派发失败（`session.prompt` 抛错）保留批次和未读，下一轮或「处理待办」会重试；
 - 手动「全部已读」只改 `read`，不改 outcome；
-- 设置页会话行显示 `已回复 N / 已跳过 M / 待处理 K`；
-- 「处理待办」按钮会把积压的批次立刻交给 Worker，不必等下一条消息触发。
+- 设置页会话行显示 `已处理 N / 待处理 K`；
+- 「处理待办」按钮把积压批次立刻交给 Worker，不必等下一条消息触发。
 
 ### Worker 会话归属：工作区分组与预设
 
@@ -665,34 +665,22 @@ offline_access
 - 预设按 `chat.preset → worker.preset → standard` 顺序取；
 - 每次派发会比对 `workerConfigKey`（工作区 + 预设），变了就重建 Worker 会话。
 
-### 决策记录：Worker 工具用 Agent 作用域挂载
-
-结论：`feishu_avatar_reply` / `feishu_avatar_skip` 注册到 Worker Agent 自己的
-`agent.ctx.tools.register(...)`，不写进预设。
-
-- 备选方案对比见 [tool-mounting-comparison.html](./tool-mounting-comparison.html)。
-- 没选预设作用域的原因是**预设之间无法继承或叠加**：Worker 需要复用 standard
-  预设里的其他能力，做成独立预设只能把整份插件列表复制一遍，后续两边漂移。
-- 已知代价：Worker 每轮多约 250 token；其他会话零开销。
-- 需要守住的三点：Agent 就绪后再注册、卸载时逐个 try/catch 释放、会话归档后重建。
-
 ### 自动回复（已实现，`replyMode: auto`）
 
 ```text
 新消息 → 按会话攒批（45s 防抖 / 最多 10 条 / 最长 3 分钟）
   → 派给该会话专属 DSH Worker 会话（默认 standard 预设）
-  → Worker 必须调用 feishu_avatar_reply(batchToken, text) 或 feishu_avatar_skip(batchToken, reason)
-  → Host 校验频率并以本人身份发送（优先回复原消息）
-  → 批次消息标记已处理，出站记录写入 outbox
+  → 派发成功即视为已处理：标记已读、清空批次
+  → Worker 需要回复时自己调用 feishu_avatar_send（chatId 用提示里给的）
 ```
 
-护栏：
+设计取舍：**不做 Host 侧校验，也不引入批次令牌或决策工具。**
 
-- 批次令牌与批次绑定，旧令牌的迟到决策直接拒绝；
-- 每会话每小时最多 20 条自动回复；
-- 只有机器人/应用消息的批次跳过，避免和机器人互相刷屏；
-- 决策 180 秒超时则放弃本批，消息保持未读，不发送任何内容；
-- 决策本身由 Worker 调工具完成，Host 不解析自由文本。
+- 没有 reply/skip 工具，Worker 复用全局的 `feishu_avatar_send`；
+- 没有令牌、pending、settle 状态机，插件在派发后不再跟踪这一批；
+- 批次号只写进提示词，帮模型识别重复，不做校验；
+- 只有机器人/应用消息的批次默认跳过；显式开启「含机器人」后十分钟内只放行一次，避免和机器人互相刷屏；
+- 代价：Worker 失败是静默的——消息已标记已处理，只能从日志看派发错误。
 
 已知限制：
 

@@ -36,7 +36,6 @@ assert.deepEqual(tools.map((tool) => tool.name), [
 tools.length = 0;
 sections.length = 0;
 installUserIdentityContributions(ctx, {}, {
-  isAutoReplySession: (sessionId) => sessionId === 'session-worker',
   async createDraft(input) {
     return { draftId: 'draft-1', chatId: input.chatId, status: 'pending', text: input.text };
   },
@@ -61,11 +60,14 @@ const created = await draftTool.execute({ chatId: 'oc_test', text: '好的' });
 assert.equal(created.draftId, 'draft-1');
 assert.equal(created.status, 'pending');
 
-// 决策工具与收件箱工具都不再全局注册。
-assert.equal(tools.some((tool) => tool.name === 'feishu_avatar_inbox'), false);
-assert.equal(tools.some((tool) => tool.name === 'feishu_avatar_reply'), false);
-assert.equal(tools.some((tool) => tool.name === 'feishu_avatar_skip'), false);
-console.log('user identity contributions: 24 assertions passed');
+// 只有四个通用工具，没有 Worker 专属工具。
+assert.deepEqual(tools.map((tool) => tool.name).sort(), [
+  'feishu_avatar_draft',
+  'feishu_avatar_me',
+  'feishu_avatar_messages',
+  'feishu_avatar_send',
+]);
+console.log('user identity contributions: 22 assertions passed');
 
 const preset = await import('../src/user-identity/index.js');
 assert.deepEqual(preset.inject, []);

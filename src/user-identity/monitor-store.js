@@ -5,7 +5,7 @@
  * 状态：`<dataDir>/monitor-state.json`
  *
  * 监听按会话保存游标、去重集合、最近消息和批次状态（有上限、0600）。
- * `watch` 只记录，`auto` 由 Host 把一批消息派给 Worker 会话并按其决策回复。
+ * `watch` 只记录，`auto` 把一批消息派给 Worker 会话后即视为已处理。
  */
 import { readFile } from 'node:fs/promises';
 
@@ -28,15 +28,11 @@ export const BATCH_DEBOUNCE_MS = 45_000;
 /** 批次最多等这么久，避免持续刷屏时一直不处理。 */
 export const BATCH_MAX_WAIT_MS = 3 * 60_000;
 export const BATCH_MAX_MESSAGES = 10;
-/** Worker 必须在这段时间内给出决策，否则本批放弃、消息保持未读。 */
-export const DECISION_TIMEOUT_MS = 180_000;
-/** 自动回复频率上限（每会话每小时）。 */
-export const AUTO_REPLY_HOURLY_LIMIT = 20;
 export const DEFAULT_WORKER_PRESET = 'standard';
 export const MAX_WORKER_PRESET = 40;
 export const MAX_OUTBOX = 20;
-/** 消息处理结果，用于区分「未读」和「已自动处理」。 */
-export const MESSAGE_OUTCOMES = Object.freeze(['replied', 'skipped']);
+/** 消息处理结果：批次已派发给 Worker，后续不再由插件跟踪。 */
+export const MESSAGE_OUTCOMES = Object.freeze(['dispatched']);
 export const DEFAULT_POLL_INTERVAL_MS = 60_000;
 export const MIN_POLL_INTERVAL_MS = 5_000;
 export const MAX_POLL_INTERVAL_MS = 60_000;
@@ -140,7 +136,6 @@ export function normalizeMonitorMessage(value) {
     read: source.read === true || outcome !== '',
     outcome,
     handledAt: cleanTime(source.handledAt),
-    replyMessageId: cleanString(source.replyMessageId) || null,
   });
 }
 
@@ -219,7 +214,6 @@ export function normalizeMonitorState(value) {
       cursorMessageId: cleanString(entry.cursorMessageId) || null,
       messages: Object.freeze(messages),
       sessionId: cleanString(entry.sessionId) || null,
-      sessionEpoch: cleanString(entry.sessionEpoch) || null,
       workerConfigKey: cleanString(entry.workerConfigKey) || null,
       batch: Object.freeze({
         messageIds: Object.freeze(pendingIds),

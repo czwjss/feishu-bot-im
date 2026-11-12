@@ -94,8 +94,8 @@
 <div class="wrap">
 
   <h1>飞书分身 Worker 的工具挂载方式</h1>
-  <p class="lead">同一个目标：<code>feishu_avatar_reply</code> / <code>feishu_avatar_skip</code> 只在自动回复的 Worker 会话里存在。</p>
-  <p class="sub-lead">四种可行做法，按「实现成本 → 隔离精度」排列。</p>
+  <p class="lead">该对比用于「Worker 需要专属工具」的场景。当前实现已经不使用 Worker 专属工具：<code>feishu_avatar_reply</code> / <code>feishu_avatar_skip</code> 已删除，Worker 直接用全局的 <code>feishu_avatar_send</code>。</p>
+  <p class="sub-lead">四种可行做法，按「实现成本 → 隔离精度」排列，留档备查。</p>
 
   <h2>四种做法各自的工具落点</h2>
   <div class="cards">
@@ -279,8 +279,8 @@
 
   <h2>结论</h2>
   <div class="verdict">
-    <p><strong>C 是当前最合适的折中。</strong>隔离精度已经到「只有 Worker 能看见」，实现成本在一个文件里可控，不需要拆预设包。</p>
-    <p style="margin-bottom:0">如果以后 Worker 长成「多工具助手」（比如还要读文档、查日程），再迁到 <strong>D 预设作用域</strong>：那时候工具清单本身就该由预设声明，而不是由 Host 插件临时挂。</p>
+    <p><strong>当前结论：不需要 Worker 专属工具，A（全局注册）就够。</strong>Worker 复用 <code>feishu_avatar_send</code>，插件在派发后不再跟踪批次。</p>
+    <p style="margin-bottom:0">如果以后确实要给 Worker 独立能力（例如专用审批工具），再按成本从低到高选 B / C / D；多工具时优先 D 预设作用域。</p>
   </div>
 
   <div class="note" style="margin-top:16px">

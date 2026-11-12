@@ -216,8 +216,7 @@ var MESSAGES = Object.freeze({
   "\u5F85\u5904\u7406": "pending",
   "\u4E0A\u6B21\u81EA\u52A8\u56DE\u590D": "last auto",
   "\u5904\u7406\u5F85\u529E": "Flush pending",
-  "\u5DF2\u56DE\u590D": "replied",
-  "\u5DF2\u8DF3\u8FC7": "skipped"
+  "\u5DF2\u5904\u7406": "handled"
 });
 function dictionaries() {
   const zh = {};
@@ -719,8 +718,7 @@ function MonitorPanel({ connection }) {
         { style: S.hint },
         `${chat.chatMode === "p2p" ? t("\u79C1\u804A", "Direct") : t("\u7FA4\u804A", "Group")} \xB7 ${chat.chatId}`,
         chat.pendingBatch ? ` \xB7 ${t("\u5F85\u5904\u7406", "pending")} ${chat.pendingBatch}` : "",
-        chat.replied ? ` \xB7 ${t("\u5DF2\u56DE\u590D", "replied")} ${chat.replied}` : "",
-        chat.skipped ? ` \xB7 ${t("\u5DF2\u8DF3\u8FC7", "skipped")} ${chat.skipped}` : "",
+        chat.handled ? ` \xB7 ${t("\u5DF2\u5904\u7406", "handled")} ${chat.handled}` : "",
         chat.lastAutoReplyAt ? ` \xB7 ${t("\u4E0A\u6B21\u81EA\u52A8\u56DE\u590D", "last auto")} ${formatTime(chat.lastAutoReplyAt)}` : "",
         chat.lastError ? h2("span", { style: { color: "var(--dsw-alias-state-error-primary)" } }, ` \xB7 ${chat.lastError}`) : null
       )

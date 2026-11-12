@@ -17,10 +17,7 @@ import {
 export const ME_TOOL_NAME = 'feishu_avatar_me';
 export const MESSAGES_TOOL_NAME = 'feishu_avatar_messages';
 export const SEND_TOOL_NAME = 'feishu_avatar_send';
-export const INBOX_TOOL_NAME = 'feishu_avatar_inbox';
 export const DRAFT_TOOL_NAME = 'feishu_avatar_draft';
-export const REPLY_TOOL_NAME = 'feishu_avatar_reply';
-export const SKIP_TOOL_NAME = 'feishu_avatar_skip';
 
 /**
  * 执行一次用户身份 API 调用；token 过期时刷新后重试一次。
@@ -335,108 +332,6 @@ export function createSendTool({ auth, fetchImpl }) {
   });
 }
 
-/**
- * 监听收件箱：读取已记录的飞书新消息（轮询产生，不调用模型）。
- * 默认只取未读并标记已读；回复仍用 feishu_avatar_send。
- */
-/**
- * 收件箱工具保留实现但不注册：未读已经由监听的推送链路处理，
- * 模型侧再暴露一个查询入口会污染其他会话的上下文。
- */
-export function createInboxTool({ monitor }) {
-  return Object.freeze({
-    name: INBOX_TOOL_NAME,
-    description: '读取飞书分身监听到的新消息（本地收件箱）。默认只返回未读并标记已读；'
-      + '回复时用 feishu_avatar_send 以你本人身份发送。没有配置监听时返回空列表。',
-    parameters: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        chatId: {
-          type: 'string',
-          description: '只看某个会话（oc_…）；省略则返回所有监听会话。',
-        },
-        limit: {
-          type: 'integer',
-          minimum: 1,
-          maximum: 50,
-          default: 20,
-          description: '最多返回多少条，1–50，默认 20。',
-        },
-        unreadOnly: {
-          type: 'boolean',
-          default: true,
-          description: '只返回未读消息，默认 true。',
-        },
-        markRead: {
-          type: 'boolean',
-          default: true,
-          description: '返回后标记已读，避免重复处理，默认 true。',
-        },
-      },
-    },
-    output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          total: { type: 'integer' },
-          items: {
-            type: 'array',
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              properties: {
-                chatId: { type: 'string' },
-                chatName: { type: 'string' },
-                chatMode: { type: 'string' },
-                messageId: { type: 'string' },
-                senderName: { type: 'string' },
-                senderOpenId: { type: 'string' },
-                createTime: { type: 'string' },
-                text: { type: 'string' },
-              },
-              required: ['chatId', 'messageId', 'text'],
-            },
-          },
-        },
-        required: ['total', 'items'],
-      },
-      render: (_args, value) => [{
-        type: 'text',
-        text: value.total === 0
-          ? '收件箱没有新消息'
-          : `${value.total} 条新消息：${value.items.slice(0, 5).map((item) => `${item.chatName || item.chatId} · ${item.senderName || '未知'}：${item.text.slice(0, 40)}`).join('；')}`,
-      }],
-    },
-    async execute(args) {
-      if (!monitor) return { total: 0, items: [] };
-      const result = await monitor.inbox({
-        chatId: typeof args?.chatId === 'string' ? args.chatId : '',
-        limit: args?.limit,
-        unreadOnly: args?.unreadOnly !== false,
-        markRead: args?.markRead !== false,
-      });
-      return {
-        total: result.total,
-        items: result.items.map((item) => ({
-          chatId: item.chatId,
-          chatName: item.chatName ?? '',
-          chatMode: item.chatMode ?? '',
-          messageId: item.messageId,
-          senderName: item.senderName ?? '',
-          senderOpenId: item.senderOpenId ?? '',
-          createTime: item.createTime ?? '',
-          text: item.text ?? '',
-        })),
-      };
-    },
-  });
-}
-
-/**
- * 提交回复草稿：不会发送，等用户在设置页确认后才以本人身份发出。
- */
 export function createDraftTool({ monitor }) {
   return Object.freeze({
     name: DRAFT_TOOL_NAME,
@@ -502,90 +397,6 @@ ${value.text ?? ''}`,
   });
 }
 
-/**
- * 自动回复决策：Worker 处理完一批消息后调用，Host 负责发送。
- * 只在自动回复模式的任务里出现。
- */
-export function createReplyTool({ monitor }) {
-  return Object.freeze({
-    name: REPLY_TOOL_NAME,
-    description: '在自动回复任务中提交本批消息的回复，Host 会以你本人身份发送（优先回复原消息）。'
-      + 'token 必须是任务提示里给出的批次令牌；一次任务只调用一次。',
-    parameters: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        token: { type: 'string', description: '任务提示里给出的批次令牌。' },
-        text: { type: 'string', description: '回复正文，Markdown，最多 8000 字符。' },
-      },
-      required: ['token', 'text'],
-    },
-    output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          sent: { type: 'boolean' },
-          messageId: { type: 'string' },
-          handled: { type: 'integer' },
-        },
-        required: ['sent', 'handled'],
-      },
-      render: (_args, value) => [{
-        type: 'text',
-        text: value.sent
-          ? `已发送（${value.messageId || '无 id'}），处理 ${value.handled} 条消息`
-          : `未发送，处理 ${value.handled} 条消息`,
-      }],
-    },
-    async execute(args) {
-      const engine = monitor?.autoReply;
-      if (!engine) throw new Error('自动回复未启用');
-      const result = await engine.reply({ token: args?.token, text: args?.text });
-      return { sent: true, messageId: result.sentMessageId, handled: result.messageIds.length };
-    },
-  });
-}
-
-/** 自动回复决策：本批不需要回复。 */
-export function createSkipTool({ monitor }) {
-  return Object.freeze({
-    name: SKIP_TOOL_NAME,
-    description: '在自动回复任务中声明本批消息不需要回复（例如只是通知、已有人回答、与自己无关）。'
-      + 'token 必须是任务提示里给出的批次令牌。',
-    parameters: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        token: { type: 'string', description: '任务提示里给出的批次令牌。' },
-        reason: { type: 'string', description: '为什么不需要回复，简短一句。' },
-      },
-      required: ['token'],
-    },
-    output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          skipped: { type: 'boolean' },
-          handled: { type: 'integer' },
-        },
-        required: ['skipped', 'handled'],
-      },
-      render: (_args, value) => [{
-        type: 'text',
-        text: `本批不回复，处理 ${value.handled} 条消息`,
-      }],
-    },
-    async execute(args) {
-      const engine = monitor?.autoReply;
-      if (!engine) throw new Error('自动回复未启用');
-      const result = await engine.skip({ token: args?.token, reason: args?.reason });
-      return { skipped: true, handled: result.messageIds.length };
-    },
-  });
-}
-
 export function createUserIdentityTools({ auth, fetchImpl, monitor = null }) {
   const tools = [
     createMeTool({ auth, fetchImpl }),
@@ -593,7 +404,6 @@ export function createUserIdentityTools({ auth, fetchImpl, monitor = null }) {
     createSendTool({ auth, fetchImpl }),
   ];
   if (monitor) {
-    // 草稿给所有会话用；reply/skip 由 worker-tools.js 挂到 Worker 作用域。
     tools.push(createDraftTool({ monitor }));
   }
   return tools;

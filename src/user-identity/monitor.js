@@ -3,7 +3,7 @@
  *
  * 用户身份没有个人收件箱事件推送，因此监听器按会话轮询。
  * 新消息只落到本地收件箱（`monitor-state.json`，0600、有上限），
- * 由 `feishu_avatar_inbox` 工具交给 Agent，或直接回复。
+ * 由自动回复链路派发给 Worker 会话，或由草稿流程人工确认。
  * 回复仍走 `feishu_avatar_send`（用户本人身份），监听本身不写飞书。
  */
 import { chatMemberNames, getMessage, listChats, listMessages, replyCardMessage, sendCardMessage } from './api.js';
@@ -86,17 +86,13 @@ export class UserMonitorManager {
         ? new AutoReplyEngine({
           store,
           harness,
-          auth,
           sessionGuard,
-          sendCard: sendCardImpl,
-          replyCard: replyCardImpl,
           logger,
           now,
           setTimeout: setTimeoutImpl,
           clearTimeout: clearTimeoutImpl,
         })
         : null);
-    this.#autoReply?.setSelfOpenId?.('');
     this.#now = now;
     this.#setInterval = setIntervalImpl;
     this.#clearInterval = clearIntervalImpl;
@@ -173,8 +169,7 @@ export class UserMonitorManager {
       return {
         ...chat,
         unread,
-        replied: messages.filter((message) => message.outcome === 'replied').length,
-        skipped: messages.filter((message) => message.outcome === 'skipped').length,
+        handled: messages.filter((message) => message.outcome === 'dispatched').length,
         sessionId: entry.sessionId ?? null,
         pendingBatch: entry.batch?.messageIds?.length ?? 0,
         lastAutoReplyAt: (entry.outbox ?? []).filter((item) => item.source === 'auto').at(-1)?.at ?? null,
@@ -316,7 +311,7 @@ export class UserMonitorManager {
     const pending = this.#effectiveDrafts().filter((draft) => draft.status === 'pending').length;
     const draftNote = pending > 0 ? `另有 ${pending} 条待确认草稿。` : '';
     return `飞书分身收件箱有 ${total} 条未读：${detail}。${draftNote}`
-      + '用 feishu_avatar_inbox 查看；回复草稿用 feishu_avatar_draft 提交，等用户确认后再发。';
+      + '未读在设置页查看；回复草稿用 feishu_avatar_draft 提交，等用户确认后再发。';
   }
 
   /** 候选会话：群聊 + 最近私聊。 */
@@ -504,7 +499,6 @@ export class UserMonitorManager {
       }
       const auth = await this.#auth.status().catch(() => null);
       const selfOpenId = auth?.authorization?.user?.openId ?? '';
-      this.#autoReply?.setSelfOpenId?.(selfOpenId);
       for (const chat of this.#store.config.chats) {
         if (this.#disposed) break;
         await this.#pollChat(chat, accessToken, selfOpenId);

@@ -173,8 +173,7 @@ export const MESSAGES = Object.freeze({
   "待处理": "pending",
   "上次自动回复": "last auto",
   "处理待办": "Flush pending",
-  "已回复": "replied",
-  "已跳过": "skipped"
+  "已处理": "handled"
 });
 
 export function dictionaries() {

@@ -113,8 +113,7 @@ const h = React.createElement;
           h('div', { style: S.hint },
             `${chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group')} · ${chat.chatId}`,
             chat.pendingBatch ? ` · ${t('待处理', 'pending')} ${chat.pendingBatch}` : '',
-            chat.replied ? ` · ${t('已回复', 'replied')} ${chat.replied}` : '',
-            chat.skipped ? ` · ${t('已跳过', 'skipped')} ${chat.skipped}` : '',
+            chat.handled ? ` · ${t('已处理', 'handled')} ${chat.handled}` : '',
             chat.lastAutoReplyAt ? ` · ${t('上次自动回复', 'last auto')} ${formatTime(chat.lastAutoReplyAt)}` : '',
             chat.lastError ? h('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, ` · ${chat.lastError}`) : null)),
         h('select', {

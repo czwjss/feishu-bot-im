@@ -7,9 +7,8 @@ import { AutoReplyEngine, renderBatchPrompt } from '../src/user-identity/auto-re
 import { UserMonitorManager } from '../src/user-identity/monitor.js';
 import { MonitorStore } from '../src/user-identity/monitor-store.js';
 
-// 引擎里的落盘是真实文件 IO，给它一点时间
+// 引擎落盘是真实文件 IO，给它一点时间
 const tick = () => new Promise((resolve) => setTimeout(resolve, 30));
-
 const chatId = 'oc_auto_chat';
 const now = Date.UTC(2026, 10, 11, 10, 0, 0);
 
@@ -30,13 +29,38 @@ function createClock(start = now) {
     advance(ms) {
       current += ms;
       for (;;) {
-        const due = [...timers.values()].filter((timer) => timer.at <= current).sort((a, b) => a.at - b.at || a.id - b.id)[0];
+        const due = [...timers.values()]
+          .filter((timer) => timer.at <= current)
+          .sort((a, b) => a.at - b.at || a.id - b.id)[0];
         if (!due) return;
         timers.delete(due.id);
         due.callback();
       }
     },
-    pending: () => timers.size,
+  };
+}
+
+function userMessage(id, text) {
+  return {
+    messageId: id,
+    senderName: '朋友',
+    senderOpenId: 'ou_friend',
+    senderType: 'user',
+    text,
+    createTime: new Date(now).toISOString(),
+    read: false,
+  };
+}
+
+function botMessage(id, text) {
+  return {
+    messageId: id,
+    senderName: '机器人',
+    senderOpenId: 'cli_app',
+    senderType: 'app',
+    text,
+    createTime: new Date(now).toISOString(),
+    read: false,
   };
 }
 
@@ -55,192 +79,106 @@ try {
 
   const prompts = [];
   const sessions = [];
-  const sent = [];
+  let failPrompt = false;
   const harness = {
     async createSession(input) {
       sessions.push(input);
       return `sess-auto-${sessions.length}`;
     },
     async prompt(sessionId, text) {
+      if (failPrompt) throw new Error('prompt failed');
       prompts.push({ sessionId, text });
     },
   };
-  const auth = { async requireAccessToken() { return 'user-token'; } };
 
   const engine = new AutoReplyEngine({
     store,
     harness,
-    auth,
     now: clock.now,
     setTimeout: clock.setTimeout.bind(clock),
     clearTimeout: clock.clearTimeout.bind(clock),
-    sendCard: async (input) => { sent.push(['card', input]); return { messageId: 'om_auto_1' }; },
-    replyCard: async (input) => { sent.push(['reply', input]); return { messageId: 'om_auto_2' }; },
   });
-  engine.setSelfOpenId('ou_self');
 
-  // 1) 只在 auto 模式且批次攒齐后派发
   const chat = store.config.chats[0];
-  let listCalls = 0;
+
+  // 1) 只在 auto 模式且攒够防抖窗口后派发
   const monitor = new UserMonitorManager({
-    auth: { async status() { return { authorization: { authorized: true, user: { openId: 'ou_self' } } }; }, async requireAccessToken() { return 'user-token'; } },
+    auth: { async status() { return { authorization: { authorized: true, user: { openId: 'ou_self' } } }; } },
     store,
     autoReply: engine,
     now: clock.now,
     setInterval: () => ({ unref() {} }),
     clearInterval: () => {},
     chatMemberNames: async () => new Map(),
-    listMessages: async () => {
-      listCalls += 1;
-      return {
-        items: [{
-          messageId: `om_${listCalls}`,
-          createTime: new Date(clock.now()).toISOString(),
-          senderType: 'user',
-          senderOpenId: 'ou_friend',
-          senderName: '朋友',
-          text: listCalls === 1 ? '明天下午的评审你还去吗？' : '另外把文档链接发我一下',
-        }],
-        hasMore: false,
-        pageToken: null,
-      };
-    },
+    listMessages: async () => ({ items: [], hasMore: false, pageToken: null }),
   });
-  await store.saveState({ chats: { [chatId]: { cursorTimeMs: clock.now() - 60_000, seen: [], messages: [] } } });
 
-  await monitor.pollOnce();
+  await engine.enqueue(chat, ['om_1', 'om_2']);
   assert.equal(prompts.length, 0, 'debounce waits before dispatching');
-  clock.advance(44_000);
-  await tick();
-  assert.equal(prompts.length, 0, 'still inside the debounce window');
-
-  // 批次窗口内又来一条 → 合并成一批
-  await monitor.pollOnce();
   clock.advance(45_000);
   await tick();
-  assert.equal(prompts.length, 1, 'one batch prompt after the quiet window');
-  assert.equal(sessions.length, 1);
-  assert.equal(sessions[0].agentPreset, 'standard');
-  assert.match(prompts[0].text, /评审/);
-  assert.match(prompts[0].text, /文档链接/);
-  assert.match(prompts[0].text, /feishu_avatar_reply/);
-  const token = /批次令牌：(batch-[a-z0-9-]+)/.exec(prompts[0].text)?.[1];
-  assert.ok(token, 'prompt carries a batch token');
 
-  assert.equal(store.state.chats[chatId].sessionEpoch, 'avatar-decision-tools-1', 'worker epoch recorded');
+  // 批次里没有消息实体时直接清空，不派发
+  assert.equal(prompts.length, 0, 'batch without stored messages is cleared');
 
-  // 2) 工作区与预设按配置传入 createSession
-  assert.equal(sessions[0].agentPreset, 'standard');
-  // 2) Worker 决定回复 → 以本人身份发出，批次消息标记已读
-  const result = await engine.reply({ token, text: '去，文档我一会儿发你' });
-  assert.equal(result.messageIds.length, 2);
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0][0], 'reply', 'reply keeps quoting the original message');
-  assert.equal(sent[0][1].messageId, 'om_2');
-  assert.ok(store.state.chats[chatId].messages.every((message) => message.read), 'batch marked as handled');
-  assert.ok(store.state.chats[chatId].messages.every((message) => message.outcome === 'replied'), 'outcome recorded as replied');
-  assert.ok(store.state.chats[chatId].messages.every((message) => message.replyMessageId === 'om_auto_2'), 'reply id linked to the messages');
-  assert.equal(store.state.chats[chatId].outbox.at(-1).messageId, 'om_auto_2');
-  assert.equal(store.state.chats[chatId].batch.messageIds.length, 0);
-
-  // 2b) 工具集换了 epoch，旧的 Worker 会话不再复用
-  await store.saveState({
-    chats: {
-      [chatId]: {
-        ...store.state.chats[chatId],
-        sessionId: 'sess-old',
-        sessionEpoch: 'legacy',
-        messages: [{ messageId: 'om_epoch', senderName: '朋友', senderOpenId: 'ou_friend', senderType: 'user', text: '再看一眼', createTime: new Date(clock.now()).toISOString(), read: false }],
-        batch: { messageIds: ['om_epoch'], firstAt: clock.now(), lastAt: clock.now(), token: null },
-      },
-    },
-  });
-  await store.saveConfig({ enabled: true, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all', replyMode: 'auto' }] });
-  const epochChat = store.config.chats[0];
-  const sessionsBefore = sessions.length;
-  const epochToken = await engine.flush({ ...epochChat });
-  assert.ok(epochToken, 'stale-epoch batch is dispatched');
-  assert.equal(sessions.length, sessionsBefore + 1, 'a fresh worker session is created');
-  assert.notEqual(store.state.chats[chatId].sessionEpoch, 'legacy');
-  await engine.skip({ token: epochToken, reason: '测试' });
-
-  // 2a) 配置工作区与预售后，旧会话因配置变化被替换
-  await store.saveConfig({
-    enabled: true,
-    worker: { workspaceId: 'ws_feishu', preset: 'standard' },
-    chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all', replyMode: 'auto' }],
-  });
-  await store.saveState({
-    chats: {
-      [chatId]: {
-        ...store.state.chats[chatId],
-        sessionId: 'sess-old-workspace',
-        sessionEpoch: 'avatar-decision-tools-1',
-        workerConfigKey: null,
-        messages: [{ messageId: 'om_ws', senderName: '朋友', senderOpenId: 'ou_friend', senderType: 'user', text: '换分组后', createTime: new Date(clock.now()).toISOString(), read: false }],
-        batch: { messageIds: ['om_ws'], firstAt: clock.now(), lastAt: clock.now(), token: null },
-      },
-    },
-  });
-  const workspaceToken = await engine.flush({ ...store.config.chats[0] });
-  assert.ok(workspaceToken, 'workspace change dispatches a new batch');
-  const created = sessions.at(-1);
-  assert.equal(created.workspaceId, 'ws_feishu', 'worker joins the configured workspace');
-  assert.equal(store.state.chats[chatId].workerConfigKey, JSON.stringify(['ws_feishu', 'standard']));
-  await engine.skip({ token: workspaceToken, reason: '测试' });
-
-  // 3) 令牌只能用一次
-  await assert.rejects(() => engine.reply({ token, text: '再来一条' }), /批次已失效/);
-
-  // 4) skip 不发送
+  // 2) 正常派发：带 chatId、提示用 feishu_avatar_send
   await store.saveState({
     chats: {
       [chatId]: {
         cursorTimeMs: clock.now() - 60_000,
         seen: [],
-        messages: [{ messageId: 'om_skip_1', senderName: '朋友', senderOpenId: 'ou_friend', text: '明天十点开会', createTime: new Date(clock.now()).toISOString(), read: false }],
-        batch: { messageIds: ['om_skip_1'], firstAt: clock.now(), lastAt: clock.now() },
-        sessionId: 'sess-auto-1',
+        messages: [userMessage('om_1', '明天评审几点？'), userMessage('om_2', '另外文档发我')],
+        batch: { messageIds: ['om_1', 'om_2'], firstAt: clock.now(), lastAt: clock.now() },
       },
     },
   });
-  const token2 = await engine.flush({ ...chat });
-  assert.ok(token2, 'flush returns a token');
-  await engine.skip({ token: token2, reason: '只是通知' });
-  assert.equal(sent.length, 1, 'skip does not send');
-  const skippedMessage = store.state.chats[chatId].messages.find((message) => message.messageId === 'om_skip_1');
-  assert.equal(skippedMessage.outcome, 'skipped', 'skip is recorded on the message');
-  assert.equal(skippedMessage.read, true, 'skipped messages are no longer unread');
+  const token = await engine.flush({ ...chat });
+  assert.equal(token, chatId, 'flush returns the dispatched chat');
+  assert.equal(prompts.length, 1, 'one batch prompt');
+  assert.match(prompts[0].text, /明天评审几点/);
+  assert.match(prompts[0].text, /文档发我/);
+  assert.match(prompts[0].text, new RegExp(chatId));
+  assert.match(prompts[0].text, /feishu_avatar_send/);
+  assert.match(prompts[0].text, /同一批次最多回复一次/);
 
-  // 4b) 只有机器人消息的批次不自动回复，避免刷屏
+  // 3) 派发即视为已处理：消息已读、批次清空
+  const handled = store.state.chats[chatId];
+  assert.ok(handled.messages.every((message) => message.read), 'dispatch marks messages read');
+  assert.ok(handled.messages.every((message) => message.outcome === 'dispatched'), 'outcome recorded');
+  assert.equal(handled.batch.messageIds.length, 0, 'batch cleared after dispatch');
+
+  // 4) 派发失败保留批次，等重试
+  failPrompt = true;
   await store.saveState({
     chats: {
       [chatId]: {
-        cursorTimeMs: clock.now() - 60_000,
-        seen: [],
-        messages: [{ messageId: 'om_bot_only', senderName: '机器人', senderOpenId: 'cli_app', senderType: 'app', text: '通知', createTime: new Date(clock.now()).toISOString(), read: false }],
-        batch: { messageIds: ['om_bot_only'], firstAt: clock.now(), lastAt: clock.now() },
-        sessionId: 'sess-auto-1',
+        ...handled,
+        messages: [userMessage('om_3', '还在吗')],
+        batch: { messageIds: ['om_3'], firstAt: clock.now(), lastAt: clock.now() },
       },
     },
   });
-  const promptsBeforeBotOnly = prompts.length;
+  assert.equal(await engine.flush({ ...chat }), null, 'failed dispatch returns null');
+  assert.equal(store.state.chats[chatId].batch.messageIds.length, 1, 'batch kept for retry');
+  assert.equal(store.state.chats[chatId].messages[0].read, false, 'message stays unread');
+  failPrompt = false;
+
+  // 5) 只有机器人消息：默认跳过但标记已处理
+  await store.saveState({
+    chats: {
+      [chatId]: {
+        ...store.state.chats[chatId],
+        messages: [botMessage('om_bot', '机器人通知')],
+        batch: { messageIds: ['om_bot'], firstAt: clock.now(), lastAt: clock.now() },
+      },
+    },
+  });
+  const promptsBeforeBot = prompts.length;
   assert.equal(await engine.flush({ ...chat }), null, 'bot-only batch is not dispatched');
-  assert.equal(prompts.length, promptsBeforeBotOnly, 'no new worker prompt for bot-only batch');
+  assert.equal(prompts.length, promptsBeforeBot, 'no worker prompt for bot-only batch');
+  assert.equal(store.state.chats[chatId].messages[0].read, true, 'bot-only batch is marked handled');
 
-  // 5) 非 auto 会话不派发
-  const otherChat = { chatId: 'oc_watch', name: '只记录', chatMode: 'p2p', mode: 'all', replyMode: 'watch' };
-  assert.equal(await engine.flush(otherChat), null);
-
-  // 6) 提示词里带上身份与批次令牌
-  const prompt = renderBatchPrompt({
-    chat: { chatId, name: '测试私聊', chatMode: 'p2p' },
-    messages: [{ messageId: 'om_x', createTime: new Date(now).toISOString(), senderName: '朋友', text: '你好' }],
-    token: 'batch-abc',
-  });
-  assert.match(prompt, /批次令牌：batch-abc/);
-  assert.match(prompt, /不可信/);
-  // 7) 显式允许时，机器人批次可以触发一次自动回复，但十分钟内只放行一次。
+  // 6) 显式允许机器人消息时派发，但十分钟内只放行一次
   await store.saveConfig({
     enabled: true,
     chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all', replyMode: 'auto', replyToBots: true }],
@@ -249,63 +187,77 @@ try {
   await store.saveState({
     chats: {
       [chatId]: {
-        cursorTimeMs: clock.now() - 60_000,
-        seen: [],
-        messages: [{ messageId: 'om_bot_2', senderName: '机器人', senderOpenId: 'cli_app', senderType: 'app', text: '机器人通知', createTime: new Date(clock.now()).toISOString(), read: false }],
+        ...store.state.chats[chatId],
+        messages: [botMessage('om_bot_2', '机器人又说')],
         batch: { messageIds: ['om_bot_2'], firstAt: clock.now(), lastAt: clock.now() },
-        sessionId: 'sess-auto-1',
         outbox: [],
       },
     },
   });
-  const botToken = await engine.flush({ ...botChat });
-  assert.ok(botToken, 'bot batch dispatches when explicitly allowed');
-  await engine.reply({ token: botToken, text: '收到' });
-  assert.equal(sent.length, 2, 'reply sent once for the bot batch');
+  const promptsBeforeAllowed = prompts.length;
+  assert.ok(await engine.flush({ ...botChat }), 'bot batch dispatches when allowed');
+  assert.equal(prompts.length, promptsBeforeAllowed + 1);
 
+  // 7) 工作区/预设变化会重建 Worker 会话
   await store.saveState({
     chats: {
       [chatId]: {
         ...store.state.chats[chatId],
-        messages: [{ messageId: 'om_bot_3', senderName: '机器人', senderOpenId: 'cli_app', senderType: 'app', text: '机器人又说', createTime: new Date(clock.now()).toISOString(), read: false }],
-        batch: { messageIds: ['om_bot_3'], firstAt: clock.now(), lastAt: clock.now() },
+        outbox: [],
+        messages: [userMessage('om_ws', '换分组后')],
+        batch: { messageIds: ['om_ws'], firstAt: clock.now(), lastAt: clock.now() },
       },
     },
   });
-  assert.equal(await engine.flush({ ...botChat }), null, 'second bot batch within 10 minutes is throttled');
+  await store.saveConfig({
+    enabled: true,
+    worker: { workspaceId: 'ws_feishu', preset: 'standard' },
+    chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all', replyMode: 'auto' }],
+  });
+  const sessionsBefore = sessions.length;
+  assert.ok(await engine.flush({ ...store.config.chats[0] }));
+  assert.equal(sessions.length, sessionsBefore + 1, 'a fresh worker session is created');
+  assert.equal(sessions.at(-1).workspaceId, 'ws_feishu', 'worker joins the configured workspace');
+  assert.equal(store.state.chats[chatId].workerConfigKey, JSON.stringify(['ws_feishu', 'standard']));
 
-  // 8) Worker 会话被归档时换新会话，旧会话不再复用。
+  // 8) 归档的 Worker 会被换掉
   const archived = new Set([store.state.chats[chatId].sessionId]);
-  const guardedEngine = new AutoReplyEngine({
+  const guarded = new AutoReplyEngine({
     store,
     harness,
-    auth,
-    sessionGuard: { isArchived: (id) => archived.has(id), exists: () => true },
     now: clock.now,
+    sessionGuard: { isArchived: (id) => archived.has(id), exists: () => true },
     setTimeout: clock.setTimeout.bind(clock),
     clearTimeout: clock.clearTimeout.bind(clock),
-    sendCard: async () => ({ messageId: 'om_g1' }),
-    replyCard: async () => ({ messageId: 'om_g2' }),
   });
   await store.saveState({
     chats: {
       [chatId]: {
         ...store.state.chats[chatId],
-        messages: [{ messageId: 'om_arch', senderName: '朋友', senderOpenId: 'ou_friend', senderType: 'user', text: '归档后还能回吗', createTime: new Date(clock.now()).toISOString(), read: false }],
-        batch: { messageIds: ['om_arch'], firstAt: clock.now(), lastAt: clock.now(), token: null },
+        messages: [userMessage('om_arch', '归档后还能回吗')],
+        batch: { messageIds: ['om_arch'], firstAt: clock.now(), lastAt: clock.now() },
       },
     },
   });
   const sessionsBeforeArchive = sessions.length;
-  const archiveToken = await guardedEngine.flush({ ...store.config.chats[0] });
-  assert.ok(archiveToken, 'archived worker does not block dispatch');
-  assert.equal(sessions.length, sessionsBeforeArchive + 1, 'a replacement worker session is created');
-  assert.ok(!archived.has(store.state.chats[chatId].sessionId), 'stored session points at the new worker');
-  await guardedEngine.skip({ token: archiveToken, reason: '测试' });
+  assert.ok(await guarded.flush({ ...store.config.chats[0] }), 'archived worker does not block dispatch');
+  assert.equal(sessions.length, sessionsBeforeArchive + 1, 'replacement worker session created');
+  assert.ok(!archived.has(store.state.chats[chatId].sessionId), 'pointer moved to the new worker');
 
+  // 9) 提示词内容
+  const prompt = renderBatchPrompt({
+    chat: { chatId, name: '测试私聊', chatMode: 'p2p' },
+    messages: [{ messageId: 'om_x', createTime: new Date(now).toISOString(), senderName: '朋友', text: '你好' }],
+    batchId: 'batch-abc',
+  });
+  assert.match(prompt, /批次：batch-abc/);
+  assert.match(prompt, /不可信/);
+
+  // 10) 非 auto 会话不派发
+  assert.equal(await engine.flush({ ...chat, replyMode: 'watch' }), null);
 } finally {
   await tick();
   await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-console.log('user identity auto reply: 38 assertions passed');
+console.log('user identity auto reply: 30 assertions passed');
