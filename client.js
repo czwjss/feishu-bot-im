@@ -678,54 +678,63 @@ function MonitorPanel({ connection }) {
     if (right.id === defaultWorkspaceId) return 1;
     return 0;
   });
-  const selectStyle = { ...S.input, width: "auto", height: "28px", fontSize: "12px", paddingRight: "26px" };
   const sectionHead = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", margin: "2px 0 6px" };
   const sectionTitle = { fontSize: "12px", fontWeight: 600 };
   const divider = { borderTop: "1px solid var(--dsw-alias-border-l1)", paddingTop: "10px", marginTop: "2px" };
   const chatRow = (chat) => {
+    const mode = chat.mode ?? (chat.chatMode === "p2p" ? "all" : "mention");
     return h2(
       "div",
-      { key: chat.chatId, style: { display: "grid", gap: "6px", padding: "9px 0", borderTop: "1px solid var(--dsw-alias-border-l1)" } },
+      {
+        key: chat.chatId,
+        style: { display: "grid", gap: "7px", padding: "10px 0", borderTop: "1px solid var(--dsw-alias-border-l1)" }
+      },
       h2(
         "div",
-        { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+        { style: { display: "flex", alignItems: "baseline", gap: "8px" } },
         h2(
           "div",
-          { style: { flex: "1 1 160px", minWidth: 0 } },
+          { style: { flex: 1, minWidth: 0 } },
+          h2("div", {
+            style: { fontSize: "13px", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+            title: chat.name || chat.chatId
+          }, chat.name || chat.chatId),
           h2(
             "div",
-            { style: { display: "flex", alignItems: "center", gap: "6px" } },
-            h2(
-              "span",
-              { style: { fontSize: "13px", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } },
-              chat.name || chat.chatId
-            ),
-            null
-          ),
-          h2(
-            "div",
-            { style: { ...S.hint, marginTop: "1px" } },
-            `${chat.chatMode === "p2p" ? t("\u79C1\u804A", "Direct") : t("\u7FA4\u804A", "Group")} \xB7 ${chat.chatId}`,
-            chat.lastDispatchAt ? ` \xB7 ${t("\u4E0A\u6B21\u6D3E\u53D1", "last dispatch")} ${formatTime(chat.lastDispatchAt)}` : ""
+            {
+              style: { ...S.hint, marginTop: "1px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+              title: chat.chatId
+            },
+            `${chat.chatMode === "p2p" ? t("\u79C1\u804A", "Direct") : t("\u7FA4\u804A", "Group")} \xB7 ${chat.chatId}`
           )
         ),
+        h2("button", {
+          type: "button",
+          className: "bxf-mini bxf-danger",
+          disabled: busy === `remove:${chat.chatId}`,
+          onClick: () => void remove(chat)
+        }, t("\u79FB\u9664", "Remove"))
+      ),
+      h2(
+        "div",
+        { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" } },
         h2(
           "select",
           {
-            style: selectStyle,
+            style: { ...S.input, height: "30px", fontSize: "12px" },
             "aria-label": t("\u89E6\u53D1\u89C4\u5219", "Trigger"),
-            value: chat.mode ?? (chat.chatMode === "p2p" ? "all" : "mention"),
+            value: mode,
             disabled: busy === `mode:${chat.chatId}`,
             onChange: (event) => void setChat(chat, { mode: event.target.value })
           },
-          h2("option", { value: "all" }, t("\u5168\u90E8\u6D88\u606F", "All")),
-          h2("option", { value: "mention" }, t("@\u4E0E\u56DE\u590D", "Mentions")),
+          h2("option", { value: "all" }, t("\u5168\u90E8\u6D88\u606F", "All messages")),
+          h2("option", { value: "mention" }, t("\u4EC5 @ \u4E0E\u56DE\u590D", "Mentions & replies")),
           h2("option", { value: "keyword" }, t("\u5173\u952E\u8BCD", "Keywords"))
         ),
         h2(
           "select",
           {
-            style: selectStyle,
+            style: { ...S.input, height: "30px", fontSize: "12px" },
             "aria-label": t("\u5904\u7406\u65B9\u5F0F", "Handling"),
             value: chat.replyMode === "auto" && chat.replyToBots ? "auto-bots" : chat.replyMode ?? "watch",
             disabled: busy === `mode:${chat.chatId}`,
@@ -734,15 +743,15 @@ function MonitorPanel({ connection }) {
               void setChat(chat, value === "auto-bots" ? { replyMode: "auto", replyToBots: true } : { replyMode: value, replyToBots: false });
             }
           },
-          h2("option", { value: "watch" }, t("\u53EA\u8BB0\u5F55", "Record")),
+          h2("option", { value: "watch" }, t("\u53EA\u8BB0\u5F55", "Record only")),
           h2("option", { value: "auto" }, t("\u81EA\u52A8\u56DE\u590D", "Auto reply")),
-          h2("option", { value: "auto-bots" }, t("\u81EA\u52A8\u56DE\u590D\uFF08\u542B\u673A\u5668\u4EBA\uFF09", "Auto reply (bots)"))
+          h2("option", { value: "auto-bots" }, t("\u81EA\u52A8\u56DE\u590D\uFF08\u542B\u673A\u5668\u4EBA\uFF09", "Auto reply (bots too)"))
         )
       ),
-      chat.mode === "keyword" ? h2("input", {
+      mode === "keyword" ? h2("input", {
         style: { ...S.input, height: "30px", fontSize: "12px" },
         defaultValue: (chat.keywords ?? []).join("\uFF0C"),
-        placeholder: t("\u5173\u952E\u8BCD\uFF0C\u7528\u9017\u53F7\u5206\u9694\uFF0C\u56DE\u8F66\u4FDD\u5B58", "Keywords, comma separated; blur to save"),
+        placeholder: t("\u5173\u952E\u8BCD\uFF0C\u9017\u53F7\u5206\u9694", "Keywords, comma separated"),
         onBlur: (event) => {
           const keywords = event.target.value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
           void setChat(chat, { keywords });
@@ -825,7 +834,11 @@ function MonitorPanel({ connection }) {
       h2(
         "div",
         null,
-        h2("div", { style: sectionHead }, h2("span", { style: sectionTitle }, t("\u4F1A\u8BDD", "Chats"))),
+        h2(
+          "div",
+          { style: sectionHead },
+          h2("span", { style: sectionTitle }, chats.length > 0 ? `${t("\u4F1A\u8BDD", "Chats")} \xB7 ${chats.length}` : t("\u4F1A\u8BDD", "Chats"))
+        ),
         chats.length === 0 ? h2("p", { style: S.hint }, t("\u8FD8\u6CA1\u6709\u76D1\u542C\u4F1A\u8BDD\uFF0C\u5148\u5728\u4E0B\u9762\u6DFB\u52A0\u4E00\u4E2A\u3002", "No chats yet \u2014 add one below.")) : h2("div", null, chats.map(chatRow))
       ),
       h2(

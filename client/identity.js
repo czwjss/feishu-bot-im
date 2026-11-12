@@ -99,61 +99,74 @@ const h = React.createElement;
         return 0;
       });
 
-      const selectStyle = { ...S.input, width: 'auto', height: '28px', fontSize: '12px', paddingRight: '26px' };
       const sectionHead = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', margin: '2px 0 6px' };
       const sectionTitle = { fontSize: '12px', fontWeight: 600 };
       const divider = { borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: '10px', marginTop: '2px' };
 
       const chatRow = (chat) => {
-        return h('div', { key: chat.chatId, style: { display: 'grid', gap: '6px', padding: '9px 0', borderTop: '1px solid var(--dsw-alias-border-l1)' } },
-          h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
-            h('div', { style: { flex: '1 1 160px', minWidth: 0 } },
-              h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
-                h('span', { style: { fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } },
-                  chat.name || chat.chatId),
-                null),
-              h('div', { style: { ...S.hint, marginTop: '1px' } },
-                `${chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group')} · ${chat.chatId}`,
-                chat.lastDispatchAt ? ` · ${t('上次派发', 'last dispatch')} ${formatTime(chat.lastDispatchAt)}` : '')),
-            h('select', {
-              style: selectStyle,
-              'aria-label': t('触发规则', 'Trigger'),
-              value: chat.mode ?? (chat.chatMode === 'p2p' ? 'all' : 'mention'),
-              disabled: busy === `mode:${chat.chatId}`,
-              onChange: (event) => void setChat(chat, { mode: event.target.value }),
+        const mode = chat.mode ?? (chat.chatMode === 'p2p' ? 'all' : 'mention');
+        return h('div', {
+          key: chat.chatId,
+          style: { display: 'grid', gap: '7px', padding: '10px 0', borderTop: '1px solid var(--dsw-alias-border-l1)' },
+        },
+        h('div', { style: { display: 'flex', alignItems: 'baseline', gap: '8px' } },
+          h('div', { style: { flex: 1, minWidth: 0 } },
+            h('div', {
+              style: { fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+              title: chat.name || chat.chatId,
+            }, chat.name || chat.chatId),
+            h('div', {
+              style: { ...S.hint, marginTop: '1px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+              title: chat.chatId,
             },
-            h('option', { value: 'all' }, t('全部消息', 'All')),
-            h('option', { value: 'mention' }, t('@与回复', 'Mentions')),
-            h('option', { value: 'keyword' }, t('关键词', 'Keywords'))),
-            h('select', {
-              style: selectStyle,
-              'aria-label': t('处理方式', 'Handling'),
-              value: chat.replyMode === 'auto' && chat.replyToBots ? 'auto-bots' : (chat.replyMode ?? 'watch'),
-              disabled: busy === `mode:${chat.chatId}`,
-              onChange: (event) => {
-                const value = event.target.value;
-                void setChat(chat, value === 'auto-bots'
-                  ? { replyMode: 'auto', replyToBots: true }
-                  : { replyMode: value, replyToBots: false });
-              },
+            `${chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group')} · ${chat.chatId}`)),
+          h('button', {
+            type: 'button',
+            className: 'bxf-mini bxf-danger',
+            disabled: busy === `remove:${chat.chatId}`,
+            onClick: () => void remove(chat),
+          }, t('移除', 'Remove'))),
+        h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' } },
+          h('select', {
+            style: { ...S.input, height: '30px', fontSize: '12px' },
+            'aria-label': t('触发规则', 'Trigger'),
+            value: mode,
+            disabled: busy === `mode:${chat.chatId}`,
+            onChange: (event) => void setChat(chat, { mode: event.target.value }),
+          },
+          h('option', { value: 'all' }, t('全部消息', 'All messages')),
+          h('option', { value: 'mention' }, t('仅 @ 与回复', 'Mentions & replies')),
+          h('option', { value: 'keyword' }, t('关键词', 'Keywords'))),
+          h('select', {
+            style: { ...S.input, height: '30px', fontSize: '12px' },
+            'aria-label': t('处理方式', 'Handling'),
+            value: chat.replyMode === 'auto' && chat.replyToBots ? 'auto-bots' : (chat.replyMode ?? 'watch'),
+            disabled: busy === `mode:${chat.chatId}`,
+            onChange: (event) => {
+              const value = event.target.value;
+              void setChat(chat, value === 'auto-bots'
+                ? { replyMode: 'auto', replyToBots: true }
+                : { replyMode: value, replyToBots: false });
             },
-            h('option', { value: 'watch' }, t('只记录', 'Record')),
-            h('option', { value: 'auto' }, t('自动回复', 'Auto reply')),
-            h('option', { value: 'auto-bots' }, t('自动回复（含机器人）', 'Auto reply (bots)')))),
-          chat.mode === 'keyword'
-            ? h('input', {
-              style: { ...S.input, height: '30px', fontSize: '12px' },
-              defaultValue: (chat.keywords ?? []).join('，'),
-              placeholder: t('关键词，用逗号分隔，回车保存', 'Keywords, comma separated; blur to save'),
-              onBlur: (event) => {
-                const keywords = event.target.value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
-                void setChat(chat, { keywords });
-              },
-            })
-            : null,
-          chat.lastError
-            ? h('div', { style: { ...S.hint, color: 'var(--dsw-alias-state-error-primary)' } }, chat.lastError)
-            : null);
+          },
+          h('option', { value: 'watch' }, t('只记录', 'Record only')),
+          h('option', { value: 'auto' }, t('自动回复', 'Auto reply')),
+          h('option', { value: 'auto-bots' }, t('自动回复（含机器人）', 'Auto reply (bots too)'))),
+        ),
+        mode === 'keyword'
+          ? h('input', {
+            style: { ...S.input, height: '30px', fontSize: '12px' },
+            defaultValue: (chat.keywords ?? []).join('，'),
+            placeholder: t('关键词，逗号分隔', 'Keywords, comma separated'),
+            onBlur: (event) => {
+              const keywords = event.target.value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
+              void setChat(chat, { keywords });
+            },
+          })
+          : null,
+        chat.lastError
+          ? h('div', { style: { ...S.hint, color: 'var(--dsw-alias-state-error-primary)' } }, chat.lastError)
+          : null);
       };
 
       const pickerSection = showPicker
@@ -207,7 +220,8 @@ const h = React.createElement;
                 : null)),
 
           h('div', null,
-            h('div', { style: sectionHead }, h('span', { style: sectionTitle }, t('会话', 'Chats'))),
+            h('div', { style: sectionHead },
+              h('span', { style: sectionTitle }, chats.length > 0 ? `${t('会话', 'Chats')} · ${chats.length}` : t('会话', 'Chats'))),
             chats.length === 0
               ? h('p', { style: S.hint }, t('还没有监听会话，先在下面添加一个。', 'No chats yet — add one below.'))
               : h('div', null, chats.map(chatRow))),
