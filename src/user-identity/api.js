@@ -326,6 +326,7 @@ export function normalizeMessage(item) {
     chatId: stringOf(source.chat_id),
     msgType: stringOf(source.msg_type),
     createTime: formatCreateTime(source.create_time),
+    updateTime: formatCreateTime(source.update_time),
     senderOpenId: stringOf(sender.id),
     senderName: stringOf(sender.name),
     senderType: stringOf(sender.sender_type),

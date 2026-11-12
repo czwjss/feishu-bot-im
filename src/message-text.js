@@ -12,7 +12,9 @@ export function scopedValue(value, scope, fallback) {
   return value ?? fallback;
 }
 
-/** 流式卡片超过这个时间还没收尾，视为异常中断。 */
+/** 流式卡片超过这个时间没有任何更新，视为异常中断。 */
+export const CARD_IDLE_MS = 5 * 60_000;
+/** 兜底上限：即使一直在更新，超过这个时间也不再等待。 */
 export const CARD_STUCK_MS = 15 * 60_000;
 
 /**

@@ -28,8 +28,6 @@ export const BATCH_MAX_WAIT_MS = 3 * 60_000;
 export const BATCH_MAX_MESSAGES = 10;
 export const DEFAULT_WORKER_PRESET = 'standard';
 export const MAX_WORKER_PRESET = 40;
-/** 流式卡片在收尾前不进入收件箱；超过这个时间仍未收尾就彻底丢掉。 */
-export const CARD_PENDING_MS = 15 * 60_000;
 export const MAX_PENDING_CARDS = 20;
 /** 流式卡片等待中的批次，多久再看一次。 */
 export const CARD_RETRY_MS = 30_000;
@@ -135,6 +133,7 @@ export function normalizeMonitorMessage(value) {
     msgType: cleanString(source.msgType),
     streaming: typeof source.streaming === 'boolean' ? source.streaming : null,
     createTime: cleanString(source.createTime),
+    updateTime: cleanString(source.updateTime),
     text,
     // outcome 非空表示已被自动回复或自动跳过；read 仍表示人工/流程已读。
     read: source.read === true || outcome !== '',
@@ -157,8 +156,8 @@ export function normalizePendingCard(value) {
     messageId,
     chatId,
     createTime: cleanString(source.createTime),
+    updateTime: cleanString(source.updateTime),
     lastText: stringOf(source.lastText).slice(0, MAX_MESSAGE_TEXT),
-    lastChangedAt: cleanTime(source.lastChangedAt),
   });
 }
 

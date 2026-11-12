@@ -330,6 +330,33 @@ console.log('user identity monitor: 27 assertions passed');
     assert.equal(store.state.chats[chatId].messages.length, 0, 'streaming card is not in the inbox');
     assert.equal(store.state.pendingCards.length, 1, 'streaming card waits for settlement');
 
+    // update_time 超过 5 分钟没变：直接丢弃，不进收件箱。
+    const staleMonitor = new UserMonitorManager({
+      auth: { async status() { return {}; }, async requireAccessToken() { return 'token'; } },
+      store,
+      now: () => now + 6 * 60_000,
+      setInterval: () => ({ unref() {} }),
+      clearInterval: () => {},
+      chatMemberNames: async () => new Map(),
+      listMessages: async () => ({ items: [], hasMore: false, pageToken: null }),
+      getMessage: async () => ({
+        messageId: 'om_card_stream', msgType: 'interactive', streaming: true,
+        text: '⏳ 正在处理…', createTime: new Date(now).toISOString(),
+        updateTime: new Date(now).toISOString(),
+      }),
+    });
+    await staleMonitor.pollOnce();
+    assert.equal(store.state.pendingCards.length, 0, 'idle card is dropped after 5 minutes');
+    assert.equal(store.state.chats[chatId].messages.length, 0, 'idle card never enters the inbox');
+
+    await store.saveState({
+      chats: { [chatId]: { ...store.state.chats[chatId], cursorTimeMs: now - 60_000, seen: [] } },
+      pendingCards: [{
+        messageId: 'om_card_stream', chatId,
+        createTime: new Date(now).toISOString(), updateTime: new Date(now).toISOString(),
+        lastText: '⏳ 正在处理…',
+      }],
+    });
     streaming = false;
     await monitor.pollOnce();
     assert.equal(store.state.pendingCards.length, 0, 'settled card leaves the pending list');
@@ -340,4 +367,4 @@ console.log('user identity monitor: 27 assertions passed');
     await rm(dir, { recursive: true, force: true });
   }
 }
-console.log('user identity monitor cards: 5 assertions passed');
+console.log('user identity monitor cards: 7 assertions passed');
