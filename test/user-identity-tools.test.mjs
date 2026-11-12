@@ -208,11 +208,11 @@ assert.match(messagesTool.description, /群聊或私聊/);
 console.log('im-feishu user identity tool identity: 7 assertions passed');
 
 // 每个分身工具都必须声明 output { schema, render }，否则工具注册会被 Host 拒绝。
-for (const tool of createUserIdentityTools({ auth: {}, monitor: { createDraft: async () => ({}) } })) {
+for (const tool of createUserIdentityTools({ auth: {} })) {
   assert.ok(tool.output?.schema, `${tool.name} declares an output schema`);
   assert.equal(typeof tool.output?.render, 'function', `${tool.name} declares a renderer`);
 }
-console.log('im-feishu user identity tool output: 8 assertions passed');
+console.log('im-feishu user identity tool output: 6 assertions passed');
 
 // 发送工具支持「回复某条消息」：走 reply 接口而不是新发一条。
 {

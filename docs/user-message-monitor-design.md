@@ -636,7 +636,6 @@ offline_access
 - 设置页显示未读数、最近消息，支持全部已读和清空记录；
 - 轮询间隔默认 60 秒，可在 `monitor.json` 的 `pollIntervalMs` 调整；
 - 触发规则（阶段 1 的 A）：私聊默认全收，群聊默认只收 @我 / 回复我，也可改成关键词模式；
-- 草稿确认（阶段 2 的 B）：`feishu_avatar_draft` 只创建草稿，用户在设置页点「发送」才以本人身份发出，30 分钟过期。
 
 ### 消息状态：未读 / 已处理
 
@@ -694,7 +693,7 @@ offline_access
 ```text
 src/user-identity/monitor.js
 src/user-identity/monitor-store.js
-src/user-identity/tools.js          feishu_avatar_draft / reply / skip
+src/user-identity/tools.js          feishu_avatar_me / messages / send
 src/user-identity/api.js            listChats（types=p2p,group）
 client/identity.js                  MonitorPanel
 ```

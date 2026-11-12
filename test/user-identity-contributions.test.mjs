@@ -30,42 +30,17 @@ assert.deepEqual(tools.map((tool) => tool.name), [
   'feishu_avatar_send',
 ]);
 
-// 有监听时追加草稿与决策工具；收件箱工具不再注册。
+// 有监听时也只注册同样的三个工具；草稿与决策工具都已删除。
 tools.length = 0;
 sections.length = 0;
-installUserIdentityContributions(ctx, {}, {
-  async createDraft(input) {
-    return { draftId: 'draft-1', chatId: input.chatId, status: 'pending', text: input.text };
-  },
-  autoReply: {
-    async reply({ text }) {
-      return { sentMessageId: 'om_sent', messageIds: ['om_1', 'om_2'] };
-    },
-    async skip() {
-      return { skipped: true, messageIds: ['om_1'] };
-    },
-  },
-});
+installUserIdentityContributions(ctx, {}, { autoReply: {}, async inbox() { return { total: 0, items: [] }; } });
 assert.deepEqual(tools.map((tool) => tool.name), [
   'feishu_avatar_me',
   'feishu_avatar_messages',
   'feishu_avatar_send',
-  'feishu_avatar_draft',
 ]);
 assert.equal(sections.length, 0, 'no extra prompt section is registered');
-const draftTool = tools.find((tool) => tool.name === 'feishu_avatar_draft');
-const created = await draftTool.execute({ chatId: 'oc_test', text: '好的' });
-assert.equal(created.draftId, 'draft-1');
-assert.equal(created.status, 'pending');
-
-// 只有四个通用工具，没有 Worker 专属工具。
-assert.deepEqual(tools.map((tool) => tool.name).sort(), [
-  'feishu_avatar_draft',
-  'feishu_avatar_me',
-  'feishu_avatar_messages',
-  'feishu_avatar_send',
-]);
-console.log('user identity contributions: 20 assertions passed');
+console.log('user identity contributions: 16 assertions passed');
 
 const preset = await import('../src/user-identity/index.js');
 assert.deepEqual(preset.inject, []);

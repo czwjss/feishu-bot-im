@@ -197,66 +197,6 @@ try {
   }
 }
 
-// 10) 草稿：创建不发送，确认后才发送，忽略不发。
-{
-  const dir3 = await mkdtemp(join(tmpdir(), 'im-feishu-draft-'));
-  try {
-    const store3 = new MonitorStore({
-      configPath: join(dir3, 'monitor.json'),
-      statePath: join(dir3, 'monitor-state.json'),
-    });
-    await store3.load();
-    await store3.saveConfig({ enabled: false, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p' }] });
-
-    const sent = [];
-    const monitor3 = new UserMonitorManager({
-      auth: {
-        async status() { return { authorization: { authorized: true, user: { openId: 'ou_self' } } }; },
-        async requireAccessToken() { return 'user-token'; },
-      },
-      store: store3,
-      now: () => now,
-      sendCard: async (input) => { sent.push(['card', input]); return { messageId: 'om_sent_1' }; },
-      replyCard: async (input) => { sent.push(['reply', input]); return { messageId: 'om_sent_2' }; },
-    });
-
-    const draft = await monitor3.createDraft({ chatId, messageId: 'om_target', text: '好的，我看下' });
-    assert.equal(draft.status, 'pending');
-    assert.equal(sent.length, 0, 'creating a draft must not send anything');
-
-    const pending = await monitor3.drafts();
-    assert.equal(pending.drafts.filter((item) => item.status === 'pending').length, 1);
-
-    const approved = await monitor3.sendDraft(draft.draftId);
-    assert.equal(approved.status, 'sent');
-    assert.equal(approved.sentMessageId, 'om_sent_2');
-    assert.equal(sent[0][0], 'reply');
-    assert.equal(sent[0][1].messageId, 'om_target');
-
-    // 已发送的草稿不能再次发送。
-    await assert.rejects(() => monitor3.sendDraft(draft.draftId), /不能发送/);
-
-    // 忽略不发送。
-    const draft2 = await monitor3.createDraft({ chatId, text: '另一条' });
-    const ignored = await monitor3.ignoreDraft(draft2.draftId);
-    assert.equal(ignored.status, 'ignored');
-    assert.equal(sent.length, 1);
-
-    // 非监听会话不能建草稿。
-    await assert.rejects(() => monitor3.createDraft({ chatId: 'oc_other', text: 'x' }), /不在监听列表/);
-
-    // 摘要包含待确认草稿。
-    await monitor3.createDraft({ chatId, text: '第三条' });
-    await monitor3.store.saveState({
-      ...monitor3.store.state,
-      chats: { [chatId]: { cursorTimeMs: now, seen: [], messages: [{ messageId: 'om_u', text: 'hi', createTime: new Date(now).toISOString(), read: false }] } },
-    });
-    assert.match(monitor3.summary(), /待确认草稿/);
-  } finally {
-    await rm(dir3, { recursive: true, force: true });
-  }
-}
-
 // 11) 同一 message_id 原地刷新时更新旧记录，不新增未读。
 {
   const dir4 = await mkdtemp(join(tmpdir(), 'im-feishu-refresh-'));
@@ -354,4 +294,4 @@ try {
   }
 }
 
-console.log('user identity monitor: 50 assertions passed');
+console.log('user identity monitor: 30 assertions passed');

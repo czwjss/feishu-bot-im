@@ -30,7 +30,7 @@ export function installUserIdentityContributions(ctx, auth, monitor = null) {
   ctx.inject(['tools'], async (toolCtx) => {
     let tools;
     try {
-      tools = createUserIdentityTools({ auth, monitor });
+      tools = createUserIdentityTools({ auth });
     } catch (error) {
       await report('create-tools', error);
       return;
