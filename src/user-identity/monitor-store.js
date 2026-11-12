@@ -133,7 +133,6 @@ export function normalizeMonitorMessage(value) {
     msgType: cleanString(source.msgType),
     streaming: typeof source.streaming === 'boolean' ? source.streaming : null,
     createTime: cleanString(source.createTime),
-    updateTime: cleanString(source.updateTime),
     text,
     // outcome 非空表示已被自动回复或自动跳过；read 仍表示人工/流程已读。
     read: source.read === true || outcome !== '',
@@ -156,7 +155,6 @@ export function normalizePendingCard(value) {
     messageId,
     chatId,
     createTime: cleanString(source.createTime),
-    updateTime: cleanString(source.updateTime),
     lastText: stringOf(source.lastText).slice(0, MAX_MESSAGE_TEXT),
   });
 }

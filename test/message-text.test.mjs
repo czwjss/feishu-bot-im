@@ -61,9 +61,7 @@ assert.equal(cardStreamingOf(JSON.stringify({ schema: '1.0', title: '旧卡片' 
 assert.equal(cardStreamingOf('not json'), null);
 console.log('feishu card streaming flag: 4 assertions passed');
 
-// 流式卡片的时间阈值：空闲 5 分钟放弃，绝对上限对齐平台 10 分钟。
-import { CARD_IDLE_MS, CARD_STUCK_MS } from '../src/message-text.js';
-assert.equal(CARD_IDLE_MS, 5 * 60_000);
+// 流式卡片只剩绝对上限：对齐平台 10 分钟自动关闭。
+import { CARD_STUCK_MS } from '../src/message-text.js';
 assert.equal(CARD_STUCK_MS, 10 * 60_000);
-assert.ok(CARD_STUCK_MS > CARD_IDLE_MS, '绝对上限必须大于空闲阈值');
-console.log('feishu card timeouts: 3 assertions passed');
+console.log('feishu card timeouts: 1 assertions passed');

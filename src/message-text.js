@@ -12,8 +12,6 @@ export function scopedValue(value, scope, fallback) {
   return value ?? fallback;
 }
 
-/** 流式卡片超过这个时间没有任何更新，视为异常中断。 */
-export const CARD_IDLE_MS = 5 * 60_000;
 /** 兜底上限：飞书流式模式会在 10 分钟后自动关闭，超过就不再等。 */
 export const CARD_STUCK_MS = 10 * 60_000;
 

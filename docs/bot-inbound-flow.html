@@ -188,7 +188,7 @@
     <div class="arrow">↓</div>
     <div class="row">
       <div class="mini" style="grid-column: span 2;"><b>收尾</b>streaming_mode=false → 用最新内容 <code>handleMessage(data, {resubmitted:true})</code> 重放，跳过 hasSeen</div>
-      <div class="mini" style="grid-column: span 2;"><b>丢弃</b>update_time 超 5 分钟未变，或创建超 10 分钟 → 移出列表，不入会话、不标记</div>
+      <div class="mini" style="grid-column: span 2;"><b>丢弃</b>创建超 10 分钟（平台自动关闭流式模式）→ 移出列表，不入会话、不标记</div>
     </div>
   </div>
 
@@ -197,7 +197,7 @@
     <div class="grid2">
       <div class="box"><b>卡片更新不会推送事件</b><div class="meta">一条卡片只推一次 receive；内容是初始态，所以必须主动 getMessage 查状态。</div></div>
       <div class="box"><b>收尾判定靠 streaming_mode</b><div class="meta">卡片 JSON 2.0 的 config 字段；飞书 10 分钟后会自动关闭流式模式。</div></div>
-      <div class="box"><b>停滞判定靠 update_time</b><div class="meta">每次刷新都会推进；超过 5 分钟没变视为异常中断。</div></div>
+      <div class="box"><b>只有 10 分钟上限</b><div class="meta">平台会在 10 分钟后自动关闭流式模式，超过就丢弃，不再看更新时间。</div></div>
       <div class="box"><b>挂起不阻塞</b><div class="meta">挂起只影响这一条卡片，同聊天的其他消息照常入站。</div></div>
     </div>
     <p class="note">已知边界：挂起列表在内存里，插件重载后丢失；卡片收尾重放可能晚于期间到达的新消息。</p>

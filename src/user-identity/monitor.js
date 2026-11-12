@@ -8,7 +8,6 @@
  */
 import { chatMemberNames, getMessage, listChats, listMessages } from './api.js';
 import { AutoReplyEngine } from './auto-reply.js';
-import { CARD_IDLE_MS } from '../message-text.js';
 import {
   MAX_MONITOR_CHATS,
   MAX_MESSAGES_PER_CHAT,
@@ -376,7 +375,6 @@ export class UserMonitorManager {
       messageId: item.messageId,
       chatId,
       createTime: item.createTime ?? new Date(time).toISOString(),
-      updateTime: item.updateTime ?? '',
       lastText: item.text ?? '',
     });
     await this.#store.saveState({ ...this.#store.state, pendingCards: pending });
@@ -400,18 +398,8 @@ export class UserMonitorManager {
         changed = true;
         continue;
       }
-      // update_time 是服务端记录的最近更新时间，比本地比对文本更准。
-      const updatedAt = Date.parse(message?.updateTime ?? card.updateTime ?? '') || Date.parse(card.createTime) || this.#now();
-      if (this.#now() - updatedAt > CARD_IDLE_MS) {
-        this.#logger?.info?.(`[im-feishu] ${card.messageId} 超过 5 分钟没有更新，丢弃`);
-        changed = true; // 彻底丢掉，当它从没来过
-        continue;
-      }
       const text = message?.text ?? card.lastText;
-      const nextText = text !== card.lastText ? { ...card, lastText: text } : card;
-      const next = message?.updateTime && message.updateTime !== card.updateTime
-        ? { ...nextText, updateTime: message.updateTime }
-        : nextText;
+      const next = text !== card.lastText ? { ...card, lastText: text } : card;
       if (next !== card) changed = true;
       kept.push(next);
     }
@@ -436,7 +424,6 @@ export class UserMonitorManager {
         msgType: 'interactive',
         streaming: false,
         createTime: message.createTime || card.createTime,
-        updateTime: message.updateTime || card.updateTime,
         text: message.text || card.lastText,
         read: false,
       });
@@ -621,7 +608,6 @@ export class UserMonitorManager {
             msgType: item.msgType ?? '',
             streaming: typeof item.streaming === 'boolean' ? item.streaming : null,
             createTime: item.createTime ?? new Date(time).toISOString(),
-            updateTime: item.updateTime ?? '',
             text: this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, roster),
             read: false,
           };

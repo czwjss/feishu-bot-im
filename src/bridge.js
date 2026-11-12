@@ -5,7 +5,7 @@
  * single edited message → final answer. One chat maps to one DSH Session.
  */
 import { TurnRunner } from './turn.js';
-import { CARD_IDLE_MS, CARD_STUCK_MS, cardStreamingOf, chatIdOfKey, scopedValue, textOfContentOrPost } from './message-text.js';
+import { CARD_STUCK_MS, cardStreamingOf, chatIdOfKey, scopedValue, textOfContentOrPost } from './message-text.js';
 
 /** 挂起卡片的检查间隔：流式卡片通常很快收尾，30 秒查一次足够。 */
 const CARD_POLL_MS = 30_000;
@@ -742,7 +742,6 @@ export class FeishuBridge {
       data,
       chatId: message.chat_id,
       created,
-      updatedAt: Number(message.update_time) || created,
     });
     this.#startCardTimer();
     this.#log('info', `卡片仍在流式输出，挂起等待收尾 ${message.message_id}`);
@@ -766,14 +765,7 @@ export class FeishuBridge {
       }
       const latest = await this.#bot.getMessage?.(messageId).catch(() => null);
       if (!latest?.bodyContent) continue;
-      if (cardStreamingOf(latest.bodyContent) === true) {
-        pending.updatedAt = latest.updatedAt ?? pending.updatedAt;
-        if (Date.now() - pending.updatedAt > CARD_IDLE_MS) {
-          this.#pendingCards.delete(messageId);
-          this.#log('warn', `卡片超过 5 分钟没有更新，丢弃 ${messageId}`);
-        }
-        continue;
-      }
+      if (cardStreamingOf(latest.bodyContent) === true) continue;
       this.#pendingCards.delete(messageId);
       const data = {
         ...pending.data,

@@ -236,7 +236,6 @@ export class FeishuBot {
         messageId: item.message_id ?? messageId,
         msgType: item.msg_type ?? item.message_type ?? null,
         bodyContent: item.body?.content ?? '',
-        updatedAt: Number(item.update_time) || Number(item.create_time) || Date.now(),
         mentions: Array.isArray(item.mentions) ? item.mentions : [],
       };
     } catch {
