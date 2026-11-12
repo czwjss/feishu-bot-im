@@ -146,18 +146,10 @@ export const MESSAGES = Object.freeze({
   "已暂停": "Paused",
   "最后检查": "Last check",
   "立即检查": "Check now",
-  "没有可添加的会话。": "No chats available to add.",
   "选择会话": "Choose chats",
   "添加": "Add",
-  "手动填 chat_id（oc_…）": "Enter chat_id (oc_…)",
-  "未知": "Unknown",
   "全部消息": "All messages",
   "关键词": "Keywords",
-  "处理方式": "Handling",
-  "只记录": "Record only",
-  "自动回复": "Auto reply",
-  "自动回复（含机器人）": "Auto reply (bots too)",
-  "上次派发": "last dispatch",
 });
 
 export function dictionaries() {

@@ -189,18 +189,10 @@ var MESSAGES = Object.freeze({
   "\u5DF2\u6682\u505C": "Paused",
   "\u6700\u540E\u68C0\u67E5": "Last check",
   "\u7ACB\u5373\u68C0\u67E5": "Check now",
-  "\u6CA1\u6709\u53EF\u6DFB\u52A0\u7684\u4F1A\u8BDD\u3002": "No chats available to add.",
   "\u9009\u62E9\u4F1A\u8BDD": "Choose chats",
   "\u6DFB\u52A0": "Add",
-  "\u624B\u52A8\u586B chat_id\uFF08oc_\u2026\uFF09": "Enter chat_id (oc_\u2026)",
-  "\u672A\u77E5": "Unknown",
   "\u5168\u90E8\u6D88\u606F": "All messages",
-  "\u5173\u952E\u8BCD": "Keywords",
-  "\u5904\u7406\u65B9\u5F0F": "Handling",
-  "\u53EA\u8BB0\u5F55": "Record only",
-  "\u81EA\u52A8\u56DE\u590D": "Auto reply",
-  "\u81EA\u52A8\u56DE\u590D\uFF08\u542B\u673A\u5668\u4EBA\uFF09": "Auto reply (bots too)",
-  "\u4E0A\u6B21\u6D3E\u53D1": "last dispatch"
+  "\u5173\u952E\u8BCD": "Keywords"
 });
 function dictionaries() {
   const zh = {};
@@ -704,17 +696,13 @@ function MonitorPanel({ connection }) {
           "select",
           {
             style: { ...control, width: "132px" },
-            "aria-label": t("\u5904\u7406\u65B9\u5F0F", "Handling"),
-            value: chat.replyMode === "auto" && chat.replyToBots ? "auto-bots" : chat.replyMode ?? "watch",
+            "aria-label": t("\u56DE\u590D\u8303\u56F4", "Reply scope"),
+            value: chat.replyToBots ? "bots" : "human",
             disabled: busy === `mode:${chat.chatId}`,
-            onChange: (event) => {
-              const value = event.target.value;
-              void setChat(chat, value === "auto-bots" ? { replyMode: "auto", replyToBots: true } : { replyMode: value, replyToBots: false });
-            }
+            onChange: (event) => void setChat(chat, { replyToBots: event.target.value === "bots" })
           },
-          h2("option", { value: "watch" }, t("\u53EA\u8BB0\u5F55", "Record")),
-          h2("option", { value: "auto" }, t("\u81EA\u52A8\u56DE\u590D", "Auto")),
-          h2("option", { value: "auto-bots" }, t("\u81EA\u52A8\uFF08\u542B\u673A\u5668\u4EBA\uFF09", "Auto + bots"))
+          h2("option", { value: "human" }, t("\u56DE\u590D\u771F\u4EBA\u6D88\u606F", "Replies humans")),
+          h2("option", { value: "bots" }, t("\u673A\u5668\u4EBA\u6D88\u606F\u4E5F\u56DE\u590D", "Also bots"))
         ),
         h2("button", {
           type: "button",

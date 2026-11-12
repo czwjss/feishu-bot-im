@@ -72,7 +72,7 @@ try {
   await store.load();
   await store.saveConfig({
     enabled: true,
-    chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all', replyMode: 'auto' }],
+    chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all' }],
   });
 
   const prompts = [];
@@ -181,7 +181,7 @@ try {
   // 6) 显式允许机器人消息时派发，但十分钟内只放行一次
   await store.saveConfig({
     enabled: true,
-    chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all', replyMode: 'auto', replyToBots: true }],
+    chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all', replyToBots: true }],
   });
   const botChat = store.config.chats[0];
   await store.saveState({
@@ -225,7 +225,7 @@ try {
   await store.saveConfig({
     enabled: true,
     worker: { workspaceId: 'ws_feishu', preset: 'standard' },
-    chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all', replyMode: 'auto' }],
+    chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all' }],
   });
   const sessionsBefore = sessions.length;
   assert.ok(await engine.flush({ ...store.config.chats[0] }));
@@ -240,7 +240,7 @@ try {
       statePath: join(dir, 'fallback-state.json'),
     });
     await fallbackStore.load();
-    await fallbackStore.saveConfig({ enabled: true, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all', replyMode: 'auto' }] });
+    await fallbackStore.saveConfig({ enabled: true, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all' }] });
     const created = [];
     const fallbackEngine = new AutoReplyEngine({
       store: fallbackStore,
@@ -298,7 +298,6 @@ try {
   assert.match(prompt, /不可信/);
 
   // 10) 非 auto 会话不派发
-  assert.equal(await engine.flush({ ...chat, replyMode: 'watch' }), null);
 } finally {
   await tick();
   await rm(dir, { recursive: true, force: true }).catch(() => undefined);

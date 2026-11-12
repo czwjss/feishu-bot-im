@@ -3,7 +3,7 @@
  *
  * 用户身份没有个人收件箱事件推送，因此监听器按会话轮询。
  * 新消息落到本地状态（`monitor-state.json`，0600、有上限），
- * `replyMode: auto` 的会话由自动回复链路派发给 Worker 会话处理。
+ * 收到的消息会自动攒批交给 Worker 会话处理。
  * 回复由 Worker 调用 `feishu_avatar_send`（用户本人身份）发出，监听本身不写飞书。
  */
 import { CARD_STUCK_MS } from '../message-text.js';
@@ -253,7 +253,7 @@ export class UserMonitorManager {
   async flushPending() {
     let dispatched = 0;
     for (const chat of this.#store.config.chats) {
-      if (chat.replyMode !== 'auto' || !this.#autoReply) continue;
+      if (!this.#autoReply) continue;
       const entry = this.#store.state.chats[chat.chatId] ?? {};
       if ((entry.batch?.messageIds ?? []).length === 0) continue;
       const token = await this.#autoReply.flush(chat).catch(() => null);
@@ -304,7 +304,6 @@ export class UserMonitorManager {
         ...chat,
         mode: patch.mode === undefined ? chat.mode : patch.mode,
         keywords: patch.keywords === undefined ? chat.keywords : patch.keywords,
-        replyMode: patch.replyMode === undefined ? chat.replyMode : patch.replyMode,
         replyToBots: patch.replyToBots === undefined ? chat.replyToBots : patch.replyToBots,
         preset: patch.preset === undefined ? chat.preset : patch.preset,
       });
@@ -380,7 +379,7 @@ export class UserMonitorManager {
       fresh.push(card.messageId);
     }
     await this.#patchChat(chat.chatId, { messages: messages.slice(-MAX_MESSAGES_PER_CHAT) });
-    if (fresh.length > 0 && chat.replyMode === 'auto' && this.#autoReply) {
+    if (fresh.length > 0 && this.#autoReply) {
       await this.#autoReply.enqueue(chat, fresh).catch(() => undefined);
     }
   }
@@ -574,7 +573,7 @@ export class UserMonitorManager {
         cursorMessageId = lastSkipped.item.messageId;
       }
 
-      if (eligible.length > 0 && chat.replyMode === 'auto' && this.#autoReply) {
+      if (eligible.length > 0 && this.#autoReply) {
         const freshIds = eligible.filter(({ updateOf }) => !updateOf).map(({ item }) => item.messageId);
         if (freshIds.length > 0) await this.#autoReply.enqueue(chat, freshIds).catch(() => undefined);
       }

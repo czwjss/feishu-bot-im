@@ -98,7 +98,6 @@ export class AutoReplyEngine {
   /** 把新消息并入该会话的待处理批次。 */
   async enqueue(chat, messageIds) {
     if (this.#disposed) return;
-    if (chat?.replyMode !== 'auto') return;
     const ids = (messageIds ?? []).filter(Boolean);
     if (ids.length === 0) return;
     const entry = this.#store.state.chats[chat.chatId] ?? {};
@@ -131,7 +130,6 @@ export class AutoReplyEngine {
   /** 把当前批次派给 Worker；派发成功即认为已处理。 */
   async flush(chat) {
     if (this.#disposed) return null;
-    if (chat?.replyMode !== 'auto') return null;
     const entry = this.#store.state.chats[chat.chatId] ?? {};
     const ids = entry.batch?.messageIds ?? [];
     if (ids.length === 0) return null;

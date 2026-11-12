@@ -5,7 +5,7 @@
  * 状态：`<dataDir>/monitor-state.json`
  *
  * 监听按会话保存游标、去重集合、最近消息和批次状态（有上限、0600）。
- * `watch` 只记录，`auto` 把一批消息派给 Worker 会话后即视为已处理。
+ * 消息按批次派给 Worker 会话，派发成功即视为已处理。
  */
 import { readFile } from 'node:fs/promises';
 
@@ -20,7 +20,6 @@ export const MAX_MESSAGES_PER_CHAT = 50;
 export const MAX_MESSAGE_TEXT = 2_000;
 export const MAX_KEYWORDS = 10;
 export const TRIGGER_MODES = Object.freeze(['all', 'mention', 'keyword']);
-export const REPLY_MODES = Object.freeze(['watch', 'auto']);
 /** 一批消息的防抖窗口：首条到达后再等这么久就把批次交给 Worker。 */
 export const BATCH_DEBOUNCE_MS = 45_000;
 /** 批次最多等这么久，避免持续刷屏时一直不处理。 */
@@ -78,7 +77,6 @@ export function normalizeMonitorChat(value) {
     external: source.external === true,
     mode,
     keywords: normalizeKeywords(source.keywords),
-    replyMode: REPLY_MODES.includes(source.replyMode) ? source.replyMode : 'watch',
     preset: cleanString(source.preset),
     /** 是否允许“只有机器人消息”的批次触发自动回复（默认关，仅用于测试）。 */
     replyToBots: source.replyToBots === true,

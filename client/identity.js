@@ -116,19 +116,13 @@ const h = React.createElement;
           h('option', { value: 'keyword' }, t('关键词', 'Keywords'))),
           h('select', {
             style: { ...control, width: '132px' },
-            'aria-label': t('处理方式', 'Handling'),
-            value: chat.replyMode === 'auto' && chat.replyToBots ? 'auto-bots' : (chat.replyMode ?? 'watch'),
+            'aria-label': t('回复范围', 'Reply scope'),
+            value: chat.replyToBots ? 'bots' : 'human',
             disabled: busy === `mode:${chat.chatId}`,
-            onChange: (event) => {
-              const value = event.target.value;
-              void setChat(chat, value === 'auto-bots'
-                ? { replyMode: 'auto', replyToBots: true }
-                : { replyMode: value, replyToBots: false });
-            },
+            onChange: (event) => void setChat(chat, { replyToBots: event.target.value === 'bots' }),
           },
-          h('option', { value: 'watch' }, t('只记录', 'Record')),
-          h('option', { value: 'auto' }, t('自动回复', 'Auto')),
-          h('option', { value: 'auto-bots' }, t('自动（含机器人）', 'Auto + bots'))),
+          h('option', { value: 'human' }, t('回复真人消息', 'Replies humans')),
+          h('option', { value: 'bots' }, t('机器人消息也回复', 'Also bots'))),
           h('button', {
             type: 'button',
             className: 'bxf-mini bxf-danger',
