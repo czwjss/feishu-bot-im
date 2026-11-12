@@ -47,7 +47,6 @@ export class UserMonitorManager {
   #chatMemberNames;
   #getMessage;
   #defaultWorkspaceId;
-  #appNameFor;
   #autoReply;
   #nameCache = new Map();
   #parentSender = new Map();
@@ -58,7 +57,6 @@ export class UserMonitorManager {
     harness = null,
     sessionGuard = null,
     defaultWorkspaceId = null,
-    appNameFor = null,
     autoReply = null,
     logger = null,
     listMessages: listMessagesImpl = listMessages,
@@ -77,7 +75,6 @@ export class UserMonitorManager {
     this.#store = store;
     this.#logger = logger;
     this.#defaultWorkspaceId = defaultWorkspaceId;
-    this.#appNameFor = typeof appNameFor === 'function' ? appNameFor : null;
     this.#autoReply = autoReply
       ?? (harness
         ? new AutoReplyEngine({
@@ -251,12 +248,6 @@ export class UserMonitorManager {
     return this.status();
   }
 
-  /** 机器人发送者的显示名：按应用 id 查已配置机器人的名称。 */
-  #appNameOf(openId) {
-    const name = this.#appNameFor?.(openId);
-    return typeof name === 'string' && name.trim() ? name.trim() : '机器人';
-  }
-
   /** DSH 当前默认工作区 id；解析不到时返回 null。 */
   async resolveDefaultWorkspaceId() {
     return Promise.resolve(this.#defaultWorkspaceId ?? null).catch(() => null);
@@ -382,7 +373,7 @@ export class UserMonitorManager {
       if (messages.some((item) => item.messageId === card.messageId)) continue;
       messages.push({
         messageId: card.messageId,
-        senderName: message.senderName || (message.senderType === 'app' ? this.#appNameOf(message.senderOpenId) : ''),
+        senderName: message.senderName || (message.senderType === 'app' ? '机器人' : ''),
         senderOpenId: message.senderOpenId ?? '',
         senderType: message.senderType ?? '',
         createTime: message.createTime || card.createTime,
@@ -561,7 +552,7 @@ export class UserMonitorManager {
           const entry = {
             messageId: item.messageId,
             senderName: item.senderName || roster.get(item.senderOpenId)
-              || (item.senderType === 'app' ? this.#appNameOf(item.senderOpenId) : ''),
+              || (item.senderType === 'app' ? '机器人' : ''),
             senderOpenId: item.senderOpenId ?? '',
             senderType: item.senderType ?? '',
             createTime: item.createTime ?? new Date(time).toISOString(),

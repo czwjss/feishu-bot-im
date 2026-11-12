@@ -162,10 +162,6 @@ export async function apply(ctx, config = {}) {
     harness,
     sessionGuard,
     defaultWorkspaceId: readDefaultWorkspaceId,
-    appNameFor: (appId) => {
-      const bot = configStore.bots.find((item) => item.appId === appId);
-      return bot ? (bot.botName || bot.alias || null) : null;
-    },
     logger,
   });
   handoffKeywordsProvider = () => userMonitor.store.config.handoffKeywords;
