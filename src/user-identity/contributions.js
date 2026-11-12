@@ -1,13 +1,14 @@
 /**
- * 把飞书分身能力挂到 Host：system prompt 规则与模型工具。
+ * 把飞书分身能力挂到 Host：只注册模型工具。
  *
+ * 规则文案统一在 `src/policy.js` 的 FEISHU_POLICY 里，由 Host 注册一次，
+ * 机器人和分身共用，这里不再单独注册 policy section。
  * Host 默认调用，因此不需要在 Agent 预设里再挂 `./user-identity` 子插件。
  */
 import { appendFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-import { USER_IDENTITY_POLICY } from './policy.js';
 import { createUserIdentityTools } from './tools.js';
 
 /** 注册失败时留一份可读记录，便于在没有控制台的环境里定位。 */
@@ -26,14 +27,6 @@ async function report(stage, error) {
  * @param {object|null} monitor 消息监听；提供后额外注册收件箱工具。
  */
 export function installUserIdentityContributions(ctx, auth, monitor = null) {
-  ctx.inject(['systemPrompt'], (promptCtx) => {
-    promptCtx.systemPrompt.section({
-      name: 'im-feishu-user:policy',
-      order: 141,
-      text: USER_IDENTITY_POLICY,
-    });
-  });
-
   ctx.inject(['tools'], async (toolCtx) => {
     let tools;
     try {

@@ -22,11 +22,8 @@ const ctx = {
 
 // 没有监听时只挂三个工具。
 installUserIdentityContributions(ctx, {});
-assert.equal(sections.length, 1);
-assert.equal(sections[0].name, 'im-feishu-user:policy');
-assert.equal(sections[0].order, 141);
-assert.match(sections[0].text, /feishu_avatar_send/);
-assert.match(sections[0].text, /标题按需/, 'title style rule lives in the avatar policy');
+// 分身只贡献工具，不再单独注册 policy section（规则统一在 Host 的 FEISHU_POLICY）。
+assert.equal(sections.length, 0, 'no extra policy section is registered');
 assert.deepEqual(tools.map((tool) => tool.name), [
   'feishu_avatar_me',
   'feishu_avatar_messages',
@@ -55,7 +52,7 @@ assert.deepEqual(tools.map((tool) => tool.name), [
   'feishu_avatar_send',
   'feishu_avatar_draft',
 ]);
-assert.equal(sections.length, 1, 'no unread summary is injected into other sessions');
+assert.equal(sections.length, 0, 'no extra prompt section is registered');
 const draftTool = tools.find((tool) => tool.name === 'feishu_avatar_draft');
 const created = await draftTool.execute({ chatId: 'oc_test', text: '好的' });
 assert.equal(created.draftId, 'draft-1');
@@ -68,7 +65,7 @@ assert.deepEqual(tools.map((tool) => tool.name).sort(), [
   'feishu_avatar_messages',
   'feishu_avatar_send',
 ]);
-console.log('user identity contributions: 22 assertions passed');
+console.log('user identity contributions: 20 assertions passed');
 
 const preset = await import('../src/user-identity/index.js');
 assert.deepEqual(preset.inject, []);

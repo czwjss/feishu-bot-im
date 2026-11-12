@@ -18,11 +18,9 @@ assert.ok(!FEISHU_POLICY.includes('@'), 'the policy never uses the @ symbol');
 console.log('feishu policy: 13 assertions passed');
 
 
-// 标题风格规则对机器人和分身同时生效，但只维护一份。
-import { TITLE_RULE } from '../src/policy.js';
-import { USER_IDENTITY_POLICY } from '../src/user-identity/policy.js';
-assert.ok(FEISHU_POLICY.includes(TITLE_RULE), 'bot policy carries the shared title rule');
-assert.ok(USER_IDENTITY_POLICY.includes(TITLE_RULE), 'avatar policy carries the same rule');
-assert.equal(FEISHU_POLICY.split('\n').filter((line) => line === TITLE_RULE).length, 1);
-assert.equal(USER_IDENTITY_POLICY.split('\n').filter((line) => line === TITLE_RULE).length, 1);
-console.log('feishu shared title policy: 4 assertions passed');
+// 只有一套 policy：机器人与分身的规则都在 FEISHU_POLICY 里，标题规则只出现一次。
+assert.match(FEISHU_POLICY, /feishu_bot_send/);
+assert.match(FEISHU_POLICY, /feishu_avatar_send/);
+assert.match(FEISHU_POLICY, /飞书分身（用户身份）规则/);
+assert.equal(FEISHU_POLICY.split('\n').filter((line) => line.includes('标题按需')).length, 1);
+console.log('feishu single policy: 4 assertions passed');
