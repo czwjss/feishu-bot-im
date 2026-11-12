@@ -236,3 +236,12 @@ console.log('im-feishu user identity tool output: 8 assertions passed');
   await assert.rejects(() => tool.execute({ openId: 'ou_x', text: 'hi', replyToMessageId: 'om_1' }), /需要同时提供 chatId/);
 }
 console.log('im-feishu user identity reply mode: 5 assertions passed');
+
+// 标题规则只写一次：在 title 参数上，不在工具描述里重复。
+{
+  const tool = createSendTool({ auth: {}, fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ code: 0, data: {} }) }) });
+  assert.match(tool.parameters.properties.title.description, /短消息不写/);
+  assert.match(tool.parameters.properties.title.description, /总结|长内容/);
+  assert.equal(/短对话不写标题/.test(tool.description), false, 'tool description does not repeat the rule');
+}
+console.log('im-feishu user identity title rule: 3 assertions passed');
