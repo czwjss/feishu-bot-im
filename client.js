@@ -608,7 +608,7 @@ function MonitorPanel({ connection }) {
   const [manualMode, setManualMode] = import_react2.default.useState("p2p");
   const [busy, setBusy] = import_react2.default.useState("");
   const [error, setError] = import_react2.default.useState(null);
-  const [workerOptions, setWorkerOptions2] = import_react2.default.useState({ workspaces: [], presets: [] });
+  const [workerOptions, setWorkerOptions] = import_react2.default.useState({ workspaces: [], presets: [] });
   const load = import_react2.default.useCallback(async () => {
     try {
       const value = await rpc(connection, API.userMonitorStatus, {});
@@ -627,7 +627,7 @@ function MonitorPanel({ connection }) {
     let alive = true;
     void rpc(connection, API.userMonitorWorkerOptions, {}).then((value) => {
       if (!alive) return;
-      setWorkerOptions2({
+      setWorkerOptions({
         workspaces: Array.isArray(value?.workspaces) ? value.workspaces : [],
         presets: Array.isArray(value?.presets) ? value.presets : []
       });
@@ -1141,19 +1141,6 @@ function UserIdentityButton({ connection, bot }) {
   import_react2.default.useEffect(() => {
     void load();
   }, [load]);
-  import_react2.default.useEffect(() => {
-    let alive = true;
-    void rpc(connection, API.userMonitorWorkerOptions, {}).then((value) => {
-      if (!alive) return;
-      setWorkerOptions({
-        workspaces: Array.isArray(value?.workspaces) ? value.workspaces : [],
-        presets: Array.isArray(value?.presets) ? value.presets : []
-      });
-    }).catch(() => void 0);
-    return () => {
-      alive = false;
-    };
-  }, [connection]);
   import_react2.default.useEffect(() => {
     if (status?.connect?.phase !== "pending") return void 0;
     const timer = setInterval(() => {

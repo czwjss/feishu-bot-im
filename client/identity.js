@@ -412,18 +412,6 @@ const h = React.createElement;
 
       React.useEffect(() => { void load(); }, [load]);
       React.useEffect(() => {
-        let alive = true;
-        void rpc(connection, API.userMonitorWorkerOptions, {}).then((value) => {
-          if (!alive) return;
-          setWorkerOptions({
-            workspaces: Array.isArray(value?.workspaces) ? value.workspaces : [],
-            presets: Array.isArray(value?.presets) ? value.presets : [],
-          });
-        }).catch(() => undefined);
-        return () => { alive = false; };
-      }, [connection]);
-
-      React.useEffect(() => {
         if (status?.connect?.phase !== 'pending') return undefined;
         const timer = setInterval(() => { void load(); }, 1500);
         return () => clearInterval(timer);
