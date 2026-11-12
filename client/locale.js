@@ -150,7 +150,6 @@ export const MESSAGES = Object.freeze({
   "选择会话": "Choose chats",
   "添加": "Add",
   "手动填 chat_id（oc_…）": "Enter chat_id (oc_…)",
-  "清空记录": "Clear",
   "未知": "Unknown",
   "全部消息": "All messages",
   "关键词": "Keywords",

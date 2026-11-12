@@ -12,7 +12,7 @@ const h = React.createElement;
       const [showPicker, setShowPicker] = React.useState(false);
       const [busy, setBusy] = React.useState('');
       const [error, setError] = React.useState(null);
-      const [workerOptions, setWorkerOptions] = React.useState({ workspaces: [], presets: [] });
+      const [workerOptions, setWorkerOptions] = React.useState({ workspaces: [], presets: [], defaultWorkspaceId: null });
 
       const load = React.useCallback(async () => {
         try {
@@ -34,6 +34,7 @@ const h = React.createElement;
           setWorkerOptions({
             workspaces: Array.isArray(value?.workspaces) ? value.workspaces : [],
             presets: Array.isArray(value?.presets) ? value.presets : [],
+            defaultWorkspaceId: typeof value?.defaultWorkspaceId === 'string' ? value.defaultWorkspaceId : null,
           });
         }).catch(() => undefined);
         return () => { alive = false; };
@@ -63,7 +64,6 @@ const h = React.createElement;
       const toggle = () => act('toggle', () => rpc(connection, API.userMonitorEnable, { enabled: monitor?.enabled !== true }));
       const poll = () => act('poll', () => rpc(connection, API.userMonitorPoll, {}));
       const flushPending = () => act('flush', () => rpc(connection, API.userMonitorFlush, {}));
-      const clearAll = () => act('clear', () => rpc(connection, API.userMonitorClear, {}));
 
       const togglePicker = () => {
         const next = !showPicker;
@@ -92,6 +92,12 @@ const h = React.createElement;
       const candidates = (available ?? []).filter((chat) => !monitored.has(chat.chatId));
       const pendingTotal = chats.reduce((sum, chat) => sum + (chat.pendingBatch || 0), 0);
       const formatTime = (ms) => (Number.isFinite(ms) && ms > 0 ? new Date(ms).toLocaleTimeString() : '—');
+      const defaultWorkspaceId = workerOptions.defaultWorkspaceId ?? null;
+      const workspaces = [...workerOptions.workspaces].sort((left, right) => {
+        if (left.id === defaultWorkspaceId) return -1;
+        if (right.id === defaultWorkspaceId) return 1;
+        return 0;
+      });
 
       const selectStyle = { ...S.input, width: 'auto', height: '28px', fontSize: '12px', paddingRight: '26px' };
       const sectionHead = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', margin: '2px 0 6px' };
@@ -99,14 +105,13 @@ const h = React.createElement;
       const divider = { borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: '10px', marginTop: '2px' };
 
       const chatRow = (chat) => {
-        const recorded = (chat.messages ?? []).length;
         return h('div', { key: chat.chatId, style: { display: 'grid', gap: '6px', padding: '9px 0', borderTop: '1px solid var(--dsw-alias-border-l1)' } },
           h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
             h('div', { style: { flex: '1 1 160px', minWidth: 0 } },
               h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
                 h('span', { style: { fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } },
                   chat.name || chat.chatId),
-                recorded > 0 ? h('span', { style: S.badge('muted') }, recorded) : null),
+                null),
               h('div', { style: { ...S.hint, marginTop: '1px' } },
                 `${chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group')} · ${chat.chatId}`,
                 chat.lastDispatchAt ? ` · ${t('上次派发', 'last dispatch')} ${formatTime(chat.lastDispatchAt)}` : '')),
@@ -150,22 +155,6 @@ const h = React.createElement;
             ? h('div', { style: { ...S.hint, color: 'var(--dsw-alias-state-error-primary)' } }, chat.lastError)
             : null);
       };
-
-      const recentSection = chats.some((chat) => (chat.messages ?? []).length > 0)
-        ? h('div', { style: { display: 'grid', gap: '6px' } },
-          chats.filter((chat) => (chat.messages ?? []).length > 0).map((chat) => h('div', {
-            key: `r:${chat.chatId}`,
-            style: { display: 'grid', gap: '2px' },
-          },
-          h('div', { style: { ...S.hint, fontWeight: 600 } }, chat.name || chat.chatId),
-          (chat.messages ?? []).slice(-3).map((message) => h('div', {
-            key: message.messageId,
-            style: {
-              fontSize: '12px', color: 'var(--dsw-alias-label-secondary)',
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            },
-          }, `${message.outcome === 'dispatched' ? '✓ ' : ''}${message.senderName || t('未知', 'Unknown')}：${message.text}`)))))
-        : null;
 
       const pickerSection = showPicker
         ? h('div', { style: { display: 'grid', gap: '2px', maxHeight: '240px', overflow: 'auto', paddingTop: '4px' } },
@@ -258,13 +247,12 @@ const h = React.createElement;
                 h('span', { style: { ...S.hint, marginTop: 0 } }, t('分组', 'Group')),
                 h('select', {
                   style: { ...S.input, height: '30px', fontSize: '12px' },
-                  value: monitor.worker?.workspaceId || '',
+                  value: monitor.worker?.workspaceId || defaultWorkspaceId || '',
                   disabled: busy === 'worker',
                   onChange: (event) => void setWorker({ workspaceId: event.target.value, workspacePath: '' }),
                 },
-                h('option', { value: '' }, t('默认工作区', 'Default workspace')),
-                workerOptions.workspaces.map((item) => h('option', { key: item.id, value: item.id },
-                  `${item.title || item.id}${item.path ? ` · ${item.path}` : ''}`)))),
+                workspaces.map((item) => h('option', { key: item.id, value: item.id },
+                  `${item.title || item.id}${item.path ? ` · ${item.path}` : ''}${item.id === defaultWorkspaceId ? t('（默认）', ' (default)') : ''}`)))),
               h('label', { style: { display: 'grid', gap: '4px' } },
                 h('span', { style: { ...S.hint, marginTop: 0 } }, t('预设', 'Preset')),
                 h('select', {
@@ -277,16 +265,7 @@ const h = React.createElement;
                 workerOptions.presets.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id))))),
             h('p', { style: S.hint },
               t('自动回复的 Worker 会话建在这个分组下；改动后下一次派发自动换新会话。',
-                'Auto-reply workers are created in this group; changes apply on the next dispatch.'))),
-
-          recentSection
-            ? h('div', { style: divider },
-              h('div', { style: sectionHead },
-                h('span', { style: sectionTitle }, t('最近记录', 'Recent')),
-                h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'clear', onClick: () => void clearAll() },
-                  t('清空记录', 'Clear'))),
-              recentSection)
-            : null));
+                'Auto-reply workers are created in this group; changes apply on the next dispatch.')))));
     }
 
 

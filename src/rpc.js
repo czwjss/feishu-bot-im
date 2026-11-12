@@ -216,7 +216,12 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
         const items = Array.isArray(baseline?.items) ? baseline.items : [];
         const runtime = manager.runtimes[0] ?? null;
         const presets = runtime ? await runtime.listPresets().catch(() => []) : [];
+        const monitor = requireUserMonitor();
+        const defaultWorkspaceId = typeof monitor.resolveDefaultWorkspaceId === 'function'
+          ? await monitor.resolveDefaultWorkspaceId().catch(() => null)
+          : null;
         return ok({
+          defaultWorkspaceId,
           workspaces: items
             .filter((item) => typeof item?.workspaceId === 'string' && item.workspaceId)
             .map((item) => ({
@@ -249,9 +254,6 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
           replyToBots: input.replyToBots,
           preset: input.preset,
         }));
-
-      case 'user.monitor.clear':
-        return ok(await requireUserMonitor().clearMessages(input.chatId));
 
       // ── 兼容层：旧版单机器人设置页仍可工作 ─────────────────────────────
       case 'connection.status': {

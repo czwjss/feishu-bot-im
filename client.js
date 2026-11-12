@@ -193,7 +193,6 @@ var MESSAGES = Object.freeze({
   "\u9009\u62E9\u4F1A\u8BDD": "Choose chats",
   "\u6DFB\u52A0": "Add",
   "\u624B\u52A8\u586B chat_id\uFF08oc_\u2026\uFF09": "Enter chat_id (oc_\u2026)",
-  "\u6E05\u7A7A\u8BB0\u5F55": "Clear",
   "\u672A\u77E5": "Unknown",
   "\u5168\u90E8\u6D88\u606F": "All messages",
   "\u5173\u952E\u8BCD": "Keywords",
@@ -257,8 +256,7 @@ var API = {
   userMonitorWorkerOptions: "user.monitor.worker.options",
   userMonitorPoll: "user.monitor.poll",
   userMonitorFlush: "user.monitor.flush",
-  userMonitorChatSet: "user.monitor.chat.set",
-  userMonitorClear: "user.monitor.clear"
+  userMonitorChatSet: "user.monitor.chat.set"
 };
 var boundTranslate = null;
 var activeLocale = "";
@@ -595,7 +593,7 @@ function MonitorPanel({ connection }) {
   const [showPicker, setShowPicker] = import_react2.default.useState(false);
   const [busy, setBusy] = import_react2.default.useState("");
   const [error, setError] = import_react2.default.useState(null);
-  const [workerOptions, setWorkerOptions] = import_react2.default.useState({ workspaces: [], presets: [] });
+  const [workerOptions, setWorkerOptions] = import_react2.default.useState({ workspaces: [], presets: [], defaultWorkspaceId: null });
   const load = import_react2.default.useCallback(async () => {
     try {
       const value = await rpc(connection, API.userMonitorStatus, {});
@@ -616,7 +614,8 @@ function MonitorPanel({ connection }) {
       if (!alive) return;
       setWorkerOptions({
         workspaces: Array.isArray(value?.workspaces) ? value.workspaces : [],
-        presets: Array.isArray(value?.presets) ? value.presets : []
+        presets: Array.isArray(value?.presets) ? value.presets : [],
+        defaultWorkspaceId: typeof value?.defaultWorkspaceId === "string" ? value.defaultWorkspaceId : null
       });
     }).catch(() => void 0);
     return () => {
@@ -648,7 +647,6 @@ function MonitorPanel({ connection }) {
   const toggle = () => act("toggle", () => rpc(connection, API.userMonitorEnable, { enabled: monitor?.enabled !== true }));
   const poll = () => act("poll", () => rpc(connection, API.userMonitorPoll, {}));
   const flushPending = () => act("flush", () => rpc(connection, API.userMonitorFlush, {}));
-  const clearAll = () => act("clear", () => rpc(connection, API.userMonitorClear, {}));
   const togglePicker = () => {
     const next = !showPicker;
     setShowPicker(next);
@@ -674,12 +672,17 @@ function MonitorPanel({ connection }) {
   const candidates = (available ?? []).filter((chat) => !monitored.has(chat.chatId));
   const pendingTotal = chats.reduce((sum, chat) => sum + (chat.pendingBatch || 0), 0);
   const formatTime = (ms) => Number.isFinite(ms) && ms > 0 ? new Date(ms).toLocaleTimeString() : "\u2014";
+  const defaultWorkspaceId = workerOptions.defaultWorkspaceId ?? null;
+  const workspaces = [...workerOptions.workspaces].sort((left, right) => {
+    if (left.id === defaultWorkspaceId) return -1;
+    if (right.id === defaultWorkspaceId) return 1;
+    return 0;
+  });
   const selectStyle = { ...S.input, width: "auto", height: "28px", fontSize: "12px", paddingRight: "26px" };
   const sectionHead = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", margin: "2px 0 6px" };
   const sectionTitle = { fontSize: "12px", fontWeight: 600 };
   const divider = { borderTop: "1px solid var(--dsw-alias-border-l1)", paddingTop: "10px", marginTop: "2px" };
   const chatRow = (chat) => {
-    const recorded = (chat.messages ?? []).length;
     return h2(
       "div",
       { key: chat.chatId, style: { display: "grid", gap: "6px", padding: "9px 0", borderTop: "1px solid var(--dsw-alias-border-l1)" } },
@@ -697,7 +700,7 @@ function MonitorPanel({ connection }) {
               { style: { fontSize: "13px", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } },
               chat.name || chat.chatId
             ),
-            recorded > 0 ? h2("span", { style: S.badge("muted") }, recorded) : null
+            null
           ),
           h2(
             "div",
@@ -748,28 +751,6 @@ function MonitorPanel({ connection }) {
       chat.lastError ? h2("div", { style: { ...S.hint, color: "var(--dsw-alias-state-error-primary)" } }, chat.lastError) : null
     );
   };
-  const recentSection = chats.some((chat) => (chat.messages ?? []).length > 0) ? h2(
-    "div",
-    { style: { display: "grid", gap: "6px" } },
-    chats.filter((chat) => (chat.messages ?? []).length > 0).map((chat) => h2(
-      "div",
-      {
-        key: `r:${chat.chatId}`,
-        style: { display: "grid", gap: "2px" }
-      },
-      h2("div", { style: { ...S.hint, fontWeight: 600 } }, chat.name || chat.chatId),
-      (chat.messages ?? []).slice(-3).map((message) => h2("div", {
-        key: message.messageId,
-        style: {
-          fontSize: "12px",
-          color: "var(--dsw-alias-label-secondary)",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis"
-        }
-      }, `${message.outcome === "dispatched" ? "\u2713 " : ""}${message.senderName || t("\u672A\u77E5", "Unknown")}\uFF1A${message.text}`))
-    ))
-  ) : null;
   const pickerSection = showPicker ? h2(
     "div",
     { style: { display: "grid", gap: "2px", maxHeight: "240px", overflow: "auto", paddingTop: "4px" } },
@@ -907,15 +888,14 @@ function MonitorPanel({ connection }) {
               "select",
               {
                 style: { ...S.input, height: "30px", fontSize: "12px" },
-                value: monitor.worker?.workspaceId || "",
+                value: monitor.worker?.workspaceId || defaultWorkspaceId || "",
                 disabled: busy === "worker",
                 onChange: (event) => void setWorker({ workspaceId: event.target.value, workspacePath: "" })
               },
-              h2("option", { value: "" }, t("\u9ED8\u8BA4\u5DE5\u4F5C\u533A", "Default workspace")),
-              workerOptions.workspaces.map((item) => h2(
+              workspaces.map((item) => h2(
                 "option",
                 { key: item.id, value: item.id },
-                `${item.title || item.id}${item.path ? ` \xB7 ${item.path}` : ""}`
+                `${item.title || item.id}${item.path ? ` \xB7 ${item.path}` : ""}${item.id === defaultWorkspaceId ? t("\uFF08\u9ED8\u8BA4\uFF09", " (default)") : ""}`
               ))
             )
           ),
@@ -944,22 +924,7 @@ function MonitorPanel({ connection }) {
             "Auto-reply workers are created in this group; changes apply on the next dispatch."
           )
         )
-      ),
-      recentSection ? h2(
-        "div",
-        { style: divider },
-        h2(
-          "div",
-          { style: sectionHead },
-          h2("span", { style: sectionTitle }, t("\u6700\u8FD1\u8BB0\u5F55", "Recent")),
-          h2(
-            "button",
-            { type: "button", className: "bxf-mini", disabled: busy === "clear", onClick: () => void clearAll() },
-            t("\u6E05\u7A7A\u8BB0\u5F55", "Clear")
-          )
-        ),
-        recentSection
-      ) : null
+      )
     )
   );
 }

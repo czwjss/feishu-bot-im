@@ -124,13 +124,8 @@ try {
   await monitor.pollOnce();
   assert.equal(store.state.chats[chatId].messages.length, 2);
 
-  // 5) status 返回记录的消息。
-  const status = await monitor.status();
-  assert.equal(status.chats[0].messages.length, 2);
-
-  // 7) 清空记录但保留游标。
-  await monitor.clearMessages();
-  assert.equal(store.state.chats[chatId].messages.length, 0);
+  // 5) 记录保留在状态里。
+  assert.equal(store.state.chats[chatId].messages.length, 2);
   assert.equal(store.state.chats[chatId].cursorTimeMs, now - 5_000);
 
 } finally {

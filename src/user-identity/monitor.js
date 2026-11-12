@@ -46,6 +46,7 @@ export class UserMonitorManager {
   #listChats;
   #chatMemberNames;
   #getMessage;
+  #defaultWorkspaceId;
   #autoReply;
   #nameCache = new Map();
   #parentSender = new Map();
@@ -73,12 +74,14 @@ export class UserMonitorManager {
     this.#auth = auth;
     this.#store = store;
     this.#logger = logger;
+    this.#defaultWorkspaceId = defaultWorkspaceId;
     this.#autoReply = autoReply
       ?? (harness
         ? new AutoReplyEngine({
           store,
           harness,
           sessionGuard,
+          defaultWorkspaceId,
           logger,
           now,
           setTimeout: setTimeoutImpl,
@@ -140,7 +143,6 @@ export class UserMonitorManager {
         lastDispatchAt: entry.lastDispatchAt ?? null,
         lastPollAt: entry.lastPollAt ?? null,
         lastError: entry.lastError ?? null,
-        messages: messages.slice(-10),
       };
     });
     return {
@@ -242,6 +244,11 @@ export class UserMonitorManager {
     return this.status();
   }
 
+  /** DSH 当前默认工作区 id；解析不到时返回 null。 */
+  async resolveDefaultWorkspaceId() {
+    return Promise.resolve(this.#defaultWorkspaceId ?? null).catch(() => null);
+  }
+
   /** 手动触发：把各会话积压的待处理批次立刻交给 Worker。 */
   async flushPending() {
     let dispatched = 0;
@@ -258,18 +265,6 @@ export class UserMonitorManager {
   async setEnabled(enabled) {
     await this.#store.saveConfig({ enabled: enabled === true });
     if (enabled === true) void this.pollOnce();
-    return this.status();
-  }
-
-  /** 清空某会话（或全部）记录，但保留游标和去重集合。 */
-  async clearMessages(chatId = '') {
-    const id = stringOf(chatId).trim();
-    const state = { ...this.#store.state, chats: { ...this.#store.state.chats } };
-    for (const [key, entry] of Object.entries(state.chats)) {
-      if (id && key !== id) continue;
-      state.chats[key] = { ...entry, messages: [] };
-    }
-    await this.#store.saveState(state);
     return this.status();
   }
 
