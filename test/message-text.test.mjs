@@ -35,3 +35,14 @@ assert.equal(interactiveTextOfContent(JSON.stringify({
 })), '请升级至最新版本客户端，以查看内容');
 
 console.log('message text: 13 assertions passed');
+
+// 卡片消息入站：抽成文本，机器人按普通消息处理。
+const cardContent = JSON.stringify({
+  schema: '2.0',
+  header: { title: { content: '回复夸夸' } },
+  body: { elements: [{ tag: 'markdown', content: '哈哈，谢谢夸。' }] },
+});
+assert.equal(textOfContentOrPost({ message_type: 'interactive', content: cardContent }), '回复夸夸\n哈哈，谢谢夸。');
+assert.equal(textOfContentOrPost({ message_type: 'interactive', content: JSON.stringify({ schema: '2.0', body: { elements: [{ tag: 'markdown', content: '只有正文' }] } }) }), '只有正文');
+assert.equal(textOfContentOrPost({ message_type: 'interactive', content: '{}' }), null);
+console.log('feishu card inbound: 5 assertions passed');
