@@ -8,7 +8,7 @@ import { TurnRunner } from './turn.js';
 import { CARD_IDLE_MS, CARD_STUCK_MS, cardStreamingOf, chatIdOfKey, scopedValue, textOfContentOrPost } from './message-text.js';
 
 /** 挂起卡片的检查间隔。 */
-const CARD_POLL_MS = 3_000;
+const CARD_POLL_MS = 2_000;
 import { approvalCard, questionCard, resolvedApprovalText, newSessionCard, adjustCard, noticeCard } from './cards.js';
 import { isAddressed, isAllowed, senderOpenId } from './access.js';
 import { buildMenuCard, collectMenuData, currentMenuValue, menuOptionLabel, runCommand } from './commands.js';
@@ -743,6 +743,7 @@ export class FeishuBridge {
       chatId: message.chat_id,
       created,
       updatedAt: Number(message.update_time) || created,
+      nextCheckAt: Date.now() + CARD_POLL_MS,
     });
     this.#startCardTimer();
     this.#log('info', `卡片仍在流式输出，挂起等待收尾 ${message.message_id}`);
@@ -758,9 +759,15 @@ export class FeishuBridge {
   async #sweepPendingCards() {
     if (this.#disposed) return;
     for (const [messageId, pending] of [...this.#pendingCards]) {
-      if (Date.now() - pending.created > CARD_STUCK_MS) {
+      const now = Date.now();
+      if (now < (pending.nextCheckAt ?? 0)) continue;
+      // 越等越稀疏：前 30 秒 2 秒一次，之后 5 秒、15 秒。
+      const age = now - pending.created;
+      const interval = age < 30_000 ? CARD_POLL_MS : age < 120_000 ? 5_000 : 15_000;
+      pending.nextCheckAt = now + interval;
+      if (now - pending.created > CARD_STUCK_MS) {
         this.#pendingCards.delete(messageId);
-        this.#log('warn', `卡片超过 15 分钟未收尾，丢弃 ${messageId}`);
+        this.#log('warn', `卡片超过 10 分钟未收尾，丢弃 ${messageId}`);
         continue;
       }
       const latest = await this.#bot.getMessage?.(messageId).catch(() => null);
