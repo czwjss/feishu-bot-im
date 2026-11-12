@@ -1680,5 +1680,15 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
+// 24) 对方要求真人：不建会话、不回卡片
+{
+  const { bot, harness, bridge } = makeBridge();
+  await bridge.handleMessage(message({ content: JSON.stringify({ text: '麻烦转人工处理' }) }));
+  assert.equal(harness.prompts.length, 0, 'handoff message does not reach the model');
+  assert.equal(harness.created, 0, 'handoff message creates no session');
+  assert.equal(bot.cards.length, 0, 'handoff message gets no reply card');
+  bridge.dispose();
+}
+
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 82 assertions passed');
+console.log('bridge: 86 assertions passed');

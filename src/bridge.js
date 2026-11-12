@@ -6,6 +6,7 @@
  */
 import { TurnRunner } from './turn.js';
 import { CARD_STUCK_MS, cardStreamingOf, chatIdOfKey, scopedValue, textOfContentOrPost } from './message-text.js';
+import { handoffRequestedIn } from './handoff.js';
 
 /** 挂起卡片的检查间隔：流式卡片通常很快收尾，30 秒查一次足够。 */
 const CARD_POLL_MS = 30_000;
@@ -235,6 +236,13 @@ export class FeishuBridge {
           return;
         }
       }
+    }
+
+    // 对方明确要求真人：不回复，等人来处理。
+    const handoff = handoffRequestedIn(text);
+    if (handoff) {
+      this.#log('info', `命中「${handoff}」，转人工，不回复 ${message.message_id}`);
+      return;
     }
 
     const supported = ['text', 'post', 'image', 'file', 'interactive'];

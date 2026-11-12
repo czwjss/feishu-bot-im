@@ -16,6 +16,7 @@ import {
   BATCH_MAX_WAIT_MS,
   DEFAULT_WORKER_PRESET,
 } from './monitor-store.js';
+import { handoffRequestedIn } from '../handoff.js';
 
 function stringOf(value) {
   return typeof value === 'string' ? value : '';
@@ -137,6 +138,13 @@ export class AutoReplyEngine {
     // 流式卡片在收尾前不会进入消息列表，所以这里的消息都是可处理的。
     const messages = this.#storedMessages(chat.chatId, ids);
     if (messages.length === 0) {
+      await this.#clearBatch(chat.chatId);
+      return null;
+    }
+    // 有人明确要求真人：整批不处理，等人来。
+    const handoff = messages.map((message) => handoffRequestedIn(message.text)).find(Boolean);
+    if (handoff) {
+      this.#logger?.info?.(`[im-feishu] ${chat.chatId} 命中「${handoff}」，本批转人工，不派发`);
       await this.#clearBatch(chat.chatId);
       return null;
     }

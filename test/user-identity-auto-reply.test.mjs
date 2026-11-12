@@ -145,6 +145,21 @@ try {
   const handled = store.state.chats[chatId];
   assert.equal(handled.batch.messageIds.length, 0, 'batch cleared after dispatch');
 
+  // 3b) 有人要求转人工：整批不派发，直接丢弃
+  await store.saveState({
+    chats: {
+      [chatId]: {
+        ...handled,
+        messages: [userMessage('om_handoff', '别问了，转人工处理')],
+        batch: { messageIds: ['om_handoff'], firstAt: clock.now(), lastAt: clock.now() },
+      },
+    },
+  });
+  const promptsBeforeHandoff = prompts.length;
+  assert.equal(await engine.flush({ ...chat }), null, 'handoff batch is not dispatched');
+  assert.equal(prompts.length, promptsBeforeHandoff, 'no worker prompt for handoff batch');
+  assert.deepEqual(store.state.chats[chatId].batch.messageIds, [], 'handoff batch is dropped');
+
   // 4) 派发失败保留批次，等重试
   failPrompt = true;
   await store.saveState({
