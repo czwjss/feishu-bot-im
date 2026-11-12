@@ -24,9 +24,8 @@ async function report(stage, error) {
 /**
  * @param {object} ctx Host 或兼容作用域的 Cordis 上下文。
  * @param {object} auth 用户身份认证器。
- * @param {object|null} monitor 消息监听；提供后额外注册收件箱工具。
  */
-export function installUserIdentityContributions(ctx, auth, monitor = null) {
+export function installUserIdentityContributions(ctx, auth) {
   ctx.inject(['tools'], async (toolCtx) => {
     let tools;
     try {

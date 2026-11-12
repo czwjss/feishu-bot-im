@@ -149,7 +149,7 @@ export async function apply(ctx, config = {}) {
     sessionGuard,
     logger,
   });
-  installUserIdentityContributions(ctx, userIdentityAuth, userMonitor);
+  installUserIdentityContributions(ctx, userIdentityAuth);
   userMonitor.start();
 
   const handler = createRpcHandler({ manager, harness, version: pluginVersion, userIdentity, userMonitor });

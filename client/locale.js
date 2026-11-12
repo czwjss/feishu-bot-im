@@ -169,7 +169,7 @@ export const MESSAGES = Object.freeze({
   "自动回复": "Auto reply",
   "自动回复（含机器人）": "Auto reply (bots too)",
   "待处理": "pending",
-  "上次自动回复": "last auto",
+  "上次派发": "last dispatch",
   "处理待办": "Flush pending",
   "已处理": "handled"
 });

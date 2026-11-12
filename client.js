@@ -212,7 +212,7 @@ var MESSAGES = Object.freeze({
   "\u81EA\u52A8\u56DE\u590D": "Auto reply",
   "\u81EA\u52A8\u56DE\u590D\uFF08\u542B\u673A\u5668\u4EBA\uFF09": "Auto reply (bots too)",
   "\u5F85\u5904\u7406": "pending",
-  "\u4E0A\u6B21\u81EA\u52A8\u56DE\u590D": "last auto",
+  "\u4E0A\u6B21\u6D3E\u53D1": "last dispatch",
   "\u5904\u7406\u5F85\u529E": "Flush pending",
   "\u5DF2\u5904\u7406": "handled"
 });
@@ -271,7 +271,6 @@ var API = {
   userMonitorPoll: "user.monitor.poll",
   userMonitorFlush: "user.monitor.flush",
   userMonitorChatSet: "user.monitor.chat.set",
-  userMonitorInbox: "user.monitor.inbox",
   userMonitorRead: "user.monitor.read",
   userMonitorClear: "user.monitor.clear"
 };
@@ -703,7 +702,7 @@ function MonitorPanel({ connection }) {
         `${chat.chatMode === "p2p" ? t("\u79C1\u804A", "Direct") : t("\u7FA4\u804A", "Group")} \xB7 ${chat.chatId}`,
         chat.pendingBatch ? ` \xB7 ${t("\u5F85\u5904\u7406", "pending")} ${chat.pendingBatch}` : "",
         chat.handled ? ` \xB7 ${t("\u5DF2\u5904\u7406", "handled")} ${chat.handled}` : "",
-        chat.lastAutoReplyAt ? ` \xB7 ${t("\u4E0A\u6B21\u81EA\u52A8\u56DE\u590D", "last auto")} ${formatTime(chat.lastAutoReplyAt)}` : "",
+        chat.lastDispatchAt ? ` \xB7 ${t("\u4E0A\u6B21\u6D3E\u53D1", "last dispatch")} ${formatTime(chat.lastDispatchAt)}` : "",
         chat.lastError ? h2("span", { style: { color: "var(--dsw-alias-state-error-primary)" } }, ` \xB7 ${chat.lastError}`) : null
       )
     ),

@@ -250,9 +250,6 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
           preset: input.preset,
         }));
 
-      case 'user.monitor.inbox':
-        return ok(await requireUserMonitor().inbox(input));
-
       case 'user.monitor.read':
         return ok(await requireUserMonitor().markRead(input.chatId));
 

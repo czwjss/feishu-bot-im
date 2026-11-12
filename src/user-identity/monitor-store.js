@@ -28,7 +28,6 @@ export const BATCH_MAX_WAIT_MS = 3 * 60_000;
 export const BATCH_MAX_MESSAGES = 10;
 export const DEFAULT_WORKER_PRESET = 'standard';
 export const MAX_WORKER_PRESET = 40;
-export const MAX_OUTBOX = 20;
 /** 消息处理结果：批次已派发给 Worker，后续不再由插件跟踪。 */
 export const MESSAGE_OUTCOMES = Object.freeze(['dispatched']);
 export const DEFAULT_POLL_INTERVAL_MS = 60_000;
@@ -171,19 +170,6 @@ export function normalizeMonitorState(value) {
     const pendingIds = Array.isArray(batch.messageIds)
       ? batch.messageIds.map(cleanString).filter(Boolean).slice(0, BATCH_MAX_MESSAGES)
       : [];
-    const outbox = [];
-    for (const raw of Array.isArray(entry.outbox) ? entry.outbox : []) {
-      const item = raw && typeof raw === 'object' ? raw : {};
-      const messageId = cleanString(item.messageId);
-      if (!messageId) continue;
-      outbox.push(Object.freeze({
-        messageId,
-        text: stringOf(item.text).slice(0, MAX_MESSAGE_TEXT),
-        at: cleanTime(item.at) ?? 0,
-        source: cleanString(item.source) || 'auto',
-      }));
-      if (outbox.length >= MAX_OUTBOX) break;
-    }
     chats[chatId] = Object.freeze({
       cursorTimeMs: cleanTime(entry.cursorTimeMs),
       cursorMessageId: cleanString(entry.cursorMessageId) || null,
@@ -196,7 +182,7 @@ export function normalizeMonitorState(value) {
         lastAt: cleanTime(batch.lastAt),
         token: cleanString(batch.token) || null,
       }),
-      outbox: Object.freeze(outbox),
+      lastDispatchAt: cleanTime(entry.lastDispatchAt),
       seen: Object.freeze(seen),
       lastPollAt: cleanTime(entry.lastPollAt),
       lastError: cleanString(entry.lastError) || null,

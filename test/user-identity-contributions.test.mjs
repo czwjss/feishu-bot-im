@@ -33,7 +33,7 @@ assert.deepEqual(tools.map((tool) => tool.name), [
 // 有监听时也只注册同样的三个工具；草稿与决策工具都已删除。
 tools.length = 0;
 sections.length = 0;
-installUserIdentityContributions(ctx, {}, { autoReply: {}, async inbox() { return { total: 0, items: [] }; } });
+installUserIdentityContributions(ctx, {});
 assert.deepEqual(tools.map((tool) => tool.name), [
   'feishu_avatar_me',
   'feishu_avatar_messages',

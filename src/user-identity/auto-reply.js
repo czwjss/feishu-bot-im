@@ -15,7 +15,6 @@ import {
   BATCH_MAX_MESSAGES,
   BATCH_MAX_WAIT_MS,
   DEFAULT_WORKER_PRESET,
-  MAX_OUTBOX,
 } from './monitor-store.js';
 
 function stringOf(value) {
@@ -144,7 +143,7 @@ export class AutoReplyEngine {
       await this.#clearBatch(chat.chatId, batchMessages, { markHandled: true });
       return null;
     }
-    if (botOnly && this.#repliesSince(chat.chatId, 10 * 60_000) > 0) {
+    if (botOnly && this.#dispatchedWithin(chat.chatId, 10 * 60_000)) {
       this.#logger?.info?.(`[im-feishu] ${chat.chatId} 十分钟内已自动回复过机器人，跳过本轮`);
       await this.#clearBatch(chat.chatId, batchMessages, { markHandled: true });
       return null;
@@ -167,6 +166,7 @@ export class AutoReplyEngine {
       return null;
     }
 
+    await this.#patch(chat.chatId, { lastDispatchAt: this.#now() });
     await this.#clearBatch(chat.chatId, batchMessages, { markHandled: true });
     return chat.chatId;
   }
@@ -220,11 +220,10 @@ export class AutoReplyEngine {
     return null;
   }
 
-  #repliesSince(chatId, windowMs) {
-    const since = this.#now() - windowMs;
-    return (this.#store.state.chats[chatId]?.outbox ?? [])
-      .filter((item) => item.at > since && item.source === 'auto')
-      .length;
+  /** 该会话在窗口内是否已经派发过（用于机器人批次限速）。 */
+  #dispatchedWithin(chatId, windowMs) {
+    const last = this.#store.state.chats[chatId]?.lastDispatchAt ?? 0;
+    return this.#now() - last < windowMs;
   }
 
   /** 清空批次；markHandled 时把消息标记为已处理。 */

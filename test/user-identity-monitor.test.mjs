@@ -125,18 +125,12 @@ try {
   await monitor.pollOnce();
   assert.equal(store.state.chats[chatId].messages.length, 2);
 
-  // 5) 收件箱默认只取未读并标记已读。
-  const first = await monitor.inbox({});
-  assert.equal(first.total, 2);
-  assert.deepEqual(first.items.map((item) => item.text), ['bot', '@同事 你好']);
-  const second = await monitor.inbox({});
-  assert.equal(second.total, 0);
-
-  // 6) status 统计未读并带最近消息。
-  await monitor.inbox({ unreadOnly: false, markRead: false });
+  // 5) status 统计未读；标记已读后归零。
   const status = await monitor.status();
-  assert.equal(status.unreadTotal, 0);
+  assert.equal(status.unreadTotal, 2);
   assert.equal(status.chats[0].messages.length, 2);
+  await monitor.markRead();
+  assert.equal((await monitor.status()).unreadTotal, 0);
 
   // 7) 清空记录但保留游标。
   await monitor.clearMessages();
@@ -235,7 +229,7 @@ try {
     await monitor4.pollOnce();
     assert.equal(store4.state.chats[chatId].messages.length, 1);
     assert.match(store4.state.chats[chatId].messages[0].text, /正在处理/);
-    await monitor4.inbox({ markRead: false });
+    await monitor4.markRead();
     await store4.saveState({
       ...store4.state,
       chats: { ...store4.state.chats, [chatId]: { ...store4.state.chats[chatId], seen: [] } },
@@ -294,4 +288,4 @@ try {
   }
 }
 
-console.log('user identity monitor: 30 assertions passed');
+console.log('user identity monitor: 27 assertions passed');

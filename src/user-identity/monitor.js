@@ -1,18 +1,17 @@
 /**
- * 飞书分身消息监听（阶段 1：只记录，不调模型、不自动回复）。
+ * 飞书分身消息监听。
  *
  * 用户身份没有个人收件箱事件推送，因此监听器按会话轮询。
- * 新消息只落到本地收件箱（`monitor-state.json`，0600、有上限），
- * 由自动回复链路派发给 Worker 会话处理。
- * 回复仍走 `feishu_avatar_send`（用户本人身份），监听本身不写飞书。
+ * 新消息落到本地状态（`monitor-state.json`，0600、有上限），
+ * `replyMode: auto` 的会话由自动回复链路派发给 Worker 会话处理。
+ * 回复由 Worker 调用 `feishu_avatar_send`（用户本人身份）发出，监听本身不写飞书。
  */
-import { chatMemberNames, getMessage, listChats, listMessages, replyCardMessage, sendCardMessage } from './api.js';
+import { chatMemberNames, getMessage, listChats, listMessages } from './api.js';
 import { AutoReplyEngine } from './auto-reply.js';
 import {
   MAX_MONITOR_CHATS,
   MAX_MESSAGES_PER_CHAT,
   MAX_SEEN_IDS,
-  normalizeKeywords,
   normalizeMonitorChat,
   normalizeMonitorConfig,
   normalizeMonitorState,
@@ -48,10 +47,7 @@ export class UserMonitorManager {
   #listChats;
   #chatMemberNames;
   #getMessage;
-  #sendCard;
-  #replyCard;
   #autoReply;
-  #prepareWorker = null;
   #nameCache = new Map();
   #parentSender = new Map();
 
@@ -66,8 +62,6 @@ export class UserMonitorManager {
     listChats: listChatsImpl = listChats,
     chatMemberNames: chatMemberNamesImpl = chatMemberNames,
     getMessage: getMessageImpl = getMessage,
-    sendCard: sendCardImpl = sendCardMessage,
-    replyCard: replyCardImpl = replyCardMessage,
     now = Date.now,
     setInterval: setIntervalImpl = setInterval,
     clearInterval: clearIntervalImpl = clearInterval,
@@ -98,8 +92,6 @@ export class UserMonitorManager {
     this.#listChats = listChatsImpl;
     this.#chatMemberNames = chatMemberNamesImpl;
     this.#getMessage = getMessageImpl;
-    this.#sendCard = sendCardImpl;
-    this.#replyCard = replyCardImpl;
   }
 
   get store() {
@@ -133,26 +125,6 @@ export class UserMonitorManager {
     return this.#autoReply;
   }
 
-  /** 当前记录在案的 Worker 会话 id。 */
-  workerSessionIds() {
-    const chats = this.#store.state?.chats ?? {};
-    return Object.values(chats).map((entry) => entry?.sessionId).filter((id) => typeof id === 'string' && id);
-  }
-
-  /** 由 Host 注入：会话创建后把 Worker 工具挂到它的作用域上。 */
-  setWorkerPreparer(prepare) {
-    this.#prepareWorker = typeof prepare === 'function' ? prepare : null;
-  }
-
-  /** 该会话是否是某个监听会话的自动回复 Worker。 */
-  isAutoReplySession(sessionId) {
-    const needle = typeof sessionId === 'string' ? sessionId.trim() : '';
-    if (!needle) return false;
-    if (this.#autoReply?.isWorkerSession?.(needle)) return true;
-    const chats = this.#store.state?.chats ?? {};
-    return Object.values(chats).some((entry) => entry?.sessionId === needle);
-  }
-
   /** 监听状态 + 每会话未读数和最近消息（受上限约束）。 */
   async status() {
     const auth = await this.#auth.status().catch(() => null);
@@ -170,7 +142,7 @@ export class UserMonitorManager {
         handled: messages.filter((message) => message.outcome === 'dispatched').length,
         sessionId: entry.sessionId ?? null,
         pendingBatch: entry.batch?.messageIds?.length ?? 0,
-        lastAutoReplyAt: (entry.outbox ?? []).filter((item) => item.source === 'auto').at(-1)?.at ?? null,
+        lastDispatchAt: entry.lastDispatchAt ?? null,
         cursorTimeMs: entry.cursorTimeMs ?? null,
         lastPollAt: entry.lastPollAt ?? null,
         lastError: entry.lastError ?? null,
@@ -191,26 +163,6 @@ export class UserMonitorManager {
         : null,
       chats,
     };
-  }
-
-  /**
-   * 注入用的未读摘要；没有未读时返回空串。
-   * 只给计数和会话名，不把正文塞进 system prompt。
-   */
-  summary() {
-    const unread = [];
-    for (const chat of this.#store.config.chats) {
-      const entry = this.#store.state.chats[chat.chatId] ?? {};
-      const count = (entry.messages ?? []).filter((message) => !message.read).length;
-      if (count > 0) unread.push({ name: chat.name || chat.chatId, count });
-    }
-    if (unread.length === 0) return '';
-    const total = unread.reduce((sum, item) => sum + item.count, 0);
-    const detail = unread.slice(0, 5)
-      .map((item) => `${item.name} ${item.count} 条`)
-      .join('、');
-    return `飞书分身收件箱有 ${total} 条未读：${detail}。`
-      + '未读在设置页查看；回复由你本人身份发出。';
   }
 
   /** 候选会话：群聊 + 最近私聊。 */
@@ -340,47 +292,31 @@ export class UserMonitorManager {
     return this.status();
   }
 
-  /**
-   * 收件箱：读取已记录的监听消息。
-   * 默认只返回未读并标记已读，避免同一批消息反复交给模型。
-   */
-  async inbox({ chatId = '', limit = 20, unreadOnly = true, markRead = true } = {}) {
+  /** 标记某会话（或全部）消息已读。 */
+  async markRead(chatId = '') {
     const id = stringOf(chatId).trim();
-    const size = Math.min(50, Math.max(1, Number.parseInt(String(limit ?? 20), 10) || 20));
-    const items = [];
-    for (const chat of this.#store.config.chats) {
-      if (id && chat.chatId !== id) continue;
-      const entry = this.#store.state.chats[chat.chatId] ?? {};
-      for (const message of entry.messages ?? []) {
-        if (unreadOnly && message.read) continue;
-        items.push({
-          chatId: chat.chatId,
-          chatName: chat.name || chat.chatId,
-          chatMode: chat.chatMode,
-          messageId: message.messageId,
-          senderName: message.senderName || '',
-          senderOpenId: message.senderOpenId || '',
-          createTime: message.createTime,
-          read: message.read === true,
-          text: message.text,
-        });
-      }
+    const state = { ...this.#store.state, chats: { ...this.#store.state.chats } };
+    for (const [key, entry] of Object.entries(state.chats)) {
+      if (id && key !== id) continue;
+      state.chats[key] = {
+        ...entry,
+        messages: (entry.messages ?? []).map((message) => ({ ...message, read: true })),
+      };
     }
-    items.sort((a, b) => String(a.createTime).localeCompare(String(b.createTime)));
-    const selected = items.slice(0, size);
-    if (markRead !== false && selected.length > 0) {
-      const ids = new Set(selected.map((item) => item.messageId));
-      const state = { ...this.#store.state, chats: { ...this.#store.state.chats } };
-      for (const [key, entry] of Object.entries(state.chats)) {
-        if (!(entry.messages ?? []).some((message) => ids.has(message.messageId))) continue;
-        state.chats[key] = {
-          ...entry,
-          messages: entry.messages.map((message) => (ids.has(message.messageId) ? { ...message, read: true } : message)),
-        };
-      }
-      await this.#store.saveState(state);
+    await this.#store.saveState(state);
+    return this.status();
+  }
+
+  /** 清空某会话（或全部）记录，但保留游标和去重集合。 */
+  async clearMessages(chatId = '') {
+    const id = stringOf(chatId).trim();
+    const state = { ...this.#store.state, chats: { ...this.#store.state.chats } };
+    for (const [key, entry] of Object.entries(state.chats)) {
+      if (id && key !== id) continue;
+      state.chats[key] = { ...entry, messages: [] };
     }
-    return { total: items.length, items: selected };
+    await this.#store.saveState(state);
+    return this.status();
   }
 
   /** 单轮轮询：串行处理会话，避免同一 token 并发打多个请求。 */

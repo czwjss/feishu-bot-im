@@ -192,20 +192,33 @@ try {
         ...store.state.chats[chatId],
         messages: [botMessage('om_bot_2', '机器人又说')],
         batch: { messageIds: ['om_bot_2'], firstAt: clock.now(), lastAt: clock.now() },
-        outbox: [],
+        lastDispatchAt: 0,
       },
     },
   });
   const promptsBeforeAllowed = prompts.length;
   assert.ok(await engine.flush({ ...botChat }), 'bot batch dispatches when allowed');
   assert.equal(prompts.length, promptsBeforeAllowed + 1);
+  assert.ok(store.state.chats[chatId].lastDispatchAt > 0, 'dispatch time recorded');
+
+  // 十分钟内第二个机器人批次不再派发。
+  await store.saveState({
+    chats: {
+      [chatId]: {
+        ...store.state.chats[chatId],
+        messages: [botMessage('om_bot_3', '机器人还在说')],
+        batch: { messageIds: ['om_bot_3'], firstAt: clock.now(), lastAt: clock.now() },
+      },
+    },
+  });
+  assert.equal(await engine.flush({ ...botChat }), null, 'bot batches are throttled within 10 minutes');
 
   // 7) 工作区/预设变化会重建 Worker 会话
   await store.saveState({
     chats: {
       [chatId]: {
         ...store.state.chats[chatId],
-        outbox: [],
+        lastDispatchAt: 0,
         messages: [userMessage('om_ws', '换分组后')],
         batch: { messageIds: ['om_ws'], firstAt: clock.now(), lastAt: clock.now() },
       },
@@ -262,4 +275,4 @@ try {
   await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-console.log('user identity auto reply: 30 assertions passed');
+console.log('user identity auto reply: 32 assertions passed');
