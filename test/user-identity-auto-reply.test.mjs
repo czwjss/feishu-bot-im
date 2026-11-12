@@ -340,10 +340,10 @@ try {
   const prompt = renderBatchPrompt({
     chat: { chatId, name: '测试私聊', chatMode: 'p2p' },
     messages: [{ messageId: 'om_x', createTime: new Date(now).toISOString(), senderName: '朋友', text: '你好' }],
-    batchId: 'batch-abc',
   });
-  assert.match(prompt, /批次：batch-abc/);
+  assert.match(prompt, /1\. 朋友 · (?:[\d-]+ )?\d{2}:\d{2}（om_x）\n   你好/);
   assert.match(prompt, /不可信/);
+  assert.match(prompt, /会话 id：oc_auto_chat/);
 
   // 10) 非 auto 会话不派发
 } finally {
@@ -351,4 +351,4 @@ try {
   await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-console.log('user identity auto reply: 34 assertions passed');
+console.log('user identity auto reply: 35 assertions passed');
