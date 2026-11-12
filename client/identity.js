@@ -9,6 +9,7 @@ const h = React.createElement;
       const [available, setAvailable] = React.useState(null);
       const [showPicker, setShowPicker] = React.useState(false);
       const [chatFilter, setChatFilter] = React.useState('');
+      const [handoffText, setHandoffText] = React.useState('');
       const [busy, setBusy] = React.useState('');
       const [error, setError] = React.useState(null);
       const [workerOptions, setWorkerOptions] = React.useState({ workspaces: [], presets: [], defaultWorkspaceId: null });
@@ -39,6 +40,10 @@ const h = React.createElement;
         return () => { alive = false; };
       }, [connection]);
       React.useEffect(() => {
+        if (monitor?.handoffKeywords) setHandoffText(monitor.handoffKeywords.join('，'));
+      }, [monitor?.handoffKeywords]);
+
+      React.useEffect(() => {
         const timer = setInterval(() => { void load(); }, 10_000);
         return () => clearInterval(timer);
       }, [load]);
@@ -60,6 +65,12 @@ const h = React.createElement;
       const remove = (chat) => act(`remove:${chat.chatId}`, () => rpc(connection, API.userMonitorRemove, { chatId: chat.chatId }));
       const setChat = (chat, patch) => act(`mode:${chat.chatId}`, () => rpc(connection, API.userMonitorChatSet, { chatId: chat.chatId, ...patch }));
       const setWorker = (patch) => act('worker', () => rpc(connection, API.userMonitorWorkerSet, patch));
+      const saveHandoff = () => {
+        const current = (monitor?.handoffKeywords ?? []).join('，');
+        if (handoffText.trim() === current) return;
+        const keywords = handoffText.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
+        void act('handoff', () => rpc(connection, API.userMonitorHandoffSet, { keywords }));
+      };
       const toggle = () => act('toggle', () => rpc(connection, API.userMonitorEnable, { enabled: monitor?.enabled !== true }));
       const poll = () => act('poll', () => rpc(connection, API.userMonitorPoll, {}));
       const flushPending = () => act('flush', () => rpc(connection, API.userMonitorFlush, {}));
@@ -227,6 +238,21 @@ const h = React.createElement;
               h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'chats', onClick: togglePicker },
                 busy === 'chats' ? t('读取中…', 'Loading…') : (showPicker ? t('收起', 'Close') : t('选择会话', 'Choose')))),
             pickerSection),
+
+          h('div', { style: divider },
+            h('div', { style: sectionHead }, h('span', { style: sectionTitle }, t('转人工', 'Handoff'))),
+            h('input', {
+              style: { ...S.input, height: '30px', fontSize: '12px' },
+              value: handoffText,
+              disabled: busy === 'handoff',
+              placeholder: t('转人工，人工客服', 'human, agent'),
+              onChange: (event) => setHandoffText(event.target.value),
+              onBlur: saveHandoff,
+              onKeyDown: (event) => { if (event.key === 'Enter') saveHandoff(); },
+            }),
+            h('p', { style: S.hint },
+              t('逗号分隔。命中后机器人不回复、分身丢弃当前批次，等人处理。',
+                'Comma separated. On a hit the bot stays silent and the avatar drops the current batch.'))),
 
           h('div', { style: divider },
             h('div', { style: sectionHead }, h('span', { style: sectionTitle }, t('Worker 会话', 'Worker session'))),

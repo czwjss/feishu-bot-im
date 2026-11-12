@@ -47,6 +47,7 @@ export class FeishuBridge {
   #eventsPath;
   #chatTypes = new Map();
   #chatNames = new Map();
+  #handoffKeywords = null;
   #reactions = new Map();
   #reactionQueue = new Map();
   #feishuPromptOrigins = new Map();
@@ -71,7 +72,7 @@ export class FeishuBridge {
   #savePreset;
   #saveModel;
 
-  constructor({ bot, harness, config, state, logger, version, inboxDir, saveWorkspace, eventsPath, onContext, listPresets, savePreset, saveModel }) {
+  constructor({ bot, harness, config, state, logger, version, inboxDir, saveWorkspace, eventsPath, onContext, listPresets, savePreset, saveModel, handoffKeywords = null }) {
     this.#bot = bot;
     this.#harness = harness;
     this.#config = config;
@@ -79,6 +80,7 @@ export class FeishuBridge {
     this.#logger = logger ?? console;
     this.#version = version ?? '0.0.0';
     this.#inbound = new InboundContent({ bot, inboxDir, logger: this.#logger });
+    this.#handoffKeywords = handoffKeywords;
     this.#saveWorkspace = saveWorkspace ?? (async () => this.#config);
     this.#onContext = typeof onContext === 'function' ? onContext : () => undefined;
     this.#eventsPath = eventsPath ?? null;
@@ -239,7 +241,7 @@ export class FeishuBridge {
     }
 
     // 对方明确要求真人：不回复，等人来处理。
-    const handoff = handoffRequestedIn(text);
+    const handoff = handoffRequestedIn(text, this.#handoffKeywords?.() ?? undefined);
     if (handoff) {
       this.#log('info', `命中「${handoff}」，转人工，不回复 ${message.message_id}`);
       return;

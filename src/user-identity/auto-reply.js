@@ -142,7 +142,8 @@ export class AutoReplyEngine {
       return null;
     }
     // 有人明确要求真人：整批不处理，等人来。
-    const handoff = messages.map((message) => handoffRequestedIn(message.text)).find(Boolean);
+    const keywordList = this.#store.config.handoffKeywords;
+    const handoff = messages.map((message) => handoffRequestedIn(message.text, keywordList)).find(Boolean);
     if (handoff) {
       this.#logger?.info?.(`[im-feishu] ${chat.chatId} 命中「${handoff}」，本批转人工，不派发`);
       await this.#clearBatch(chat.chatId);

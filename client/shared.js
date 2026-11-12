@@ -42,6 +42,7 @@ const RPC_ENDPOINT = 'im-feishu';
       userMonitorRemove: 'user.monitor.remove',
       userMonitorEnable: 'user.monitor.enable',
       userMonitorWorkerSet: 'user.monitor.worker.set',
+      userMonitorHandoffSet: 'user.monitor.handoff.set',
       userMonitorWorkerOptions: 'user.monitor.worker.options',
       userMonitorPoll: 'user.monitor.poll',
       userMonitorFlush: 'user.monitor.flush',

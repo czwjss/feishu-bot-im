@@ -362,3 +362,41 @@ console.log('user identity monitor: 27 assertions passed');
   }
 }
 console.log('user identity monitor cards: 7 assertions passed');
+
+// 13) 转人工关键词可配置，并随状态返回。
+{
+  const dir6 = await mkdtemp(join(tmpdir(), 'im-feishu-handoff-'));
+  try {
+    const store6 = new MonitorStore({
+      configPath: join(dir6, 'monitor.json'),
+      statePath: join(dir6, 'monitor-state.json'),
+    });
+    await store6.load();
+    await store6.saveConfig({ enabled: true });
+    assert.deepEqual(store6.config.handoffKeywords, ['转人工', '人工客服', '找真人', '我要投诉']);
+
+    const monitor6 = new UserMonitorManager({
+      auth: { async status() { return {}; }, async requireAccessToken() { return 'token'; } },
+      store: store6,
+      now: () => now,
+      setInterval: () => ({ unref() {} }),
+      clearInterval: () => {},
+      chatMemberNames: async () => new Map(),
+      listMessages: async () => ({ items: [], hasMore: false, pageToken: null }),
+    });
+    const status = await monitor6.setHandoffKeywords(['走人工', '找店长']);
+    assert.deepEqual(status.handoffKeywords, ['走人工', '找店长']);
+    assert.deepEqual(store6.config.handoffKeywords, ['走人工', '找店长']);
+
+    const empty = await monitor6.setHandoffKeywords([]);
+    assert.deepEqual(empty.handoffKeywords, [], 'empty list disables handoff keywords');
+    const reloaded = await new MonitorStore({
+      configPath: join(dir6, 'monitor.json'),
+      statePath: join(dir6, 'monitor-state.json'),
+    }).load();
+    assert.deepEqual(reloaded.config.handoffKeywords, [], 'custom keywords persist');
+  } finally {
+    await rm(dir6, { recursive: true, force: true });
+  }
+}
+console.log('user identity handoff keywords: 6 assertions passed');

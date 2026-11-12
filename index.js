@@ -77,9 +77,12 @@ export async function apply(ctx, config = {}) {
     return store;
   };
 
+  // 转人工关键词保存在监听配置里，机器人侧通过这个 provider 读取。
+  let handoffKeywordsProvider = () => null;
   const manager = new RuntimeManager({
     ctx,
     configStore,
+    handoffKeywords: () => handoffKeywordsProvider(),
     harness,
     logger,
     version: pluginVersion,
@@ -161,6 +164,7 @@ export async function apply(ctx, config = {}) {
     defaultWorkspaceId: readDefaultWorkspaceId,
     logger,
   });
+  handoffKeywordsProvider = () => userMonitor.store.config.handoffKeywords;
   installUserIdentityContributions(ctx, userIdentityAuth);
   userMonitor.start();
 

@@ -63,10 +63,11 @@ export class BotRuntime {
   #lastError = null;
   #statusTimer = null;
   #presetSource = null;
+  #handoffKeywords = null;
   #contexts = new Map();
   #disposed = false;
 
-  constructor({ ctx, botId, configStore, stateStore, harness, logger, version, dataDir, verify, createBot }) {
+  constructor({ ctx, botId, configStore, stateStore, harness, logger, version, dataDir, verify, createBot, handoffKeywords = null }) {
     this.#ctx = ctx;
     this.#botId = botId;
     this.#configStore = configStore;
@@ -77,6 +78,7 @@ export class BotRuntime {
     this.#dataDir = dataDir;
     this.#verify = verify ?? verifyCredentials;
     this.#createBot = createBot ?? ((options) => new FeishuBot(options));
+    this.#handoffKeywords = handoffKeywords;
   }
 
   get botId() {
@@ -228,6 +230,7 @@ export class BotRuntime {
         listPresets: () => this.listPresets(),
         savePreset: (value) => this.save({ agentPreset: value }).then((next) => next),
         saveModel: (value) => this.save({ model: value }).then((next) => next),
+        handoffKeywords: this.#handoffKeywords,
       });
       const wsState = await bot.startLongConnection({
         onMessage: (data) => { void bridge.handleMessage(data); },
@@ -572,9 +575,10 @@ export class RuntimeManager {
   #registration = null;
   #qrCodeDataUrl = null;
   #provision = null;
+  #handoffKeywords = null;
   #disposed = false;
 
-  constructor({ ctx, configStore, harness, logger, version, dataDir, openState, verify, createBot }) {
+  constructor({ ctx, configStore, harness, logger, version, dataDir, openState, verify, createBot, handoffKeywords = null }) {
     this.#ctx = ctx;
     this.#configStore = configStore;
     this.#harness = harness;
@@ -584,6 +588,7 @@ export class RuntimeManager {
     this.#openState = openState;
     this.#verify = verify;
     this.#createBot = createBot;
+    this.#handoffKeywords = handoffKeywords;
   }
 
   get runtimes() {
@@ -608,6 +613,7 @@ export class RuntimeManager {
       dataDir: this.#dataDir,
       verify: this.#verify,
       createBot: this.#createBot,
+      handoffKeywords: this.#handoffKeywords,
     });
     runtime.setPresetSource(() => this.#presetSource?.());
     this.#runtimes.set(botId, runtime);

@@ -147,6 +147,7 @@ export class UserMonitorManager {
       enabled: config.enabled,
       pollIntervalMs: config.pollIntervalMs,
       worker: config.worker,
+      handoffKeywords: config.handoffKeywords,
       authorization: auth
         ? {
           authorized: Boolean(auth.authorization?.authorized),
@@ -238,6 +239,12 @@ export class UserMonitorManager {
         workspacePath: patch.workspacePath === undefined ? current.workspacePath : patch.workspacePath,
       },
     });
+    return this.status();
+  }
+
+  /** 设置转人工关键词；空数组退回默认关键词。 */
+  async setHandoffKeywords(keywords) {
+    await this.#store.saveConfig({ handoffKeywords: keywords });
     return this.status();
   }
 

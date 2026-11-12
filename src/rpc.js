@@ -204,6 +204,9 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
       case 'user.monitor.remove':
         return ok(await requireUserMonitor().removeChat(input.chatId));
 
+      case 'user.monitor.handoff.set':
+        return ok(await requireUserMonitor().setHandoffKeywords(input.keywords));
+
       case 'user.monitor.worker.set':
         return ok(await requireUserMonitor().setWorker({
           workspaceId: input.workspaceId,

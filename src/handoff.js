@@ -6,23 +6,29 @@
  */
 
 /** 命中即视为「要求真人处理」。英文按小写匹配。 */
-export const HANDOFF_KEYWORDS = Object.freeze([
+export const DEFAULT_HANDOFF_KEYWORDS = Object.freeze([
   '转人工',
   '人工客服',
   '找真人',
   '我要投诉',
 ]);
 
+/** 兼容旧名：默认关键词。 */
+export const HANDOFF_KEYWORDS = DEFAULT_HANDOFF_KEYWORDS;
+
 /**
  * 文本里是否要求人工。
  * @param {unknown} text
+ * @param {readonly string[]} [keywords] 自定义关键词，省略时用默认值
  * @returns {string|null} 命中的关键词，未命中返回 null
  */
-export function handoffRequestedIn(text) {
+export function handoffRequestedIn(text, keywords = DEFAULT_HANDOFF_KEYWORDS) {
   const value = typeof text === 'string' ? text.trim().toLowerCase() : '';
   if (!value) return null;
-  for (const keyword of HANDOFF_KEYWORDS) {
-    if (value.includes(keyword.toLowerCase())) return keyword;
+  const list = Array.isArray(keywords) ? keywords : DEFAULT_HANDOFF_KEYWORDS;
+  for (const keyword of list) {
+    if (typeof keyword !== 'string' || !keyword.trim()) continue;
+    if (value.includes(keyword.trim().toLowerCase())) return keyword;
   }
   return null;
 }

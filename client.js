@@ -245,6 +245,7 @@ var API = {
   userMonitorRemove: "user.monitor.remove",
   userMonitorEnable: "user.monitor.enable",
   userMonitorWorkerSet: "user.monitor.worker.set",
+  userMonitorHandoffSet: "user.monitor.handoff.set",
   userMonitorWorkerOptions: "user.monitor.worker.options",
   userMonitorPoll: "user.monitor.poll",
   userMonitorFlush: "user.monitor.flush",
@@ -582,6 +583,7 @@ function MonitorPanel({ connection }) {
   const [available, setAvailable] = import_react2.default.useState(null);
   const [showPicker, setShowPicker] = import_react2.default.useState(false);
   const [chatFilter, setChatFilter] = import_react2.default.useState("");
+  const [handoffText, setHandoffText] = import_react2.default.useState("");
   const [busy, setBusy] = import_react2.default.useState("");
   const [error, setError] = import_react2.default.useState(null);
   const [workerOptions, setWorkerOptions] = import_react2.default.useState({ workspaces: [], presets: [], defaultWorkspaceId: null });
@@ -614,6 +616,9 @@ function MonitorPanel({ connection }) {
     };
   }, [connection]);
   import_react2.default.useEffect(() => {
+    if (monitor?.handoffKeywords) setHandoffText(monitor.handoffKeywords.join("\uFF0C"));
+  }, [monitor?.handoffKeywords]);
+  import_react2.default.useEffect(() => {
     const timer = setInterval(() => {
       void load();
     }, 1e4);
@@ -635,6 +640,12 @@ function MonitorPanel({ connection }) {
   const remove = (chat) => act(`remove:${chat.chatId}`, () => rpc(connection, API.userMonitorRemove, { chatId: chat.chatId }));
   const setChat = (chat, patch) => act(`mode:${chat.chatId}`, () => rpc(connection, API.userMonitorChatSet, { chatId: chat.chatId, ...patch }));
   const setWorker = (patch) => act("worker", () => rpc(connection, API.userMonitorWorkerSet, patch));
+  const saveHandoff = () => {
+    const current = (monitor?.handoffKeywords ?? []).join("\uFF0C");
+    if (handoffText.trim() === current) return;
+    const keywords = handoffText.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
+    void act("handoff", () => rpc(connection, API.userMonitorHandoffSet, { keywords }));
+  };
   const toggle = () => act("toggle", () => rpc(connection, API.userMonitorEnable, { enabled: monitor?.enabled !== true }));
   const poll = () => act("poll", () => rpc(connection, API.userMonitorPoll, {}));
   const flushPending = () => act("flush", () => rpc(connection, API.userMonitorFlush, {}));
@@ -840,6 +851,30 @@ function MonitorPanel({ connection }) {
           )
         ),
         pickerSection
+      ),
+      h2(
+        "div",
+        { style: divider },
+        h2("div", { style: sectionHead }, h2("span", { style: sectionTitle }, t("\u8F6C\u4EBA\u5DE5", "Handoff"))),
+        h2("input", {
+          style: { ...S.input, height: "30px", fontSize: "12px" },
+          value: handoffText,
+          disabled: busy === "handoff",
+          placeholder: t("\u8F6C\u4EBA\u5DE5\uFF0C\u4EBA\u5DE5\u5BA2\u670D", "human, agent"),
+          onChange: (event) => setHandoffText(event.target.value),
+          onBlur: saveHandoff,
+          onKeyDown: (event) => {
+            if (event.key === "Enter") saveHandoff();
+          }
+        }),
+        h2(
+          "p",
+          { style: S.hint },
+          t(
+            "\u9017\u53F7\u5206\u9694\u3002\u547D\u4E2D\u540E\u673A\u5668\u4EBA\u4E0D\u56DE\u590D\u3001\u5206\u8EAB\u4E22\u5F03\u5F53\u524D\u6279\u6B21\uFF0C\u7B49\u4EBA\u5904\u7406\u3002",
+            "Comma separated. On a hit the bot stays silent and the avatar drops the current batch."
+          )
+        )
       ),
       h2(
         "div",

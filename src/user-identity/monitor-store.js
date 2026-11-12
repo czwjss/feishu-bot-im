@@ -10,6 +10,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { writePrivateJson } from './config.js';
+import { DEFAULT_HANDOFF_KEYWORDS } from '../handoff.js';
 
 export const MONITOR_VERSION = 1;
 export const MONITOR_FILE = 'monitor.json';
@@ -28,6 +29,8 @@ export const BATCH_MAX_MESSAGES = 10;
 export const DEFAULT_WORKER_PRESET = 'standard';
 export const MAX_WORKER_PRESET = 40;
 export const MAX_PENDING_CARDS = 20;
+export const MAX_HANDOFF_KEYWORDS = 20;
+export const MAX_HANDOFF_KEYWORD_LENGTH = 40;
 /** 消息处理结果：批次已派发给 Worker，后续不再由插件跟踪。 */
 export const DEFAULT_POLL_INTERVAL_MS = 60_000;
 export const MIN_POLL_INTERVAL_MS = 5_000;
@@ -101,6 +104,14 @@ export function normalizeMonitorConfig(value) {
     seen.add(chat.chatId);
     chats.push(chat);
   }
+  const handoffProvided = Array.isArray(source.handoffKeywords);
+  const handoffKeywords = [];
+  for (const raw of handoffProvided ? source.handoffKeywords : []) {
+    const keyword = cleanString(raw).slice(0, MAX_HANDOFF_KEYWORD_LENGTH);
+    if (!keyword || handoffKeywords.includes(keyword)) continue;
+    handoffKeywords.push(keyword);
+    if (handoffKeywords.length >= MAX_HANDOFF_KEYWORDS) break;
+  }
   const interval = Number(source.pollIntervalMs);
   return Object.freeze({
     version: MONITOR_VERSION,
@@ -110,6 +121,7 @@ export function normalizeMonitorConfig(value) {
       : DEFAULT_POLL_INTERVAL_MS,
     chats: Object.freeze(chats),
     worker: normalizeWorkerConfig(source.worker),
+    handoffKeywords: Object.freeze(handoffProvided ? handoffKeywords : [...DEFAULT_HANDOFF_KEYWORDS]),
   });
 }
 
@@ -251,6 +263,7 @@ export class MonitorStore {
       pollIntervalMs: source.pollIntervalMs === undefined ? this.#config.pollIntervalMs : source.pollIntervalMs,
       chats: source.chats === undefined ? this.#config.chats : source.chats,
       worker: source.worker === undefined ? this.#config.worker : source.worker,
+      handoffKeywords: source.handoffKeywords === undefined ? this.#config.handoffKeywords : source.handoffKeywords,
     });
     await writePrivateJson(this.#configPath, next);
     this.#config = next;
