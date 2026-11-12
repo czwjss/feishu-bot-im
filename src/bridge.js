@@ -54,6 +54,7 @@ export class FeishuBridge {
   #batchDraining = new Set();
   #feishuPromptOrigins = new Map();
   #turnOrigin = new Map();
+  #triggerMessages = new Map();
   #externalAsk = new Map();
   #reactionActive = new Map();
   #userNames = new Map();
@@ -100,6 +101,7 @@ export class FeishuBridge {
       showStats: (chatKey) => this.#state.statsFor?.(chatKey) === true,
       showTools: (chatKey) => this.#state.toolsFor?.(chatKey) === true,
       renderMentions: (text, { chatKey, mode }) => this.#renderMentions(text, chatKey, mode),
+      replyToOf: (sessionId) => this.#triggerMessages.get(sessionId) ?? null,
     });
   }
 
@@ -629,6 +631,7 @@ export class FeishuBridge {
         // not chat, so turn/start and turn/end settle the originating message.
         if (batchIds) this.#trackReactionGroup(sessionId, batchIds, mode);
         else this.#trackReaction(sessionId, messageId, mode);
+        this.#triggerMessages.set(sessionId, messageId ?? batchIds?.at(-1) ?? null);
         this.#onContext(sessionId, injected);
         await this.#promptFeishu(sessionId, parts, { mode, chatKey, chatId });
         if (reserved) this.#eavesdrop.commit(chatKey, reserved.seq);
@@ -1063,6 +1066,7 @@ export class FeishuBridge {
     const result = await this.#turns.onSessionEvent(session, event);
     if (sessionId && event?.type === 'turn/end') {
       this.#turnOrigin.delete(sessionId);
+      this.#triggerMessages.delete(sessionId);
       this.#externalAsk.delete(sessionId);
       await this.#settleTurnReactions(sessionId, event?.data?.reason).catch(() => undefined);
       await this.#drainBatch(sessionId);

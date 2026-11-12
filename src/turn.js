@@ -39,7 +39,7 @@ export class TurnRunner {
   #cardKitCooldownUntil = 0;
   #disposed = false;
 
-  constructor({ bot, state, log, logEvent, processDetail, classifyUserMessage, onTurnOrigin, showStats, showTools, renderMentions }) {
+  constructor({ bot, state, log, logEvent, processDetail, classifyUserMessage, onTurnOrigin, showStats, showTools, renderMentions, replyToOf }) {
     this.#bot = bot;
     this.#state = state;
     this.#log = log;
@@ -50,6 +50,7 @@ export class TurnRunner {
     this.#showStats = typeof showStats === 'function' ? showStats : () => false;
     this.#showTools = typeof showTools === 'function' ? showTools : () => false;
     this.#renderMentions = typeof renderMentions === 'function' ? renderMentions : (text) => text;
+    this.#replyToOf = typeof replyToOf === 'function' ? replyToOf : () => null;
   }
 
   #classifyUserMessage;
@@ -63,6 +64,8 @@ export class TurnRunner {
   #processDetail;
 
   #renderMentions;
+
+  #replyToOf;
 
   /** Validate/convert @ tags for the output path (card vs text). */
   #mentionText(turn, text, mode) {
@@ -504,6 +507,8 @@ export class TurnRunner {
   /** Open the answer card: CardKit first, then raw, then text fallback. */
   async #openAnswerCard(turn, body) {
     if (!turn.cardMessageId && !turn.cardBroken) {
+      // 普通会话把回答卡片作为「回复」挂在触发消息下；话题走 thread。
+      const replyTo = turn.topic?.rootMessageId ? null : this.#replyToOf(turn.sessionId);
       if (turn.cardKind !== 'raw' && this.#cardKitReady()) {
         try {
           const cardId = await this.#retryCardKit(
@@ -527,6 +532,11 @@ export class TurnRunner {
             if (turn.topic && reply?.threadId) {
               this.#state.updateTopic?.(turn.topic.chatId, turn.topic.topicId, { threadId: reply.threadId }).catch(() => undefined);
             }
+          } else if (replyTo && typeof this.#bot.replyCardRef === 'function') {
+            messageId = await this.#retryCardKit(
+              () => this.#bot.replyCardRef(replyTo, cardId, turn.cardSendUuid),
+              'send',
+            );
           } else {
             messageId = await this.#retryCardKit(
               () => this.#bot.sendCardRef(turn.chatId, cardId, turn.cardSendUuid),
@@ -559,6 +569,8 @@ export class TurnRunner {
           if (turn.topic && reply?.threadId) {
             this.#state.updateTopic?.(turn.topic.chatId, turn.topic.topicId, { threadId: reply.threadId }).catch(() => undefined);
           }
+        } else if (replyTo && typeof this.#bot.replyCard === 'function') {
+          turn.cardMessageId = await this.#bot.replyCard(replyTo, this.#card(turn, body), turn.chatId);
         } else {
           turn.cardMessageId = await this.#bot.sendCard(turn.chatId, this.#card(turn, body));
         }

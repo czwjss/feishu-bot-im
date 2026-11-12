@@ -26,6 +26,16 @@ class FakeBot {
     this.cardEntities.push({ id, card });
     return id;
   }
+  async replyCardRef(messageId, cardId, uuid) {
+    const id = `m${++seq}`;
+    this.cardRefs.push({ messageId, cardId, id, uuid });
+    return id;
+  }
+  async replyCard(messageId, card, chatId) {
+    const id = `m${++seq}`;
+    this.cards.push({ chatId, card, id, replyTo: messageId });
+    return id;
+  }
   async sendCardRef(chatId, cardId, uuid) {
     const id = `m${++seq}`;
     this.cardRefs.push({ chatId, cardId, id, uuid });
@@ -1228,10 +1238,10 @@ function message(overrides = {}) {
 {
   const { bot, harness, bridge } = makeBridge();
   bot.cardKit = true;
-  const realSend = bot.sendCardRef.bind(bot);
+  const realSend = bot.replyCardRef.bind(bot);
   let attempts = 0;
   const uuids = [];
-  bot.sendCardRef = async (chatId, cardId, uuid) => {
+  bot.replyCardRef = async (messageId, cardId, uuid) => {
     attempts += 1;
     uuids.push(uuid);
     if (attempts === 1) {
@@ -1239,7 +1249,7 @@ function message(overrides = {}) {
       error.code = 'ECONNRESET';
       throw error;
     }
-    return realSend(chatId, cardId, uuid);
+    return realSend(messageId, cardId, uuid);
   };
   await state.bindSession('chat:oc_cardkit_send_retry', 'sess-cardkit-send');
   await bridge.handleMessage(message({ chat_id: 'oc_cardkit_send_retry', content: JSON.stringify({ text: '开始' }) }));

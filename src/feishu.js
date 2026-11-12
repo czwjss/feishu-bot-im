@@ -508,6 +508,29 @@ export class FeishuBot {
     return messageId;
   }
 
+  /** Post an already-created CardKit card as a reply to one message. */
+  async replyCardRef(messageId, cardId, uuid = null) {
+    const response = assertApiSuccess('Feishu reply card', await this.#client.im.v1.message.reply({
+      path: { message_id: messageId },
+      data: {
+        msg_type: 'interactive',
+        content: cardRefContent(cardId),
+        ...(uuid ? { uuid } : {}),
+      },
+    }));
+    return response?.data?.message_id ?? null;
+  }
+
+  /** Post a full card as a reply to one message. */
+  async replyCard(messageId, card, chatId = null) {
+    void chatId;
+    const response = assertApiSuccess('Feishu reply card', await this.#client.im.v1.message.reply({
+      path: { message_id: messageId },
+      data: { msg_type: 'interactive', content: JSON.stringify(card) },
+    }));
+    return response?.data?.message_id ?? null;
+  }
+
   /** Post an already-created CardKit card as a thread reply. */
   async replyCardRefInThread(messageId, cardId, uuid = null) {
     const response = assertApiSuccess('Feishu threaded card message', await this.#client.im.v1.message.reply({

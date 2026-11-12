@@ -43,7 +43,8 @@ console.log('feishu policy guardrails: 7 assertions passed');
 assert.match(FEISHU_POLICY, /feishu_bot_recall/);
 console.log('feishu recall policy: 1 assertions passed');
 
-// 分身自动回复的引用规则写在唯一的策略里。
+// 引用规则对机器人和分身通用。
+assert.match(FEISHU_POLICY, /机器人与分身通用/);
 assert.match(FEISHU_POLICY, /引用最后一条需要回复的消息/);
 assert.match(FEISHU_POLICY, /群聊且一批里有多人发言时不要引用/);
-console.log('feishu reply quoting policy: 2 assertions passed');
+console.log('feishu reply quoting policy: 3 assertions passed');
