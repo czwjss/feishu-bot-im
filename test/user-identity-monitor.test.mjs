@@ -330,6 +330,32 @@ console.log('user identity monitor: 27 assertions passed');
     assert.equal(store.state.chats[chatId].messages.length, 0, 'streaming card is not in the inbox');
     assert.equal(store.state.pendingCards.length, 1, 'streaming card waits for settlement');
 
+    // 超过 10 分钟仍未收尾：静默丢弃，不进入收件箱。
+    await store.saveState({
+      chats: { [chatId]: { ...store.state.chats[chatId], cursorTimeMs: now - 60_000, seen: [] } },
+      pendingCards: [{
+        messageId: 'om_card_stale', chatId,
+        createTime: new Date(now - 11 * 60_000).toISOString(),
+        lastText: '⏳ 正在处理…',
+      }],
+    });
+    const staleMonitor = new UserMonitorManager({
+      auth: { async status() { return {}; }, async requireAccessToken() { return 'token'; } },
+      store,
+      now: () => now,
+      setInterval: () => ({ unref() {} }),
+      clearInterval: () => {},
+      chatMemberNames: async () => new Map(),
+      listMessages: async () => ({ items: [], hasMore: false, pageToken: null }),
+      getMessage: async () => ({
+        messageId: 'om_card_stale', streaming: true, text: '⏳ 正在处理…',
+        createTime: new Date(now - 11 * 60_000).toISOString(),
+      }),
+    });
+    await staleMonitor.pollOnce();
+    assert.equal(store.state.pendingCards.length, 0, 'card older than 10 minutes is dropped');
+    assert.equal(store.state.chats[chatId].messages.length, 0, 'dropped card never enters the inbox');
+
     await store.saveState({
       chats: { [chatId]: { ...store.state.chats[chatId], cursorTimeMs: now - 60_000, seen: [] } },
       pendingCards: [{
@@ -348,4 +374,4 @@ console.log('user identity monitor: 27 assertions passed');
     await rm(dir, { recursive: true, force: true });
   }
 }
-console.log('user identity monitor cards: 5 assertions passed');
+console.log('user identity monitor cards: 7 assertions passed');

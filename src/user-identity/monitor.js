@@ -6,6 +6,7 @@
  * `replyMode: auto` 的会话由自动回复链路派发给 Worker 会话处理。
  * 回复由 Worker 调用 `feishu_avatar_send`（用户本人身份）发出，监听本身不写飞书。
  */
+import { CARD_STUCK_MS } from '../message-text.js';
 import { chatMemberNames, getMessage, listChats, listMessages } from './api.js';
 import { AutoReplyEngine } from './auto-reply.js';
 import {
@@ -225,7 +226,11 @@ export class UserMonitorManager {
     const id = stringOf(chatId).trim();
     const chats = this.#store.config.chats.filter((chat) => chat.chatId !== id);
     await this.#store.saveConfig({ chats });
-    const state = { ...this.#store.state, chats: { ...this.#store.state.chats } };
+    const state = {
+      ...this.#store.state,
+      chats: { ...this.#store.state.chats },
+      pendingCards: (this.#store.state.pendingCards ?? []).filter((card) => card.chatId !== id),
+    };
     delete state.chats[id];
     await this.#store.saveState(state);
     return this.status();
@@ -385,6 +390,13 @@ export class UserMonitorManager {
     for (const card of pending) {
       if (card.chatId !== chat.chatId) {
         kept.push(card);
+        continue;
+      }
+      // 平台会在 10 分钟后自动关闭流式模式；超过仍没收尾就当作异常中断。
+      const age = this.#now() - (Date.parse(card.createTime) || this.#now());
+      if (age > CARD_STUCK_MS) {
+        this.#logger?.warn?.(`[im-feishu] 卡片超过 10 分钟未收尾，丢弃 ${card.messageId}`);
+        changed = true;
         continue;
       }
       const message = await this.#getMessage({ accessToken, messageId: card.messageId }).catch(() => null);
