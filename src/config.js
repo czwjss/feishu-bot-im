@@ -94,7 +94,6 @@ export function normalizeBot(value, { legacyId } = {}) {
     model: normalizeModel(source.model),
     agentPreset: cleanString(source.agentPreset),
     respondToBotMessages: source.respondToBotMessages !== false,
-    topicsEnabled: source.topicsEnabled !== false,
     processDetail: source.processDetail === 'brief' ? 'brief' : 'detailed',
     permissionPreset: cleanString(source.permissionPreset),
     busyMode: normalizeScoped(source.busyMode, normalizeBusyMode),
@@ -246,19 +245,16 @@ export class StateStore {
     const seen = Array.isArray(parsed?.seen) ? parsed.seen.filter((id) => typeof id === 'string') : [];
     const meta = parsed && typeof parsed.meta === 'object' && parsed.meta ? parsed.meta : {};
     const overrides = parsed && typeof parsed.overrides === 'object' && parsed.overrides ? parsed.overrides : {};
-    const topics = parsed && typeof parsed.topics === 'object' && parsed.topics ? parsed.topics : {};
-    const counters = parsed && typeof parsed.counters === 'object' && parsed.counters ? parsed.counters : {};
-    const synced = parsed && typeof parsed.synced === 'object' && parsed.synced ? parsed.synced : {};
     const usage = parsed && typeof parsed.usage === 'object' && parsed.usage ? parsed.usage : {};
     const stats = parsed && typeof parsed.stats === 'object' && parsed.stats ? parsed.stats : {};
     const tools = parsed && typeof parsed.tools === 'object' && parsed.tools ? parsed.tools : {};
+    // 旧状态里的 topic: 绑定已经废弃，加载时直接丢弃。
     const cleanSessions = {};
     for (const [key, value] of Object.entries(sessions)) {
-      const topicMatch = /^topic:([^:]+):(\d+)$/.exec(key);
-      if (topicMatch && !topics[`${topicMatch[1]}:${topicMatch[2]}`]) continue;
+      if (key.startsWith('topic:')) continue;
       cleanSessions[key] = value;
     }
-    this.#value = { sessions: cleanSessions, seen, meta: { ...meta }, overrides: { ...overrides }, topics: { ...topics }, counters: { ...counters }, synced: { ...synced }, usage: { ...usage }, stats: { ...stats }, tools: { ...tools } };
+    this.#value = { sessions: cleanSessions, seen, meta: { ...meta }, overrides: { ...overrides }, usage: { ...usage }, stats: { ...stats }, tools: { ...tools } };
     return this;
   }
 
@@ -268,9 +264,6 @@ export class StateStore {
       seen: this.#value.seen.slice(-800),
       meta: { ...(this.#value.meta ?? {}) },
       overrides: { ...(this.#value.overrides ?? {}) },
-      topics: { ...(this.#value.topics ?? {}) },
-      counters: { ...(this.#value.counters ?? {}) },
-      synced: { ...(this.#value.synced ?? {}) },
       usage: { ...(this.#value.usage ?? {}) },
       stats: { ...(this.#value.stats ?? {}) },
       tools: { ...(this.#value.tools ?? {}) },
@@ -361,76 +354,6 @@ export class StateStore {
     await this.#persist();
   }
 
-  /** Topics (independent Sessions forked out of a chat). */
-  get topics() {
-    return { ...(this.#value.topics ?? {}) };
-  }
-
-  topicFor(chatId, topicId) {
-    return (this.#value.topics ?? {})[`${chatId}:${topicId}`] ?? null;
-  }
-
-  topicBySession(sessionId) {
-    if (typeof sessionId !== 'string') return null;
-    for (const topic of Object.values(this.#value.topics ?? {})) {
-      if (topic.sessionId === sessionId) return topic;
-    }
-    return null;
-  }
-
-  topicsOf(chatId) {
-    return Object.values(this.#value.topics ?? {})
-      .filter((topic) => topic.chatId === chatId)
-      .sort((a, b) => a.topicId - b.topicId);
-  }
-
-  async createTopic({ chatId, title, brief, sessionId, rootMessageId = null, threadId = null }) {
-    const key = chatId;
-    const counters = { ...(this.#value.counters ?? {}) };
-    const topicId = (counters[key] ?? 0) + 1;
-    counters[key] = topicId;
-    const topic = {
-      chatId,
-      topicId,
-      title,
-      brief: brief ?? '',
-      sessionId,
-      rootMessageId,
-      threadId,
-      status: 'open',
-      createdAt: new Date().toISOString(),
-    };
-    this.#value = {
-      ...this.#value,
-      counters,
-      topics: { ...(this.#value.topics ?? {}), [`${chatId}:${topicId}`]: topic },
-    };
-    await this.#persist();
-    return topic;
-  }
-
-  async updateTopic(chatId, topicId, patch) {
-    const key = `${chatId}:${topicId}`;
-    const current = (this.#value.topics ?? {})[key];
-    if (!current) return null;
-    const next = { ...current, ...patch };
-    this.#value = { ...this.#value, topics: { ...(this.#value.topics ?? {}), [key]: next } };
-    await this.#persist();
-    return next;
-  }
-
-  /** Topic summaries synced back into the chat's main Session. */
-  syncedFor(chatId) {
-    return [...((this.#value.synced ?? {})[chatId] ?? [])];
-  }
-
-  async addSynced(chatId, entry) {
-    const list = [...((this.#value.synced ?? {})[chatId] ?? []), entry];
-    this.#value = { ...this.#value, synced: { ...(this.#value.synced ?? {}), [chatId]: list } };
-    await this.#persist();
-    return list;
-  }
-
   /** Per-chat overrides used when the next Session is created (never defaults). */
   overrideFor(chatKey) {
     return { ...((this.#value.overrides ?? {})[chatKey] ?? {}) };
@@ -466,7 +389,7 @@ export class StateStore {
   }
 
   async reset() {
-    this.#value = { sessions: {}, seen: [], meta: {}, overrides: {}, topics: {}, counters: {}, synced: {} };
+    this.#value = { sessions: {}, seen: [], meta: {}, overrides: {} };
     await writeJsonAtomic(this.#path, this.#value);
     return this.#value;
   }

@@ -16,7 +16,6 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "docs/topics.md",
     "docs/user-identity.md",
     "docs/user-identity-architecture.md",
     "docs/user-identity-architecture.html",

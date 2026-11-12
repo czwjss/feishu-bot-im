@@ -123,8 +123,6 @@ var MESSAGES = Object.freeze({
   "\u63D2\u5165\u4E3A\u8865\u5145\u6307\u4EE4": "Steer",
   "\u79C1\u804A\u4E0A\u4E0B\u6587\u6CE8\u5165": "Private-chat context",
   "\u7FA4\u804A": "Group chat",
-  "\u542F\u7528\u8BDD\u9898": "Enable topics",
-  "\u5F00\u542F\u540E\u6240\u6709\u7FA4\u6210\u5458\u90FD\u80FD\u7528 /topic \u5F00\u8BDD\u9898\u3001/topic-sync \u540C\u6B65\u7ED3\u8BBA\uFF0C\u4E0D\u53D7\u7BA1\u7406\u767D\u540D\u5355\u9650\u5236\u3002": "Anyone in the group may open or sync topics; the manager list does not apply.",
   "\u5141\u8BB8": "Allow",
   "\u54CD\u5E94\u5176\u5B83\u673A\u5668\u4EBA\u7684\u6D88\u606F": "Reply to other bots",
   "\u5F00\u542F\u540E\uFF0C\u5176\u5B83\u673A\u5668\u4EBA\uFF08\u5E94\u7528\uFF09\u5728\u7FA4\u91CC\u7684\u53D1\u8A00\u4E5F\u4F1A\u89E6\u53D1\u672C\u673A\u5668\u4EBA\u3002": "When on, messages from other bots also trigger this bot.",
@@ -217,7 +215,6 @@ var API = {
   botEavesdropSet: "bot.eavesdrop.set",
   botMentionsSet: "bot.mentions.set",
   botBotReplySet: "bot.bot-reply.set",
-  botTopicsSet: "bot.topics.set",
   botProcessDetailSet: "bot.process-detail.set",
   botModelSet: "bot.model.set",
   botPresetSet: "bot.preset.set",
@@ -1537,7 +1534,6 @@ function BotCard({ connection, bot, models, presets, workspaces, permissionOptio
         direct: { ...emptyScope(), ...enhancement.direct ?? {}, enabled: true }
       },
       respondBot: source.respondToBotMessages !== false,
-      topics: source.topicsEnabled !== false,
       processDetail: source.processDetail === "brief" ? "brief" : "detailed",
       permissionPreset: source.permissionPreset ?? "",
       eavesdrop: {
@@ -1617,7 +1613,6 @@ function BotCard({ connection, bot, models, presets, workspaces, permissionOptio
       managers: value.managers,
       ce: value.contextEnhancement?.group,
       respondBot: value.respondBot,
-      topics: value.topics,
       eavesdrop: value.eavesdrop,
       mentions: value.mentions
     }
@@ -1644,7 +1639,6 @@ function BotCard({ connection, bot, models, presets, workspaces, permissionOptio
     await rpc(connection, API.botBusyModeSet, { botId: bot.id, scope, mode: draft.busyMode[scope] });
     if (scope === "group") {
       await rpc(connection, API.botBotReplySet, { botId: bot.id, enabled: draft.respondBot === true });
-      await rpc(connection, API.botTopicsSet, { botId: bot.id, enabled: draft.topics !== false });
       await rpc(connection, API.botEavesdropSet, { botId: bot.id, eavesdrop: draft.eavesdrop });
       await rpc(connection, API.botMentionsSet, { botId: bot.id, mentions: draft.mentions });
       await saveAccess();
@@ -1941,20 +1935,6 @@ function BotCard({ connection, bot, models, presets, workspaces, permissionOptio
             { style: S.input, value: draft.busyMode.group, onChange: (event) => setDraft((current) => ({ ...current, busyMode: { ...current.busyMode, group: event.target.value } })) },
             h3("option", { value: "queue" }, t("\u6392\u961F\u7B49\u5F85", "Queue")),
             h3("option", { value: "steer" }, t("\u63D2\u5165\u4E3A\u8865\u5145\u6307\u4EE4", "Steer"))
-          )
-        ),
-        h3(
-          Field,
-          { label: t("\u542F\u7528\u8BDD\u9898", "Enable topics"), hint: t("\u5F00\u542F\u540E\u6240\u6709\u7FA4\u6210\u5458\u90FD\u80FD\u7528 /topic \u5F00\u8BDD\u9898\u3001/topic-sync \u540C\u6B65\u7ED3\u8BBA\uFF0C\u4E0D\u53D7\u7BA1\u7406\u767D\u540D\u5355\u9650\u5236\u3002", "Anyone in the group may open or sync topics; the manager list does not apply.") },
-          h3(
-            "label",
-            { style: S.checkLabel },
-            h3("input", {
-              type: "checkbox",
-              checked: draft.topics !== false,
-              onChange: (event) => set({ topics: event.target.checked })
-            }),
-            t("\u5141\u8BB8", "Allow")
           )
         ),
         h3(

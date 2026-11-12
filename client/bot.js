@@ -295,7 +295,6 @@ const h = React.createElement;
             direct: { ...emptyScope(), ...(enhancement.direct ?? {}), enabled: true },
           },
           respondBot: source.respondToBotMessages !== false,
-          topics: source.topicsEnabled !== false,
           processDetail: source.processDetail === 'brief' ? 'brief' : 'detailed',
           permissionPreset: source.permissionPreset ?? '',
           eavesdrop: {
@@ -378,7 +377,7 @@ const h = React.createElement;
         group: {
           busyMode: value.busyMode?.group,
           group: value.group, allow: value.allow, managers: value.managers, ce: value.contextEnhancement?.group,
-          respondBot: value.respondBot, topics: value.topics, eavesdrop: value.eavesdrop,
+          respondBot: value.respondBot, eavesdrop: value.eavesdrop,
           mentions: value.mentions,
         },
       });
@@ -409,7 +408,6 @@ const h = React.createElement;
         await rpc(connection, API.botBusyModeSet, { botId: bot.id, scope, mode: draft.busyMode[scope] });
         if (scope === 'group') {
           await rpc(connection, API.botBotReplySet, { botId: bot.id, enabled: draft.respondBot === true });
-          await rpc(connection, API.botTopicsSet, { botId: bot.id, enabled: draft.topics !== false });
           await rpc(connection, API.botEavesdropSet, { botId: bot.id, eavesdrop: draft.eavesdrop });
           await rpc(connection, API.botMentionsSet, { botId: bot.id, mentions: draft.mentions });
           await saveAccess();
@@ -594,14 +592,6 @@ const h = React.createElement;
               h('select', { style: S.input, value: draft.busyMode.group, onChange: (event) => setDraft((current) => ({ ...current, busyMode: { ...current.busyMode, group: event.target.value } })) },
                 h('option', { value: 'queue' }, t('排队等待', 'Queue')),
                 h('option', { value: 'steer' }, t('插入为补充指令', 'Steer')))),
-            h(Field, { label: t('启用话题', 'Enable topics'), hint: t('开启后所有群成员都能用 /topic 开话题、/topic-sync 同步结论，不受管理白名单限制。', 'Anyone in the group may open or sync topics; the manager list does not apply.') },
-              h('label', { style: S.checkLabel },
-                h('input', {
-                  type: 'checkbox',
-                  checked: draft.topics !== false,
-                  onChange: (event) => set({ topics: event.target.checked }),
-                }),
-                t('允许', 'Allow'))),
             h(Field, { label: t('响应其它机器人的消息', 'Reply to other bots'), hint: t('开启后，其它机器人（应用）在群里的发言也会触发本机器人。', 'When on, messages from other bots also trigger this bot.') },
               h('label', { style: S.checkLabel },
                 h('input', {

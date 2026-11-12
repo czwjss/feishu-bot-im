@@ -41,11 +41,6 @@ class FakeBot {
     this.cardRefs.push({ chatId, cardId, id, uuid });
     return id;
   }
-  async replyCardRefInThread(messageId, cardId, uuid) {
-    const id = `m${++seq}`;
-    this.cardRefs.push({ messageId, cardId, id, uuid });
-    return { messageId: id, threadId: 'thread_1' };
-  }
   async updateCardText(cardId, elementId, content, sequence, uuid) {
     this.cardTextUpdates.push({ cardId, elementId, content, sequence, uuid });
     return cardId;
@@ -603,94 +598,6 @@ function message(overrides = {}) {
   assert.equal(on.harness.prompts.length, 1, 'bot messages accepted when enabled');
   off.bridge.dispose();
   on.bridge.dispose();
-}
-
-// 13e) 话题：用户消息为根 → 独立会话 → 话题内仅 @ 响应 → /topic-sync 生成摘要
-{
-  const { bot, harness, bridge } = makeBridge();
-  const rootId = 'om_topic_root';
-  await bridge.handleMessage(message({
-    message_id: rootId,
-    chat_id: 'oc_group', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
-    content: JSON.stringify({ text: '/topic 重构投递模块\n先梳理现状' }),
-  }));
-  assert.equal(harness.created, 1, 'topic opens a fresh Session');
-  assert.equal(harness.prompts.at(-1)?.sessionId, 'sess-1', 'topic Session gets the brief');
-  const topic = state.topicFor('oc_group', 1);
-  assert.equal(topic?.rootMessageId, rootId, 'topic is rooted at the user message');
-
-  // 话题内不 @ 不响应
-  const before = harness.prompts.length;
-  await bridge.handleMessage(message({
-    chat_id: 'oc_group', chat_type: 'group', parent_id: rootId,
-    content: JSON.stringify({ text: '悄悄说一句' }), mentions: [],
-  }));
-  assert.equal(harness.prompts.length, before, 'topic requires a mention');
-
-  // 话题内 @ 才处理
-  await bridge.handleMessage(message({
-    chat_id: 'oc_group', chat_type: 'group', parent_id: rootId,
-    content: JSON.stringify({ text: '继续做第二步' }), mentions: [{ id: { open_id: 'ou_bot' } }],
-  }));
-  assert.equal(harness.prompts.at(-1)?.sessionId, 'sess-1', 'mention inside topic routes to the topic');
-
-  // /topic-sync 让话题会话生成摘要，并在结束时同步回主会话
-  await bridge.handleMessage(message({
-    chat_id: 'oc_group', chat_type: 'group', parent_id: rootId,
-    content: JSON.stringify({ text: '/topic-sync' }), mentions: [{ id: { open_id: 'ou_bot' } }],
-  }));
-  assert.equal(state.topicFor('oc_group', 1)?.syncRequested, true, 'sync marked as pending');
-  assert.match(String(harness.prompts.at(-1)?.content?.[0]?.text ?? ''), /总结/, 'topic asked for a summary');
-  bridge.dispose();
-}
-
-// 13e2) 话题不受管理白名单限制；开关关闭后拒绝
-{
-  const restricted = makeBridge({ access: { group: 'all', allowOpenIds: [], managers: [] } });
-  await restricted.bridge.handleMessage(message({
-    chat_id: 'oc_topic_open', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
-    content: JSON.stringify({ text: '/topic 任意成员可开话题\n正文' }),
-  }));
-  assert.equal(restricted.harness.created, 1, 'anyone may open a topic without being a manager');
-
-  const off = makeBridge({ topicsEnabled: false });
-  await off.bridge.handleMessage(message({
-    chat_id: 'oc_topic_off', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
-    content: JSON.stringify({ text: '/topic 关闭时的尝试\n正文' }),
-  }));
-  assert.equal(off.harness.created, 0, 'disabled topics refuse creation');
-  assert.match(cardText(off.bot), /话题功能已关闭/);
-  restricted.bridge.dispose();
-  off.bridge.dispose();
-}
-
-// 13f) 话题继承源群会话的工作区（不继承会话本身）
-{
-  const { harness, bridge } = makeBridge();
-  await state.bindSession('chat:oc_inherit', 'sess-main');
-  await state.setSessionMeta('sess-main', { workspace: '/tmp/one' });
-  await bridge.handleMessage(message({
-    chat_id: 'oc_inherit', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
-    content: JSON.stringify({ text: '/topic 继承测试\n正文内容' }),
-  }));
-  assert.deepEqual(harness.lastCreate, { workspaceId: 'ws-1', agentPreset: undefined }, 'topic reuses the chat workspace');
-  const topic = state.topicFor('oc_inherit', 1);
-  assert.equal(state.value.meta?.[topic.sessionId]?.workspace, '/tmp/one', 'topic session records the same workspace');
-  assert.notEqual(topic.sessionId, 'sess-main', 'topic gets its own Session');
-  bridge.dispose();
-}
-
-// 13g) 主会话下一条消息会带上话题同步摘要（放在 systemPrompt.context）
-{
-  const { harness, contextBySession, bridge } = makeBridge();
-  await state.bindSession('chat:oc_sync', 'sess-main2');
-  await state.addSynced('oc_sync', { topicId: 7, title: '同步话题', summary: '结论要点', at: new Date().toISOString() });
-  await bridge.handleMessage(message({ chat_id: 'oc_sync', content: JSON.stringify({ text: '总结一下' }) }));
-  const context = contextBySession.get('sess-main2') ?? '';
-  assert.match(context, /<feishu_bot_topic_sync>/);
-  assert.match(context, /话题 #7「同步话题」：结论要点/);
-  assert.equal(harness.prompts.at(-1).content[0].text, '总结一下', 'user message stays clean');
-  bridge.dispose();
 }
 
 // 13h) 消息状态表情：处理中 → 完成 / 停止
@@ -1458,28 +1365,6 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
-// 17) 话题会话的审批卡发往群 chat id，而不是 topic 绑定键
-{
-  const { bot, bridge } = makeBridge();
-  await state.bindSession('topic:oc_topic:1', 'sess-topic-approve');
-  const request = {
-    callId: 'call-t', toolName: 'bash', signal: new AbortController().signal,
-    agent: { session: { id: 'sess-topic-approve', snapshotEvents: () => [{ type: 'approval/asked', data: { id: 'ap-t', callId: 'call-t' } }] } },
-  };
-  const pending = bridge.handleApproval(request, () => new Promise(() => {}));
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.equal(bot.cards.length, 1, 'topic approval card is sent');
-  assert.equal(bot.cards[0].chatId, 'oc_topic', 'card goes to the chat, not "topic:oc_topic:1"');
-  const toast = await bridge.onCardAction({
-    operator: { open_id: 'ou_user' },
-    action: { value: { action: 'approve:ap-t' } },
-    context: { open_message_id: bot.cards[0].id, open_chat_id: 'oc_topic' },
-  });
-  assert.equal(toast.toast.type, 'success');
-  assert.equal(await pending, 'allowed-once');
-  bridge.dispose();
-}
-
 // 18) 群聊空 @：无会话回提示；已有会话交给模型
 {
   const { bot, harness, bridge } = makeBridge();
@@ -1540,51 +1425,6 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
-// 20) 话题同步摘要全部随消息注入（全部保留，不按话题去重）
-{
-  const { harness, contextBySession, bridge } = makeBridge();
-  await state.bindSession('chat:oc_sync_latest', 'sess-sync-latest');
-  await state.addSynced('oc_sync_latest', { topicId: 1, title: '旧标题', summary: '旧结论', at: new Date().toISOString() });
-  await state.addSynced('oc_sync_latest', { topicId: 1, title: '新标题', summary: '新结论', at: new Date().toISOString() });
-  await state.addSynced('oc_sync_latest', { topicId: 2, title: '第二个', summary: '二结论', at: new Date().toISOString() });
-  await bridge.handleMessage(message({ chat_id: 'oc_sync_latest', content: JSON.stringify({ text: '继续' }) }));
-  const syncContext = contextBySession.get('sess-sync-latest') ?? '';
-  assert.match(syncContext, /<feishu_bot_topic_sync>/);
-  assert.match(syncContext, /旧结论/, 'every synced summary is kept');
-  assert.match(syncContext, /新结论/);
-  assert.match(syncContext, /二结论/);
-  assert.equal(harness.prompts.at(-1).content[0].text, '继续', 'user message stays clean');
-  bridge.dispose();
-}
-
-// 21) 话题会话的提问卡同样发到群 chat id
-{
-  const { bot, bridge } = makeBridge();
-  await state.bindSession('topic:oc_topic_q:1', 'sess-topic-question');
-  const pending = bridge.handleQuestion({
-    agent: { session: { id: 'sess-topic-question' } },
-    questions: [{ id: 'q-t', question: '选哪个？', options: [{ label: 'A' }] }],
-  }, () => new Promise(() => {}));
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.equal(bot.cards[0].chatId, 'oc_topic_q', 'question card goes to the chat');
-  await bridge.onCardAction({
-    operator: { open_id: 'ou_user' },
-    action: { value: { action: 'answer:q-t:0' } },
-    context: { open_message_id: bot.cards[0].id, open_chat_id: 'oc_topic_q' },
-  });
-  assert.deepEqual(await pending, { answers: [{ id: 'q-t', selected: ['A'] }] });
-  bridge.dispose();
-}
-
-// 22) 私聊不支持话题（没有线程语义，无法继续）
-{
-  const { bot, harness, bridge } = makeBridge();
-  await bridge.handleMessage(message({ chat_id: 'oc_dm_topic', content: JSON.stringify({ text: '/topic 私聊话题' }) }));
-  assert.equal(harness.created, 0, 'no topic session in a private chat');
-  assert.match(cardText(bot), /私聊不支持话题/);
-  bridge.dispose();
-}
-
 // 23) 旁听：未 @ 消息进入缓冲，下次 @ 时注入一次
 {
   const { bot, harness, contextBySession, bridge } = makeBridge({ eavesdrop: { enabled: true, limit: 0 } });
@@ -1631,32 +1471,6 @@ function message(overrides = {}) {
   assert.ok(!block.includes('m1'), 'the oldest message was rolled off');
   assert.match(block, /m2/);
   assert.match(block, /m3/);
-  bridge.dispose();
-}
-
-// 25) 旁听按话题隔离：话题缓冲不会进主会话，主会话缓冲也不会进话题
-{
-  const { harness, contextBySession, bridge } = makeBridge({ eavesdrop: { enabled: true, limit: 0 } });
-  const topic = await state.createTopic({
-    chatId: 'oc_topic_listen', title: '旁听话题', brief: '', sessionId: 'sess-topic-listen', rootMessageId: 'om_topic_listen_root',
-  });
-  await state.bindSession(`topic:oc_topic_listen:${topic.topicId}`, 'sess-topic-listen');
-  await bridge.handleMessage(message({
-    chat_id: 'oc_topic_listen', chat_type: 'group', parent_id: 'om_topic_listen_root', mentions: [],
-    content: JSON.stringify({ text: '话题里的闲聊' }),
-  }));
-  assert.equal(harness.prompts.length, 0);
-  await bridge.handleMessage(message({
-    chat_id: 'oc_topic_listen', chat_type: 'group', mentions: [{ id: { open_id: 'ou_bot' } }],
-    content: JSON.stringify({ text: '主会话' }),
-  }));
-  assert.ok(!String(contextBySession.get('sess-1') ?? '').includes('话题里的闲聊'), 'main chat has its own buffer');
-  await bridge.handleMessage(message({
-    chat_id: 'oc_topic_listen', chat_type: 'group', parent_id: 'om_topic_listen_root', mentions: [{ id: { open_id: 'ou_bot' } }],
-    content: JSON.stringify({ text: '话题里问' }),
-  }));
-  const topicContext = contextBySession.get('sess-topic-listen') ?? '';
-  assert.match(topicContext, /话题里的闲聊/);
   bridge.dispose();
 }
 

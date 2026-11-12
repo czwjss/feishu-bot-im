@@ -292,15 +292,6 @@ export class FeishuBot {
     }
   }
 
-  /** Reply inside the message's thread (Feishu "话题" view). */
-  async replyCardInThread(messageId, card) {
-    const response = assertApiSuccess('Feishu threaded card reply', await this.#client.im.v1.message.reply({
-      path: { message_id: messageId },
-      data: { msg_type: 'interactive', content: JSON.stringify(card), reply_in_thread: true },
-    }));
-    return { messageId: response?.data?.message_id ?? null, threadId: response?.data?.thread_id ?? null };
-  }
-
   /** Edit an existing text message (used for the live progress bubble). */
   async updateText(messageId, text) {
     const parts = splitText(text);
@@ -529,20 +520,6 @@ export class FeishuBot {
       data: { msg_type: 'interactive', content: JSON.stringify(card) },
     }));
     return response?.data?.message_id ?? null;
-  }
-
-  /** Post an already-created CardKit card as a thread reply. */
-  async replyCardRefInThread(messageId, cardId, uuid = null) {
-    const response = assertApiSuccess('Feishu threaded card message', await this.#client.im.v1.message.reply({
-      path: { message_id: messageId },
-      data: {
-        msg_type: 'interactive',
-        content: cardRefContent(cardId),
-        reply_in_thread: true,
-        ...(uuid ? { uuid } : {}),
-      },
-    }));
-    return { messageId: response?.data?.message_id ?? null, threadId: response?.data?.thread_id ?? null };
   }
 
   /** Replace an existing interactive card in place. */

@@ -50,34 +50,7 @@ const onlyBlock = [{
 }];
 assert.equal(rewriteInjectedContextMessages(onlyBlock), null, 'empty body must keep the original message');
 
-// 6) 话题同步摘要：也拆成独立的 plugin 行
-{
-  const SYNC = '<feishu_bot_topic_sync>\n- 话题 #1「测试」：结论\n</feishu_bot_topic_sync>';
-  const splitSync = splitLeadingInjectedContext(`${SOURCE}\n\n${SYNC}\n\n继续`);
-  assert.equal(splitSync.blocks.length, 2);
-  assert.equal(splitSync.blocks[1].text, SYNC);
-  assert.equal(splitSync.rest, '继续');
-}
-
-// 7) 多个前置 text part（来源 + 话题同步）逐个拆成独立行
-{
-  const SYNC = '<feishu_bot_topic_sync>\n- 话题 #1「测试」：结论\n</feishu_bot_topic_sync>';
-  const multi = rewriteInjectedContextMessages([{
-    id: 'm3', role: 'user',
-    content: [
-      { type: 'text', text: SOURCE },
-      { type: 'text', text: SYNC },
-      { type: 'text', text: '继续' },
-    ],
-    source: { kind: 'user', rpcId: 'rpc-3' },
-  }], { newId: () => `ctx-${++n}` });
-  assert.equal(multi.length, 3, 'both blocks and the user text stay separate');
-  assert.deepEqual(multi[0].content, [{ type: 'text', text: SOURCE }]);
-  assert.deepEqual(multi[1].content, [{ type: 'text', text: SYNC }]);
-  assert.deepEqual(multi[2].content, [{ type: 'text', text: '继续' }]);
-}
-
-// 8) 前置块后接图片：块被拆走，图片留在用户消息里
+// 6) 前置块后接图片：块被拆走，图片留在用户消息里
 {
   const withImage = rewriteInjectedContextMessages([{
     id: 'm4', role: 'user',

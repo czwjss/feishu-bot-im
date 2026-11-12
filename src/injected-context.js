@@ -21,7 +21,6 @@ function escapePattern(text) {
 
 const SOURCE_PATTERN = new RegExp(`${escapePattern(INJECTED_CONTEXT_TAGS.sourceOpen)}([\\s\\S]*?)${escapePattern(INJECTED_CONTEXT_TAGS.sourceClose)}`);
 const GUIDANCE_PATTERN = new RegExp(`${escapePattern(INJECTED_CONTEXT_TAGS.guidanceOpen)}([\\s\\S]*?)${escapePattern(INJECTED_CONTEXT_TAGS.guidanceClose)}`);
-const TOPIC_SYNC_PATTERN = new RegExp(`${escapePattern(INJECTED_CONTEXT_TAGS.topicSyncOpen)}([\\s\\S]*?)${escapePattern(INJECTED_CONTEXT_TAGS.topicSyncClose)}`);
 const EAVESDROP_PATTERN = new RegExp(`${escapePattern(INJECTED_CONTEXT_TAGS.eavesdropOpen)}([\\s\\S]*?)${escapePattern(INJECTED_CONTEXT_TAGS.eavesdropClose)}`);
 const PEOPLE_PATTERN = new RegExp(`${escapePattern(INJECTED_CONTEXT_TAGS.peopleOpen)}([\\s\\S]*?)${escapePattern(INJECTED_CONTEXT_TAGS.peopleClose)}`);
 
@@ -39,12 +38,6 @@ export function splitLeadingInjectedContext(text) {
     if (source && source.index === 0) {
       blocks.push({ form: 'source', text: source[0] });
       rest = rest.slice(source[0].length);
-      continue;
-    }
-    const sync = TOPIC_SYNC_PATTERN.exec(rest);
-    if (sync && sync.index === 0) {
-      blocks.push({ form: 'source', text: sync[0] });
-      rest = rest.slice(sync[0].length);
       continue;
     }
     const eavesdrop = EAVESDROP_PATTERN.exec(rest);
@@ -98,7 +91,7 @@ export function rewriteInjectedContextMessages(messages, { newId = () => randomU
       rewritten.push(message);
       continue;
     }
-    // Blocks can arrive as several leading text parts (source, topic sync);
+    // Blocks can arrive as several leading text parts (source, guidance);
     // consume every leading part that is made only of injected blocks.
     const blocks = [];
     const remaining = [];

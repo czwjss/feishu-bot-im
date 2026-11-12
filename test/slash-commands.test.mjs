@@ -28,7 +28,7 @@ function fakeBot(remote, { failDelete = new Set(), failCreate = new Set() } = {}
   assert.deepEqual(result.removed.sort(), ['cancel', 'repair']);
   assert.equal(result.failed.length, 0);
   const created = result.created.sort();
-  assert.deepEqual(created.sort(), ['menu', 'new', 'topic', 'topic-sync']);
+  assert.deepEqual(created.sort(), ['menu', 'new']);
   assert.ok(bot.calls.some(([kind, arg]) => kind === 'delete' && arg === 'c1'));
 }
 
@@ -49,11 +49,11 @@ function fakeBot(remote, { failDelete = new Set(), failCreate = new Set() } = {}
   assert.ok(result.failed.some((item) => item.action === 'delete' && item.command === 'batch'));
 }
 
-// 4) 清单是 5 条且包含必需命令
+// 4) 清单是 3 条且包含必需命令
 {
   const names = manifestNames();
-  assert.equal(names.size, 5);
-  for (const required of ['menu', 'new', 'stop', 'topic', 'topic-sync']) {
+  assert.equal(names.size, 3);
+  for (const required of ['menu', 'new', 'stop']) {
     assert.ok(names.has(required), `missing ${required}`);
   }
   assert.ok(SLASH_COMMANDS.every((item) => item.zh && item.en));

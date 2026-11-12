@@ -52,8 +52,6 @@ assert.deepEqual(calls.at(-1), ['save', { respondToBotMessages: false }], 'bot r
 await handle('bot.process-detail.set', { botId: 'bot_1', mode: 'brief' });
 assert.deepEqual(calls.at(-1), ['save', { processDetail: 'brief' }], 'progress detail saved');
 
-await handle('bot.topics.set', { botId: 'bot_1', enabled: false });
-assert.deepEqual(calls.at(-1), ['save', { topicsEnabled: false }], 'topics switch saved');
 
 await handle('bot.eavesdrop.set', { botId: 'bot_1', eavesdrop: { enabled: true, limit: 0 } });
 assert.deepEqual(calls.at(-1), ['save', { eavesdrop: { enabled: true, limit: 0 } }], 'eavesdrop settings saved');

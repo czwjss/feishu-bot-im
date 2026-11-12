@@ -125,14 +125,6 @@ assert.equal(sent.kind, 'file');
 assert.equal(sent.fileName, 'a.txt');
 assert.equal(calls.at(-1).kind, 'file-msg');
 
-// 7b) 话题会话回传文件也发到群 chat id
-{
-  await s1.bindSession('topic:oc_3:1', 'sess-3');
-  const topicSent = await manager.send({ sessionId: 'sess-3', path: file });
-  assert.equal(topicSent.chatId, 'oc_3', 'topic binding resolves to the chat id');
-  assert.equal(calls.at(-1).chatId, 'oc_3');
-}
-
 // 8b) 历史消息：本地关键词过滤
 {
   const history = await manager.listMessages({ sessionId: 'sess-1', query: '上线', limit: 5, scanLimit: 10 });

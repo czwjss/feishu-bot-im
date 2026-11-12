@@ -116,10 +116,6 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
         await runtimeOf(input).save({ processDetail: input.mode === 'brief' ? 'brief' : 'detailed' });
         return ok(await runtimeOf(input).status());
 
-      case 'bot.topics.set':
-        await runtimeOf(input).save({ topicsEnabled: input.enabled !== false });
-        return ok(await runtimeOf(input).status());
-
       case 'bot.bot-reply.set':
         await runtimeOf(input).save({ respondToBotMessages: input.enabled === true });
         return ok(await runtimeOf(input).status());

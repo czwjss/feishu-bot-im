@@ -129,9 +129,6 @@ export class TurnRunner {
     const chatKey = Object.entries(this.#state.value.sessions)
       .find(([, value]) => value === sessionId)?.[0];
     if (!chatKey) return;
-    const topic = chatKey.startsWith('topic:')
-      ? this.#state.topicFor?.(chatKey.split(':')[1], Number(chatKey.split(':')[2]))
-      : null;
     const chatId = chatIdOfKey(chatKey);
     if (!chatId) return;
 
@@ -157,7 +154,6 @@ export class TurnRunner {
         streamPanelBodies: null,
         streamPanelAt: 0,
         streamText: '',
-        topic: topic ?? null,
         turn: event.data?.turn,
         answer: '',
         steps: [],
@@ -209,7 +205,6 @@ export class TurnRunner {
       active.originKind = origin.kind;
       if (origin.chatKey) active.chatKey = origin.chatKey;
       if (origin.chatId) active.chatId = origin.chatId;
-      if (origin.topic !== undefined) active.topic = origin.topic;
       this.#onTurnOrigin(sessionId, origin.kind === 'feishu' ? 'feishu' : 'external');
       if (origin.kind !== 'external' && active.silent) {
         active.silent = false;
@@ -507,8 +502,8 @@ export class TurnRunner {
   /** Open the answer card: CardKit first, then raw, then text fallback. */
   async #openAnswerCard(turn, body) {
     if (!turn.cardMessageId && !turn.cardBroken) {
-      // 普通会话把回答卡片作为「回复」挂在触发消息下；话题走 thread。
-      const replyTo = turn.topic?.rootMessageId ? null : this.#replyToOf(turn.sessionId);
+      // 回答卡片挂在触发消息下（私聊由调用方不传触发消息）。
+      const replyTo = this.#replyToOf(turn.sessionId);
       if (turn.cardKind !== 'raw' && this.#cardKitReady()) {
         try {
           const cardId = await this.#retryCardKit(
@@ -520,19 +515,7 @@ export class TurnRunner {
           );
           turn.cardSendUuid ??= randomUUID();
           let messageId = null;
-          if (turn.topic?.rootMessageId) {
-            if (typeof this.#bot.replyCardRefInThread !== 'function') {
-              throw new Error('CardKit thread reply is unavailable');
-            }
-            const reply = await this.#retryCardKit(
-              () => this.#bot.replyCardRefInThread(turn.topic.rootMessageId, cardId, turn.cardSendUuid),
-              'send',
-            );
-            messageId = reply?.messageId ?? reply?.message_id ?? null;
-            if (turn.topic && reply?.threadId) {
-              this.#state.updateTopic?.(turn.topic.chatId, turn.topic.topicId, { threadId: reply.threadId }).catch(() => undefined);
-            }
-          } else if (replyTo && typeof this.#bot.replyCardRef === 'function') {
+          if (replyTo && typeof this.#bot.replyCardRef === 'function') {
             messageId = await this.#retryCardKit(
               () => this.#bot.replyCardRef(replyTo, cardId, turn.cardSendUuid),
               'send',
@@ -563,13 +546,7 @@ export class TurnRunner {
         }
       }
       try {
-        if (turn.topic?.rootMessageId && this.#bot.replyCardInThread) {
-          const reply = await this.#bot.replyCardInThread(turn.topic.rootMessageId, this.#card(turn, body));
-          turn.cardMessageId = reply?.messageId ?? reply?.message_id ?? null;
-          if (turn.topic && reply?.threadId) {
-            this.#state.updateTopic?.(turn.topic.chatId, turn.topic.topicId, { threadId: reply.threadId }).catch(() => undefined);
-          }
-        } else if (replyTo && typeof this.#bot.replyCard === 'function') {
+        if (replyTo && typeof this.#bot.replyCard === 'function') {
           turn.cardMessageId = await this.#bot.replyCard(replyTo, this.#card(turn, body), turn.chatId);
         } else {
           turn.cardMessageId = await this.#bot.sendCard(turn.chatId, this.#card(turn, body));
@@ -697,22 +674,6 @@ export class TurnRunner {
     // A streamed progress patch may still be in flight; the final patch must not race it.
     if (turn.flushPromise) await turn.flushPromise.catch(() => undefined);
 
-    if (turn.topic) {
-      const current = this.#state.topicFor?.(turn.topic.chatId, turn.topic.topicId) ?? turn.topic;
-      await this.#state.updateTopic?.(turn.topic.chatId, turn.topic.topicId, {
-        lastAnswer: String(final).slice(0, 2000),
-        ...(current?.syncRequested ? { summary: String(final).slice(0, 1200), syncRequested: false } : {}),
-      }).catch(() => undefined);
-      if (current?.syncRequested) {
-        await this.#state.addSynced?.(turn.topic.chatId, {
-          topicId: turn.topic.topicId,
-          title: turn.topic.title,
-          summary: String(final).slice(0, 1200),
-          at: new Date().toISOString(),
-        }).catch(() => undefined);
-        await sendNotice(this.#bot, turn.chatId, `话题 #${turn.topic.topicId}「${turn.topic.title}」已同步到主会话。`, '话题已同步');
-      }
-    }
     let cardPatched = false;
     try {
       if (turn.cardKind === 'cardkit' && turn.cardKitId) {

@@ -263,69 +263,7 @@ function inbound(text, extra = {}) {
   botRuntime.dispose();
 }
 
-// 5) 话题：回答以线程回复发送，不在聊天流另发卡片
-{
-  const client = recordingClient();
-  const bot = new FeishuBot({ appId: 'cli_test', appSecret: 'x', client });
-  const topic = await state.createTopic({ chatId: 'oc_e2e', title: '测试话题', brief: '正文', sessionId: 'sess-topic', rootMessageId: 'om_root' });
-  await state.bindSession(`topic:oc_e2e:${topic.topicId}`, 'sess-topic');
-  const bridge = new FeishuBridge({ bot, harness, config, state, version: 't', inboxDir: join(dir, 'inbox') });
-  await bridge.handleMessage({
-    sender: { sender_type: 'user', sender_id: { open_id: 'ou_user' } },
-    message: {
-      message_id: 'om_topic_reply', chat_id: 'oc_e2e', chat_type: 'group', message_type: 'text',
-      parent_id: 'om_root', mentions: [{ id: { open_id: 'ou_bot' } }],
-      content: JSON.stringify({ text: '继续' }),
-    },
-  });
-  await bridge.onSessionEvent({ id: 'sess-topic' }, { type: 'turn/start', data: { turn: 1 } });
-  await bridge.onSessionEvent({ id: 'sess-topic' }, {
-    type: 'user/message',
-    data: { source: { kind: 'user', rpcId: harness.prompts.at(-1).options.requestId } },
-  });
-  await bridge.onSessionEvent({ id: 'sess-topic' }, { type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'text', text: '第一轮回答' }] } } });
-  await bridge.onSessionEvent({ id: 'sess-topic' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
-  const replies = client.calls.filter((call) => call.api === 'message.reply');
-  assert.equal(replies.length, 1, 'topic answer goes into the card thread');
-  assert.equal(replies[0].path.message_id, 'om_root');
-  assert.equal(replies[0].data.reply_in_thread, true, 'reply must stay in the topic thread');
-  assert.equal(client.calls.filter((call) => call.api === 'message.create').length, 0, 'no extra card in the chat feed');
-  const patches = client.calls.filter((call) => call.api === 'message.patch');
-  assert.ok(patches.length > 0, 'the threaded answer card is patched');
-  assert.match(patches.at(-1).data.content, /第一轮回答/, 'threaded card carries the answer');
-  bridge.dispose();
-}
-
-// 6) /topic-sync：话题摘要同步回主会话
-{
-  const client = recordingClient();
-  const bot = new FeishuBot({ appId: 'cli_test', appSecret: 'x', client });
-  const topic = await state.createTopic({ chatId: 'oc_e2e', title: '同步话题', brief: '正文', sessionId: 'sess-sync', rootMessageId: 'om_sync_root' });
-  await state.bindSession(`topic:oc_e2e:${topic.topicId}`, 'sess-sync');
-  const bridge = new FeishuBridge({ bot, harness, config, state, version: 't', inboxDir: join(dir, 'inbox') });
-  await bridge.handleMessage({
-    sender: { sender_type: 'user', sender_id: { open_id: 'ou_user' } },
-    message: {
-      message_id: 'om_sync_cmd', chat_id: 'oc_e2e', chat_type: 'group', message_type: 'text',
-      parent_id: 'om_sync_root', mentions: [{ id: { open_id: 'ou_bot' } }],
-      content: JSON.stringify({ text: '/topic-sync' }),
-    },
-  });
-  assert.equal(state.topicFor('oc_e2e', topic.topicId)?.syncRequested, true, 'sync command marked');
-  await bridge.onSessionEvent({ id: 'sess-sync' }, { type: 'turn/start', data: { turn: 1 } });
-  await bridge.onSessionEvent({ id: 'sess-sync' }, {
-    type: 'user/message',
-    data: { source: { kind: 'user', rpcId: harness.prompts.at(-1).options.requestId } },
-  });
-  await bridge.onSessionEvent({ id: 'sess-sync' }, { type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'text', text: '结论要点一' }] } } });
-  await bridge.onSessionEvent({ id: 'sess-sync' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
-  const synced = state.syncedFor('oc_e2e');
-  assert.ok(synced.some((item) => item.topicId === topic.topicId && item.summary.includes('结论要点一')), 'summary synced to the chat');
-  assert.equal(state.topicFor('oc_e2e', topic.topicId)?.syncRequested, false, 'sync flag cleared');
-  bridge.dispose();
-}
-
-// 7) 绑定会话里 Web 侧触发的 turn 不向飞书发卡片
+// 5) 绑定会话里 Web 侧触发的 turn 不向飞书发卡片
 {
   const client = recordingClient();
   const bot = new FeishuBot({ appId: 'cli_test', appSecret: 'x', client });

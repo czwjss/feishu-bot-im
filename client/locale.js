@@ -80,8 +80,6 @@ export const MESSAGES = Object.freeze({
   "插入为补充指令": "Steer",
   "私聊上下文注入": "Private-chat context",
   "群聊": "Group chat",
-  "启用话题": "Enable topics",
-  "开启后所有群成员都能用 /topic 开话题、/topic-sync 同步结论，不受管理白名单限制。": "Anyone in the group may open or sync topics; the manager list does not apply.",
   "允许": "Allow",
   "响应其它机器人的消息": "Reply to other bots",
   "开启后，其它机器人（应用）在群里的发言也会触发本机器人。": "When on, messages from other bots also trigger this bot.",

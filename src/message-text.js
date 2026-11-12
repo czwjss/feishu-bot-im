@@ -1,9 +1,8 @@
 /** Text helpers shared by the bridge and the turn runner. */
 
-/** `chat:<id>` / `topic:<id>:<n>` → the Feishu chat id (`oc_…`). */
+/** `chat:<id>` → the Feishu chat id (`oc_…`). */
 export function chatIdOfKey(key) {
   if (typeof key !== 'string' || !key) return null;
-  if (key.startsWith('topic:')) return key.split(':')[1] || null;
   return key.replace(/^chat:/, '') || null;
 }
 

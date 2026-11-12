@@ -97,7 +97,7 @@ export const MESSAGES_TOOL_NAME = 'feishu_bot_messages';
 export function createMessagesTool({ list }) {
   return Object.freeze({
     name: MESSAGES_TOOL_NAME,
-    description: '以机器人身份读取它所在会话的历史消息（群聊或私聊），支持时间范围、分页、话题，'
+    description: '以机器人身份读取它所在会话的历史消息（群聊或私聊），支持时间范围、分页、thread，'
       + '以及本次拉取范围内的本地关键词筛选；不是飞书全文搜索。',
     parameters: {
       type: 'object',
@@ -113,7 +113,7 @@ export function createMessagesTool({ list }) {
         },
         threadId: {
           type: 'string',
-          description: '话题 thread_id；指定后读取该话题回复，仍需要 chatId 做群校验。',
+          description: 'thread_id；指定后读取该 thread 的回复，仍需要 chatId 做群校验。',
         },
         startTime: {
           type: 'string',
@@ -254,9 +254,8 @@ export function createChatsTool({ list }) {
                 title: { type: 'string' },
                 sessionId: { type: 'string' },
                 kind: { type: 'string' },
-                topics: { type: 'number' },
               },
-              required: ['bot', 'chatId', 'title', 'sessionId', 'kind', 'topics'],
+              required: ['bot', 'chatId', 'title', 'sessionId', 'kind'],
             },
           },
         },
@@ -278,7 +277,6 @@ export function createChatsTool({ list }) {
           title: String(row.title ?? ''),
           sessionId: String(row.sessionId ?? ''),
           kind: String(row.kind ?? 'chat'),
-          topics: Number(row.topics) || 0,
         })),
       };
     },

@@ -2,10 +2,8 @@ import assert from 'node:assert/strict';
 
 import { chatIdOfKey, interactiveTextOfContent, scopedValue, textOfContentOrPost } from '../src/message-text.js';
 
-// 1) 绑定键 → 飞书 chat id：普通会话与话题都必须落到 oc_…
+// 1) 绑定键 → 飞书 chat id
 assert.equal(chatIdOfKey('chat:oc_123'), 'oc_123');
-assert.equal(chatIdOfKey('topic:oc_123:2'), 'oc_123');
-assert.equal(chatIdOfKey('topic:oc_123:12'), 'oc_123');
 assert.equal(chatIdOfKey(''), null);
 assert.equal(chatIdOfKey(undefined), null);
 

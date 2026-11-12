@@ -22,7 +22,7 @@ export async function runCommand(services, name, argument, context) {
           const sessionId = state.sessionFor(chatKey);
           await bot.sendText(chatId, [
             '功能菜单：',
-            '/menu 卡片菜单 · /new 新会话 · /stop 停止 · /topic 话题 · /topic-sync 同步结论',
+            '/menu 卡片菜单 · /new 新会话 · /stop 停止',
             `当前会话：${sessionId ?? '尚未创建'}`,
           ].join('\n'));
         }
@@ -36,43 +36,6 @@ export async function runCommand(services, name, argument, context) {
         await notice('已解除当前会话绑定，下一条消息会开启全新会话。', '新会话');
         return true;
       }
-      case 'topic-sync': {
-        const inTopic = typeof chatKey === 'string' && chatKey.startsWith('topic:');
-        if (!inTopic) {
-          await notice('请在话题内使用 `/topic-sync`。', '话题同步');
-          return true;
-        }
-        const topicId = Number(chatKey.split(':')[2]);
-        await services.syncTopic?.(chatId, topicId);
-        return true;
-      }
-
-      case 'topic': {
-        const arg = String(argument ?? '').trim();
-        const inTopic = typeof chatKey === 'string' && chatKey.startsWith('topic:');
-        if (inTopic) {
-          await notice('话题内可直接对话；需要把结论同步回主会话时用 `/topic-sync`。', '话题');
-          return true;
-        }
-        // Private chats have no thread semantics, so a topic could never be continued.
-        if (context?.chatType === 'p2p') {
-          await notice('私聊不支持话题；需要并行任务时，请在群里 at 我 并使用 `/topic 标题`。', '话题');
-          return true;
-        }
-        if (!arg || arg.toLowerCase() === 'list') {
-          await services.showTopics?.(chatId);
-          return true;
-        }
-        const [firstLine] = arg.split('\n');
-        await services.openTopic?.({
-          chatId,
-          title: firstLine.trim().slice(0, 20),
-          content: arg,
-          rootMessageId: context?.messageId ?? null,
-        });
-        return true;
-      }
-
       case 'stop': {
         const sessionId = state.sessionFor(chatKey);
         if (!sessionId) {

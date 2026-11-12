@@ -14,7 +14,6 @@ const RPC_ENDPOINT = 'im-feishu';
       botEavesdropSet: 'bot.eavesdrop.set',
       botMentionsSet: 'bot.mentions.set',
       botBotReplySet: 'bot.bot-reply.set',
-      botTopicsSet: 'bot.topics.set',
       botProcessDetailSet: 'bot.process-detail.set',
       botModelSet: 'bot.model.set',
       botPresetSet: 'bot.preset.set',

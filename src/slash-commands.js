@@ -10,8 +10,6 @@ export const SLASH_COMMANDS = Object.freeze([
   { command: 'menu', zh: '打开功能面板', en: 'Open the feature panel' },
   { command: 'new', zh: '开启全新会话', en: 'Start a fresh session' },
   { command: 'stop', zh: '停止当前任务', en: 'Stop the current task' },
-  { command: 'topic', zh: '开启/查看话题', en: 'Open or list topics' },
-  { command: 'topic-sync', zh: '把话题结论同步回主会话', en: 'Sync the topic conclusion back' },
 ]);
 
 export function manifestNames() {

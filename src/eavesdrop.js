@@ -3,7 +3,7 @@
  *
  * The bot only receives messages addressed to it unless the app holds the
  * `im:message.group_msg` scope. With that scope, this module keeps a rolling
- * transcript per chat (and per topic) so the next mention can carry the
+ * transcript per chat so the next mention can carry the
  * messages it was not addressed in.
  *
  * Entries keep text only. Images and files are represented by placeholders
@@ -167,7 +167,7 @@ export function renderEavesdropBlock(entries) {
 }
 
 /**
- * Rolling transcript per buffer key (`chat:<id>` / `topic:<id>:<n>`).
+ * Rolling transcript per buffer key (`chat:<id>`).
  *
  * `take()` reserves unseen entries so two overlapping mentions cannot inject
  * the same messages twice; `commit()` moves the watermark after a successful

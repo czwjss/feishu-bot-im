@@ -91,8 +91,8 @@ import {
     list: async (input) => {
       list.push(input);
       return [
-        { bot: 'bot_default', chatId: 'oc_daily', title: '日报群', sessionId: 'sess-9', kind: 'chat', topics: 2 },
-        { bot: 'bot_default', chatId: 'oc_ops', title: '', sessionId: 'sess-10', kind: 'topic', topics: 1 },
+        { bot: 'bot_default', chatId: 'oc_daily', title: '日报群', sessionId: 'sess-9', kind: 'chat' },
+        { bot: 'bot_default', chatId: 'oc_ops', title: '', sessionId: 'sess-10', kind: 'group' },
       ];
     },
   });

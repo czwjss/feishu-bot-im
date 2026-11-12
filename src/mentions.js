@@ -2,7 +2,7 @@
  * Feishu @ mentions in model output.
  *
  * The model writes the card syntax `<at id=ou_xxx></at>`. This module validates
- * the id against the people seen in the current chat/topic and then:
+ * the id against the people seen in the current chat and then:
  *
  *   - card: keeps/normalizes `<at id=ou_xxx></at>`;
  *   - text: converts to `<at user_id="ou_xxx">name</at>`;

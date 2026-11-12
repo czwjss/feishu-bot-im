@@ -195,8 +195,7 @@ export class FeishuBridge {
       }
       return;
     }
-    const topic = this.#config.topicsEnabled === false ? null : this.#topicForMessage(message);
-    const chatKey = topic ? `topic:${message.chat_id}:${topic.topicId}` : `chat:${message.chat_id}`;
+    const chatKey = `chat:${message.chat_id}`;
     // Remember who spoke / who was mentioned so the model can @ them later.
     const wantsMentions = this.#config.mentions?.enabled !== false;
     const wantsName = wantsMentions || this.#config.eavesdrop?.enabled === true;
@@ -210,10 +209,8 @@ export class FeishuBridge {
         if (mentionId === this.#config.botOpenId) continue;
       }
     }
-    // 话题内只有 @机器人 才处理；话题外按 @ 或引用机器人处理
-    const addressed = topic
-      ? isAddressed(this.#config, message)
-      : (isAddressed(this.#config, message) || await this.#isReplyToBot(message));
+    // 被 @ 或被引用机器人消息都算被叫到。
+    const addressed = isAddressed(this.#config, message) || await this.#isReplyToBot(message);
     if (!addressed) {
       this.#recordEavesdrop(chatKey, message, openId, senderName);
       return;
@@ -231,24 +228,6 @@ export class FeishuBridge {
     const text = (textOfContentOrPost(message) ?? '').replace(/@_user_\d+/g, '').trim();
     this.#chatTypes.set(chatKey, message.chat_type);
 
-    if (topic && text) {
-      const nested = COMMAND.exec(text);
-      const nestedArg = String(nested?.[2] ?? '').trim().toLowerCase();
-      if (nested && nested[1].toLowerCase() === 'topic' && nestedArg !== 'close') {
-        // 话题里不能再嵌套开话题：要新话题请回群主会话 @ 机器人
-        const notice = '话题里不能再创建话题。需要新话题时，请在群里直接 at 我并发 `/topic 标题`。';
-        try {
-          if (typeof this.#bot.replyCardInThread === 'function') {
-            await this.#bot.replyCardInThread(topic.rootMessageId, noticeCard(notice, '话题'));
-          } else {
-            await sendNotice(this.#bot, message.chat_id, notice, '话题');
-          }
-        } catch {
-          await sendNotice(this.#bot, message.chat_id, notice, '话题');
-        }
-        return;
-      }
-    }
     if (text && this.#resolveTextDecision(chatKey, message.chat_id, openId, text)) return;
 
     if (text) {
@@ -320,7 +299,7 @@ export class FeishuBridge {
         await submitPrompt([{ type: 'text', text: BARE_MENTION_PROMPT }], BARE_MENTION_PROMPT);
         return;
       }
-      await this.#sendBareMentionHint(message.chat_id, topic);
+      await this.#sendBareMentionHint(message.chat_id);
       return;
     }
 
@@ -329,15 +308,7 @@ export class FeishuBridge {
   }
 
   /** Hint card for a bare group mention when the chat has no Session yet. */
-  async #sendBareMentionHint(chatId, topic) {
-    if (topic?.rootMessageId && typeof this.#bot.replyCardInThread === 'function') {
-      try {
-        await this.#bot.replyCardInThread(topic.rootMessageId, noticeCard(BARE_MENTION_HINT, '在的', 'blue'));
-        return;
-      } catch {
-        // Fall through to a normal chat card.
-      }
-    }
+  async #sendBareMentionHint(chatId) {
     await sendNotice(this.#bot, chatId, BARE_MENTION_HINT, '在的', 'blue');
   }
 
@@ -371,13 +342,6 @@ export class FeishuBridge {
     }
   }
 
-  /** Topic metadata for a chat key (`chat:` or `topic:`). */
-  #topicOf(chatKey) {
-    if (!chatKey?.startsWith('topic:')) return { topic: null };
-    const [, chatId, topicId] = chatKey.split(':');
-    return { topic: this.#state.topicFor?.(chatId, Number(topicId)) ?? null };
-  }
-
   /**
    * Classify the user message that actually started a turn. Feishu prompts are
    * matched by the `rpcId` the Host echoes from `session.prompt`; schedule
@@ -389,16 +353,16 @@ export class FeishuBridge {
       const origin = this.#feishuPromptOrigins.get(rpcId);
       if (origin && origin.sessionId === sessionId) {
         this.#feishuPromptOrigins.delete(rpcId);
-        return { kind: 'feishu', chatKey: origin.chatKey, chatId: origin.chatId, ...this.#topicOf(origin.chatKey) };
+        return { kind: 'feishu', chatKey: origin.chatKey, chatId: origin.chatId };
       }
     }
     if (source?.kind === 'schedule') {
       const chatKey = this.#state.keyForSession(sessionId);
       const chatId = chatIdOfKey(chatKey);
       if (!chatId) return null;
-      return { kind: 'schedule', chatKey, chatId, ...this.#topicOf(chatKey) };
+      return { kind: 'schedule', chatKey, chatId };
     }
-    if (source?.kind === 'user') return { kind: 'external', chatKey: null, chatId: null, topic: null };
+    if (source?.kind === 'user') return { kind: 'external', chatKey: null, chatId: null };
     return null;
   }
 
@@ -433,7 +397,7 @@ export class FeishuBridge {
     }, this.#config.eavesdrop.limit || DEFAULT_EAVESDROP_LIMIT);
   }
 
-  /** Keep the people seen in this chat/topic so mentions can be validated. */
+  /** Keep the people seen in this chat so mentions can be validated. */
   #rememberParticipant(chatKey, openId, name) {
     if (!openId || openId === this.#config.botOpenId) return;
     let people = this.#participants.get(chatKey);
@@ -445,7 +409,7 @@ export class FeishuBridge {
     people.set(openId, name || current || null);
   }
 
-  /** Publish a roster learned through the people tool to this chat and its topics. */
+  /** Publish a roster learned through the people tool to this chat. */
   rememberPeople(chatId, people) {
     if (!chatId || !Array.isArray(people)) return;
     const keys = new Set(
@@ -621,19 +585,10 @@ export class FeishuBridge {
       conversationTitle,
       sentAt: createTime,
     });
-    // 话题同步来的摘要属于"会话数据"，跟 source 一样作为消息前置块，而不是常驻指令。
-    let syncBlock = null;
-    if (chatKey.startsWith('chat:')) {
-      const synced = this.#state.syncedFor?.(chatId) ?? [];
-      if (synced.length > 0) {
-        const lines = synced.map((item) => `- 话题 #${item.topicId}「${item.title}」：${item.summary}`);
-        syncBlock = ['<feishu_bot_topic_sync>', ...lines, '</feishu_bot_topic_sync>'].join('\n');
-      }
-    }
     // All injected context lives in the plugin's systemPrompt.context section;
     // the user's own message keeps only what they actually sent.
     const quoteBlock = renderQuoteBlock(quoted);
-    const injected = [this.#guidanceContext(chatType), sourceBlock, quoteBlock, eavesdropBlock, syncBlock]
+    const injected = [this.#guidanceContext(chatType), sourceBlock, quoteBlock, eavesdropBlock]
       .filter(Boolean)
       .join('\n\n');
 
@@ -733,77 +688,6 @@ export class FeishuBridge {
       const name = await this.#senderName(id);
       this.#rememberParticipant(chatKey, id, name);
     }
-  }
-
-  /** Message that belongs to a topic: a reply to its card or a thread post. */
-  #topicForMessage(message) {
-    const rootId = message?.root_id ?? message?.parent_id;
-    const byRoot = rootId
-      ? Object.values(this.#state.topics ?? {}).find((topic) => topic.rootMessageId === rootId)
-      : null;
-    if (byRoot) return byRoot;
-    const threadId = message?.thread_id;
-    if (typeof threadId === 'string') {
-      for (const topic of Object.values(this.#state.topics ?? {})) {
-        if (topic.threadId === threadId) return topic;
-      }
-    }
-    return null;
-  }
-
-  /** Create an independent Session for one piece of work and announce it. */
-  async openTopic({ chatId, title, content, rootMessageId = null }) {
-    const body = String(content ?? '').trim();
-    const cleanTitle = String(title ?? '').trim().slice(0, 20) || body.split('\n')[0].slice(0, 20).trim();
-    if (!cleanTitle) throw new Error('topic title required');
-
-    const sourceSession = this.#state.sessionFor(`chat:${chatId}`);
-    const sourceMeta = (this.#state.value.meta ?? {})[sourceSession] ?? {};
-    const workspace = sourceMeta.workspace ?? this.#config.workspace ?? undefined;
-    const preset = sourceMeta.preset ?? this.#config.agentPreset ?? undefined;
-    const model = sourceMeta.model
-      ?? (sourceSession ? this.#sessionModels.get(sourceSession) : null)
-      ?? this.#config.model
-      ?? null;
-
-    let workspaceId = workspace
-      ? await this.#harness.resolveWorkspaceId(workspace).catch(() => null)
-      : null;
-    if (workspace && !workspaceId) {
-      workspaceId = await this.#harness.ensureWorkspace(workspace).catch(() => null);
-    }
-    const sessionId = await this.#harness.createSession(workspaceId
-      ? { workspaceId, agentPreset: preset }
-      : { cwd: workspace, agentPreset: preset });
-    const topicChatName = await this.#chatName(chatId);
-    await this.#renameSession(sessionId, topicChatName ? `${topicChatName} · ${cleanTitle}` : cleanTitle);
-    await this.#state.setSessionMeta?.(sessionId, {
-      workspace: workspace || null, preset: preset ?? null, model,
-    });
-    if (model) await this.#harness.selectModel(sessionId, model).catch(() => undefined);
-    await this.#applyPermission(sessionId, chatId);
-
-    const topic = await this.#state.createTopic({
-      chatId, title: cleanTitle, brief: body.slice(0, 1000), sessionId, rootMessageId,
-    });
-    await this.#state.bindSession(`topic:${chatId}:${topic.topicId}`, sessionId);
-    const topicKey = `topic:${chatId}:${topic.topicId}`;
-    this.#onContext(sessionId, this.#guidanceContext('group'));
-    await this.#promptFeishu(sessionId, [{ type: 'text', text: body || cleanTitle }], { mode: 'queue', chatKey: topicKey, chatId })
-      .catch((error) => this.#log('warn', 'topic prompt failed', error));
-    return topic;
-  }
-
-  /** Ask the topic Session for a summary; the answer is synced back on turn end. */
-  async syncTopic(chatId, topicId) {
-    const topic = this.#state.topicFor?.(chatId, Number(topicId));
-    if (!topic) return null;
-    await this.#state.updateTopic(chatId, topic.topicId, { syncRequested: true });
-    await this.#promptFeishu(topic.sessionId, [{
-      type: 'text',
-      text: '请用简洁要点总结到目前为止这个话题的讨论结论（不超过 300 字，直接给结论，不要复述过程）。',
-    }], { mode: 'queue', chatKey: `topic:${chatId}:${topic.topicId}`, chatId }).catch((error) => this.#log('warn', 'topic sync prompt failed', error));
-    return topic;
   }
 
   /** Swap the status reaction on one inbound message. */
@@ -957,10 +841,6 @@ export class FeishuBridge {
   }
 
   async #runCommand(name, argument, context) {
-    if ((name === 'topic' || name === 'topic-sync') && this.#config.topicsEnabled === false) {
-      await sendNotice(this.#bot, context.chatId, '话题功能已关闭，可在机器人设置里开启。', '话题已关闭');
-      return true;
-    }
     const managed = name === 'new' || name === 'stop';
     if (managed && !this.#canManage(context.chatKey, context.openId ?? null)) {
       await sendNotice(this.#bot, context.chatId, '只有管理员可以在群里执行这个操作。', '需要管理员');
@@ -998,17 +878,6 @@ export class FeishuBridge {
       },
       savePreset: (value) => this.#savePreset(value),
       saveModel: (value) => this.#saveModel(value),
-      openTopic: (input) => this.openTopic(input),
-      showTopics: async (chatId) => {
-        const topics = this.#state.topicsOf?.(chatId) ?? [];
-        if (topics.length === 0) {
-          await sendNotice(this.#bot, chatId, '还没有话题。发送 `/topic 标题` + 换行写正文即可开启。', '话题');
-          return;
-        }
-        const lines = topics.map((topic) => `#${topic.topicId} ${topic.title}`);
-        await sendNotice(this.#bot, chatId, ['话题列表：', ...lines].join('\n'), '话题列表');
-      },
-      syncTopic: (chatId, topicId) => this.syncTopic(chatId, topicId),
       log: (level, message, error) => this.#log(level, message, error),
     };
   }

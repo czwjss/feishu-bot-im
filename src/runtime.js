@@ -172,7 +172,6 @@ export class BotRuntime {
       model: config.model ?? null,
       agentPreset: config.agentPreset ?? null,
       respondToBotMessages: config.respondToBotMessages !== false,
-      topicsEnabled: config.topicsEnabled !== false,
       processDetail: config.processDetail === 'brief' ? 'brief' : 'detailed',
       permissionPreset: config.permissionPreset ?? null,
       busyMode: config.busyMode ?? 'queue',
@@ -404,15 +403,14 @@ export class BotRuntime {
     const sessions = this.#stateStore.value.sessions ?? {};
     const bound = new Map();
     for (const [key, sessionId] of Object.entries(sessions)) {
-      if (!key.startsWith('chat:') && !key.startsWith('topic:')) continue;
+      if (!key.startsWith('chat:')) continue;
       const chatId = chatIdOfKey(key);
       if (!chatId) continue;
-      const chat = bound.get(chatId) ?? { sessionId: '', kind: 'chat', topics: 0 };
+      const chat = bound.get(chatId) ?? { sessionId: '', kind: 'chat' };
       if (key.startsWith('chat:')) {
         chat.kind = 'chat';
         chat.sessionId = sessionId;
       } else {
-        chat.topics += 1;
         if (!chat.sessionId) chat.sessionId = sessionId;
       }
       bound.set(chatId, chat);
@@ -424,10 +422,10 @@ export class BotRuntime {
     const alias = this.config?.alias ?? this.config?.botName ?? this.botId;
     const rows = [];
     for (const [chatId, item] of known) {
-      const chat = bound.get(chatId) ?? { sessionId: '', kind: 'chat', topics: 0 };
+      const chat = bound.get(chatId) ?? { sessionId: '', kind: 'chat' };
       let title = item.title;
       if (!title) title = await Promise.resolve(this.#bot?.getChatName?.(chatId)).catch(() => null) ?? '';
-      rows.push({ bot: alias, chatId, title, sessionId: chat.sessionId, kind: chat.kind, topics: chat.topics });
+      rows.push({ bot: alias, chatId, title, sessionId: chat.sessionId, kind: chat.kind });
     }
     return rows.sort((left, right) => String(left.title || left.chatId).localeCompare(String(right.title || right.chatId)));
   }
