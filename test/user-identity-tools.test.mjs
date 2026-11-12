@@ -90,8 +90,8 @@ function fakeFetch(handler) {
   const url = new URL(fetchImpl.calls[0].url);
   assert.equal(url.searchParams.get('receive_id_type'), 'chat_id');
   assert.equal(body.receive_id, 'oc_chat');
-  assert.equal(body.msg_type, 'interactive');
-  assert.equal(JSON.parse(body.content).body.elements[0].content, '你好');
+  assert.equal(body.msg_type, 'text');
+  assert.equal(JSON.parse(body.content).text, '你好');
 }
 
 {
@@ -106,8 +106,8 @@ function fakeFetch(handler) {
   const body = JSON.parse(fetchImpl.calls[0].init.body);
   assert.equal(url.searchParams.get('receive_id_type'), 'open_id');
   assert.equal(body.receive_id, 'ou_1234');
-  assert.equal(body.msg_type, 'interactive');
-  assert.equal(JSON.parse(body.content).body.elements[0].content, '联系人你好');
+  assert.equal(body.msg_type, 'text');
+  assert.equal(JSON.parse(body.content).text, '联系人你好');
   assert.equal(value.chatId, 'oc_p2p');
 }
 
@@ -123,7 +123,7 @@ function fakeFetch(handler) {
   const body = JSON.parse(fetchImpl.calls[0].init.body);
   assert.equal(url.searchParams.get('receive_id_type'), 'email');
   assert.equal(body.receive_id, 'friend@example.com');
-  assert.equal(body.msg_type, 'interactive');
+  assert.equal(body.msg_type, 'text');
   assert.equal(value.messageId, 'om_email');
 }
 
@@ -223,13 +223,14 @@ console.log('im-feishu user identity tool output: 8 assertions passed');
       return {
         ok: true,
         status: 200,
-        json: async () => ({ code: 0, data: { message_id: 'om_reply', chat_id: 'oc_x', create_time: '1794393900323', msg_type: 'interactive' } }),
+        json: async () => ({ code: 0, data: { message_id: 'om_reply', chat_id: 'oc_x', create_time: '1794393900323', msg_type: 'text' } }),
       };
     },
   });
   const value = await tool.execute({ chatId: 'oc_x', text: '收到', replyToMessageId: 'om_origin' });
   assert.equal(value.messageId, 'om_reply');
   assert.match(calls[0].url, /\/messages\/om_origin\/reply$/, 'reply uses the reply endpoint');
+  assert.equal(JSON.parse(calls[0].body).msg_type, 'text', 'reply defaults to plain text');
   await assert.rejects(() => tool.execute({ chatId: 'oc_x', path: '/tmp/a.txt', replyToMessageId: 'om_1' }), /仅支持文本卡片/);
   await assert.rejects(() => tool.execute({ openId: 'ou_x', text: 'hi', replyToMessageId: 'om_1' }), /需要同时提供 chatId/);
 }

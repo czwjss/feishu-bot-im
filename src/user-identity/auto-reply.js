@@ -43,7 +43,7 @@ export function renderBatchPrompt({ chat, messages, batchId }) {
     ...lines,
     '',
     '要求：',
-    `1. 需要回复时，调用 feishu_avatar_send，chatId 必须是 ${chat.chatId}，text 是回复正文（简短、自然、像本人说话）。`,
+    `1. 需要回复时，调用 feishu_avatar_send，chatId 必须是 ${chat.chatId}，text 是回复正文（简短、自然、像本人说话）；不要带 title，纯文本对方才认。`,
     '2. 回复某一条消息时，把它的消息 id 作为 replyToMessageId 传入，这样会以「回复」形式带上原文。',
     '3. 不需要回复时，什么都不用做。',
     `4. 同一批次最多回复一次；不要回复到其他会话。`,
