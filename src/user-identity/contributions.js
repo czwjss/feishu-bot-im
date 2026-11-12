@@ -8,9 +8,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { USER_IDENTITY_POLICY } from './policy.js';
-import { createUserIdentityTools, REPLY_TOOL_NAME, SKIP_TOOL_NAME } from './tools.js';
-
-const AUTO_REPLY_TOOLS = new Set([REPLY_TOOL_NAME, SKIP_TOOL_NAME]);
+import { createUserIdentityTools } from './tools.js';
 
 /** 注册失败时留一份可读记录，便于在没有控制台的环境里定位。 */
 async function report(stage, error) {
@@ -45,12 +43,8 @@ export function installUserIdentityContributions(ctx, auth, monitor = null) {
       return;
     }
     for (const tool of tools) {
-      // 决策工具只在自动回复的 Worker 会话里出现，其他会话看不到也不可调用。
-      const options = AUTO_REPLY_TOOLS.has(tool.name) && monitor
-        ? { when: ({ agent }) => Boolean(monitor.isAutoReplySession?.(agent?.session?.id)) }
-        : undefined;
       try {
-        toolCtx.tools.register(tool, options);
+        toolCtx.tools.register(tool);
       } catch (error) {
         await report(`register:${tool.name}`, error);
       }

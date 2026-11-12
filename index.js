@@ -20,6 +20,7 @@ import { UserIdentityConnect } from './src/user-identity/connect.js';
 import { UserIdentityManager } from './src/user-identity/manager.js';
 import { UserTokenStore } from './src/user-identity/token-store.js';
 import { installUserIdentityContributions } from './src/user-identity/contributions.js';
+import { installWorkerTools } from './src/user-identity/worker-tools.js';
 import { UserMonitorManager } from './src/user-identity/monitor.js';
 import { MonitorStore, MONITOR_FILE, MONITOR_STATE_FILE } from './src/user-identity/monitor-store.js';
 
@@ -150,6 +151,8 @@ export async function apply(ctx, config = {}) {
     logger,
   });
   installUserIdentityContributions(ctx, userIdentityAuth, userMonitor);
+  const workerTools = installWorkerTools(ctx, userMonitor, logger);
+  userMonitor.setWorkerPreparer((sessionId) => workerTools.ensure(sessionId));
   userMonitor.start();
 
   const handler = createRpcHandler({ manager, harness, version: pluginVersion, userIdentity, userMonitor });

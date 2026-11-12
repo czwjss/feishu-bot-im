@@ -74,6 +74,7 @@ export class AutoReplyEngine {
   #timeoutMs;
   #workerEpoch;
   #sessionGuard;
+  #prepareWorker;
   #workerSessions = new Set();
   #timers = new Map();
   #pending = new Map();
@@ -95,6 +96,7 @@ export class AutoReplyEngine {
     decisionTimeoutMs = DECISION_TIMEOUT_MS,
     workerEpoch = WORKER_EPOCH,
     sessionGuard = null,
+    prepareWorker = null,
   } = {}) {
     if (!store) throw new TypeError('AutoReplyEngine 需要 store');
     if (!harness) throw new TypeError('AutoReplyEngine 需要 harness');
@@ -115,6 +117,7 @@ export class AutoReplyEngine {
     this.#timeoutMs = decisionTimeoutMs;
     this.#workerEpoch = workerEpoch;
     this.#sessionGuard = sessionGuard;
+    this.#prepareWorker = prepareWorker;
   }
 
   get harness() {
@@ -227,6 +230,8 @@ export class AutoReplyEngine {
         await this.#patch(chat.chatId, { sessionId, sessionEpoch: this.#workerEpoch });
       }
       this.#workerSessions.add(sessionId);
+      // 决策工具挂在 Worker 自己的作用域上，发任务前先确保已挂好。
+      await this.#prepareWorker?.(sessionId);
       await this.#harness.prompt(sessionId, renderBatchPrompt({ chat, messages: targets, token }));
     } catch (error) {
       this.#pending.delete(token);

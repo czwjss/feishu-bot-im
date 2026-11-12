@@ -53,6 +53,7 @@ export class UserMonitorManager {
   #sendCard;
   #replyCard;
   #autoReply;
+  #prepareWorker = null;
   #nameCache = new Map();
   #parentSender = new Map();
 
@@ -136,6 +137,17 @@ export class UserMonitorManager {
   /** 自动回复引擎（未提供 harness 时为 null）。 */
   get autoReply() {
     return this.#autoReply;
+  }
+
+  /** 当前记录在案的 Worker 会话 id。 */
+  workerSessionIds() {
+    const chats = this.#store.state?.chats ?? {};
+    return Object.values(chats).map((entry) => entry?.sessionId).filter((id) => typeof id === 'string' && id);
+  }
+
+  /** 由 Host 注入：会话创建后把 Worker 工具挂到它的作用域上。 */
+  setWorkerPreparer(prepare) {
+    this.#prepareWorker = typeof prepare === 'function' ? prepare : null;
   }
 
   /** 该会话是否是某个监听会话的自动回复 Worker。 */

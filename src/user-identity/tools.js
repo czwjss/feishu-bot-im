@@ -593,9 +593,8 @@ export function createUserIdentityTools({ auth, fetchImpl, monitor = null }) {
     createSendTool({ auth, fetchImpl }),
   ];
   if (monitor) {
+    // 草稿给所有会话用；reply/skip 由 worker-tools.js 挂到 Worker 作用域。
     tools.push(createDraftTool({ monitor }));
-    tools.push(createReplyTool({ monitor }));
-    tools.push(createSkipTool({ monitor }));
   }
   return tools;
 }

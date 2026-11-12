@@ -15,7 +15,7 @@ const ctx = {
       });
     }
     if (services.includes('tools')) {
-      callback({ tools: { register: (tool, options) => tools.push({ ...tool, options }) } });
+      callback({ tools: { register: (tool) => tools.push(tool) } });
     }
   },
 };
@@ -54,8 +54,6 @@ assert.deepEqual(tools.map((tool) => tool.name), [
   'feishu_avatar_messages',
   'feishu_avatar_send',
   'feishu_avatar_draft',
-  'feishu_avatar_reply',
-  'feishu_avatar_skip',
 ]);
 assert.equal(sections.length, 1, 'no unread summary is injected into other sessions');
 const draftTool = tools.find((tool) => tool.name === 'feishu_avatar_draft');
@@ -63,18 +61,11 @@ const created = await draftTool.execute({ chatId: 'oc_test', text: '好的' });
 assert.equal(created.draftId, 'draft-1');
 assert.equal(created.status, 'pending');
 
-// 决策工具只对自动回复 Worker 会话可见。
-const replyTool = tools.find((tool) => tool.name === 'feishu_avatar_reply');
-const skipTool = tools.find((tool) => tool.name === 'feishu_avatar_skip');
-assert.equal(typeof replyTool.options?.when, 'function');
-assert.equal(typeof skipTool.options?.when, 'function');
-assert.equal(replyTool.options.when({ agent: { session: { id: 'session-worker' } } }), true);
-assert.equal(replyTool.options.when({ agent: { session: { id: 'session-other' } } }), false);
-assert.equal(tools.find((tool) => tool.name === 'feishu_avatar_send').options, undefined);
-
-// 收件箱工具已不再注册给模型。
+// 决策工具与收件箱工具都不再全局注册。
 assert.equal(tools.some((tool) => tool.name === 'feishu_avatar_inbox'), false);
-console.log('user identity contributions: 26 assertions passed');
+assert.equal(tools.some((tool) => tool.name === 'feishu_avatar_reply'), false);
+assert.equal(tools.some((tool) => tool.name === 'feishu_avatar_skip'), false);
+console.log('user identity contributions: 24 assertions passed');
 
 const preset = await import('../src/user-identity/index.js');
 assert.deepEqual(preset.inject, []);
