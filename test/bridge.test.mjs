@@ -693,6 +693,21 @@ function message(overrides = {}) {
   assert.equal(bot.reactions.at(-1).emoji, 'DONE', 'completed reaction');
   assert.deepEqual(bot.removed.at(-1), { messageId: 'om_react', reactionId: 'r1' }, 'old reaction removed');
 
+  // 多个 @ 同时在排队：每轮只结算一条消息的完成状态
+  {
+    const many = makeBridge();
+    await many.bridge.handleMessage(message({ chat_id: 'oc_many', message_id: 'om_many_1', content: JSON.stringify({ text: '第一条' }) }));
+    await many.bridge.handleMessage(message({ chat_id: 'oc_many', message_id: 'om_many_2', content: JSON.stringify({ text: '第二条' }) }));
+    await many.bridge.onSessionEvent({ id: 'sess-1' }, { type: 'turn/start', data: { turn: 1 } });
+    await many.bridge.onSessionEvent({ id: 'sess-1' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+    assert.equal(many.bot.reactions.filter((item) => item.messageId === 'om_many_1').at(-1)?.emoji, 'DONE', 'first queued message settles with its turn');
+    assert.equal(many.bot.reactions.filter((item) => item.messageId === 'om_many_2').at(-1)?.emoji, 'OnIt', 'second message keeps waiting');
+    await many.bridge.onSessionEvent({ id: 'sess-1' }, { type: 'turn/start', data: { turn: 2 } });
+    await many.bridge.onSessionEvent({ id: 'sess-1' }, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } });
+    assert.equal(many.bot.reactions.filter((item) => item.messageId === 'om_many_2').at(-1)?.emoji, 'DONE', 'second message settles with the next turn');
+    many.bridge.dispose();
+  }
+
   const stopped = makeBridge();
   await state.bindSession('chat:oc_chat', 'sess-stop');
   await stopped.bridge.handleMessage(message({ message_id: 'om_react2', content: JSON.stringify({ text: '你好' }) }));
@@ -1702,4 +1717,4 @@ function message(overrides = {}) {
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 86 assertions passed');
+console.log('bridge: 89 assertions passed');

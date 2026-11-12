@@ -958,13 +958,14 @@ export class FeishuBridge {
     if (messageId) await this.#react(messageId, REACTION.stopped).catch(() => undefined);
   }
 
-  /** A turn started: everything queued so far belongs to this turn. */
+  /** A turn started: queued prompts run one per turn, so take only the head. */
   #startTurnReactions(sessionId) {
     const queue = this.#reactionQueue.get(sessionId);
     if (!queue || queue.length === 0) return;
-    this.#reactionQueue.delete(sessionId);
+    const messageId = queue.shift();
+    if (queue.length === 0) this.#reactionQueue.delete(sessionId);
     const active = this.#reactionActive.get(sessionId) ?? new Set();
-    for (const messageId of queue) active.add(messageId);
+    active.add(messageId);
     this.#reactionActive.set(sessionId, active);
   }
 
