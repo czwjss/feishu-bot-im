@@ -35,6 +35,8 @@ export const AUTO_REPLY_HOURLY_LIMIT = 20;
 export const DEFAULT_WORKER_PRESET = 'standard';
 export const MAX_WORKER_PRESET = 40;
 export const MAX_OUTBOX = 20;
+/** 消息处理结果，用于区分「未读」和「已自动处理」。 */
+export const MESSAGE_OUTCOMES = Object.freeze(['replied', 'skipped']);
 export const DEFAULT_POLL_INTERVAL_MS = 60_000;
 export const MIN_POLL_INTERVAL_MS = 5_000;
 export const MAX_POLL_INTERVAL_MS = 60_000;
@@ -126,6 +128,7 @@ export function normalizeMonitorMessage(value) {
   const messageId = cleanString(source.messageId);
   if (!messageId) return null;
   const text = stringOf(source.text).slice(0, MAX_MESSAGE_TEXT);
+  const outcome = MESSAGE_OUTCOMES.includes(source.outcome) ? source.outcome : '';
   return Object.freeze({
     messageId,
     senderName: cleanString(source.senderName),
@@ -133,7 +136,11 @@ export function normalizeMonitorMessage(value) {
     senderType: cleanString(source.senderType),
     createTime: cleanString(source.createTime),
     text,
-    read: source.read === true,
+    // outcome 非空表示已被自动回复或自动跳过；read 仍表示人工/流程已读。
+    read: source.read === true || outcome !== '',
+    outcome,
+    handledAt: cleanTime(source.handledAt),
+    replyMessageId: cleanString(source.replyMessageId) || null,
   });
 }
 

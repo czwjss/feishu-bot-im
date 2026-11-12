@@ -234,6 +234,9 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
       case 'user.monitor.enable':
         return ok(await requireUserMonitor().setEnabled(input.enabled === true));
 
+      case 'user.monitor.flush':
+        return ok(await requireUserMonitor().flushPending());
+
       case 'user.monitor.poll':
         await requireUserMonitor().pollOnce();
         return ok(await requireUserMonitor().status());

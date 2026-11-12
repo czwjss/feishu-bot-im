@@ -81,6 +81,7 @@ const h = React.createElement;
         enabled: monitor?.enabled !== true,
       }));
       const poll = () => act('poll', () => rpc(connection, API.userMonitorPoll, {}));
+      const flushPending = () => act('flush', () => rpc(connection, API.userMonitorFlush, {}));
       const addManual = () => {
         const chatId = manual.trim();
         if (!chatId) return;
@@ -112,6 +113,8 @@ const h = React.createElement;
           h('div', { style: S.hint },
             `${chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group')} · ${chat.chatId}`,
             chat.pendingBatch ? ` · ${t('待处理', 'pending')} ${chat.pendingBatch}` : '',
+            chat.replied ? ` · ${t('已回复', 'replied')} ${chat.replied}` : '',
+            chat.skipped ? ` · ${t('已跳过', 'skipped')} ${chat.skipped}` : '',
             chat.lastAutoReplyAt ? ` · ${t('上次自动回复', 'last auto')} ${formatTime(chat.lastAutoReplyAt)}` : '',
             chat.lastError ? h('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, ` · ${chat.lastError}`) : null)),
         h('select', {
@@ -193,7 +196,9 @@ const h = React.createElement;
               monitor.enabled ? t('监听中', 'Watching') : t('已暂停', 'Paused')),
             h('span', { style: S.hint }, `${t('最后检查', 'Last check')}：${formatTime(chats[0]?.lastPollAt)}`),
             h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'poll', onClick: () => void poll() },
-              t('立即检查', 'Check now'))),
+              t('立即检查', 'Check now')),
+            h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'flush', onClick: () => void flushPending() },
+              t('处理待办', 'Flush pending'))),
           pendingDrafts.length > 0
             ? h('div', { style: { display: 'grid', gap: '6px', paddingTop: '6px', borderTop: '1px solid var(--dsw-alias-border-l1)' } },
               h('div', { style: { fontSize: '12px', fontWeight: 600 } }, `${pendingDrafts.length} ${t('条待确认草稿', 'drafts to confirm')}`),

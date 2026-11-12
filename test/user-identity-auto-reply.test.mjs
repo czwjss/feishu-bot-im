@@ -138,6 +138,8 @@ try {
   assert.equal(sent[0][0], 'reply', 'reply keeps quoting the original message');
   assert.equal(sent[0][1].messageId, 'om_2');
   assert.ok(store.state.chats[chatId].messages.every((message) => message.read), 'batch marked as handled');
+  assert.ok(store.state.chats[chatId].messages.every((message) => message.outcome === 'replied'), 'outcome recorded as replied');
+  assert.ok(store.state.chats[chatId].messages.every((message) => message.replyMessageId === 'om_auto_2'), 'reply id linked to the messages');
   assert.equal(store.state.chats[chatId].outbox.at(-1).messageId, 'om_auto_2');
   assert.equal(store.state.chats[chatId].batch.messageIds.length, 0);
 
@@ -206,6 +208,9 @@ try {
   assert.ok(token2, 'flush returns a token');
   await engine.skip({ token: token2, reason: '只是通知' });
   assert.equal(sent.length, 1, 'skip does not send');
+  const skippedMessage = store.state.chats[chatId].messages.find((message) => message.messageId === 'om_skip_1');
+  assert.equal(skippedMessage.outcome, 'skipped', 'skip is recorded on the message');
+  assert.equal(skippedMessage.read, true, 'skipped messages are no longer unread');
 
   // 4b) 只有机器人消息的批次不自动回复，避免刷屏
   await store.saveState({
@@ -303,4 +308,4 @@ try {
   await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-console.log('user identity auto reply: 34 assertions passed');
+console.log('user identity auto reply: 38 assertions passed');

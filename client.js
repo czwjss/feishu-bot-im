@@ -214,7 +214,10 @@ var MESSAGES = Object.freeze({
   "\u81EA\u52A8\u56DE\u590D": "Auto reply",
   "\u81EA\u52A8\u56DE\u590D\uFF08\u542B\u673A\u5668\u4EBA\uFF09": "Auto reply (bots too)",
   "\u5F85\u5904\u7406": "pending",
-  "\u4E0A\u6B21\u81EA\u52A8\u56DE\u590D": "last auto"
+  "\u4E0A\u6B21\u81EA\u52A8\u56DE\u590D": "last auto",
+  "\u5904\u7406\u5F85\u529E": "Flush pending",
+  "\u5DF2\u56DE\u590D": "replied",
+  "\u5DF2\u8DF3\u8FC7": "skipped"
 });
 function dictionaries() {
   const zh = {};
@@ -269,6 +272,7 @@ var API = {
   userMonitorWorkerSet: "user.monitor.worker.set",
   userMonitorWorkerOptions: "user.monitor.worker.options",
   userMonitorPoll: "user.monitor.poll",
+  userMonitorFlush: "user.monitor.flush",
   userMonitorChatSet: "user.monitor.chat.set",
   userMonitorDraftSend: "user.monitor.draft.send",
   userMonitorDraftIgnore: "user.monitor.draft.ignore",
@@ -682,6 +686,7 @@ function MonitorPanel({ connection }) {
     enabled: monitor?.enabled !== true
   }));
   const poll = () => act("poll", () => rpc(connection, API.userMonitorPoll, {}));
+  const flushPending = () => act("flush", () => rpc(connection, API.userMonitorFlush, {}));
   const addManual = () => {
     const chatId = manual.trim();
     if (!chatId) return;
@@ -714,6 +719,8 @@ function MonitorPanel({ connection }) {
         { style: S.hint },
         `${chat.chatMode === "p2p" ? t("\u79C1\u804A", "Direct") : t("\u7FA4\u804A", "Group")} \xB7 ${chat.chatId}`,
         chat.pendingBatch ? ` \xB7 ${t("\u5F85\u5904\u7406", "pending")} ${chat.pendingBatch}` : "",
+        chat.replied ? ` \xB7 ${t("\u5DF2\u56DE\u590D", "replied")} ${chat.replied}` : "",
+        chat.skipped ? ` \xB7 ${t("\u5DF2\u8DF3\u8FC7", "skipped")} ${chat.skipped}` : "",
         chat.lastAutoReplyAt ? ` \xB7 ${t("\u4E0A\u6B21\u81EA\u52A8\u56DE\u590D", "last auto")} ${formatTime(chat.lastAutoReplyAt)}` : "",
         chat.lastError ? h2("span", { style: { color: "var(--dsw-alias-state-error-primary)" } }, ` \xB7 ${chat.lastError}`) : null
       )
@@ -826,6 +833,11 @@ function MonitorPanel({ connection }) {
           "button",
           { type: "button", className: "bxf-mini", disabled: busy === "poll", onClick: () => void poll() },
           t("\u7ACB\u5373\u68C0\u67E5", "Check now")
+        ),
+        h2(
+          "button",
+          { type: "button", className: "bxf-mini", disabled: busy === "flush", onClick: () => void flushPending() },
+          t("\u5904\u7406\u5F85\u529E", "Flush pending")
         )
       ),
       pendingDrafts.length > 0 ? h2(

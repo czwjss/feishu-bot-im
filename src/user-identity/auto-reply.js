@@ -374,9 +374,16 @@ export class AutoReplyEngine {
   async #settle(pending, outbound) {
     const entry = this.#store.state.chats[pending.chatId] ?? {};
     const idSet = new Set(pending.messageIds);
-    const messages = (entry.messages ?? []).map((message) => (
-      idSet.has(message.messageId) ? { ...message, read: true } : message
-    ));
+    const outcome = outbound ? 'replied' : 'skipped';
+    const messages = (entry.messages ?? []).map((message) => (idSet.has(message.messageId)
+      ? {
+        ...message,
+        read: true,
+        outcome,
+        handledAt: this.#now(),
+        replyMessageId: outbound?.messageId ?? null,
+      }
+      : message));
     const outbox = outbound
       ? [...(entry.outbox ?? []), { ...outbound, at: this.#now() }].slice(-MAX_OUTBOX)
       : entry.outbox ?? [];

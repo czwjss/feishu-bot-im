@@ -173,6 +173,8 @@ export class UserMonitorManager {
       return {
         ...chat,
         unread,
+        replied: messages.filter((message) => message.outcome === 'replied').length,
+        skipped: messages.filter((message) => message.outcome === 'skipped').length,
         sessionId: entry.sessionId ?? null,
         pendingBatch: entry.batch?.messageIds?.length ?? 0,
         lastAutoReplyAt: (entry.outbox ?? []).filter((item) => item.source === 'auto').at(-1)?.at ?? null,
@@ -396,6 +398,19 @@ export class UserMonitorManager {
       },
     });
     return this.status();
+  }
+
+  /** 手动触发：把各会话积压的待处理批次立刻交给 Worker。 */
+  async flushPending() {
+    let dispatched = 0;
+    for (const chat of this.#store.config.chats) {
+      if (chat.replyMode !== 'auto' || !this.#autoReply) continue;
+      const entry = this.#store.state.chats[chat.chatId] ?? {};
+      if ((entry.batch?.messageIds ?? []).length === 0) continue;
+      const token = await this.#autoReply.flush(chat).catch(() => null);
+      if (token) dispatched += 1;
+    }
+    return { dispatched, ...(await this.status()) };
   }
 
   async setEnabled(enabled) {
