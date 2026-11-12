@@ -50,6 +50,8 @@ export class FeishuBridge {
   #handoffKeywords = null;
   #reactions = new Map();
   #reactionQueue = new Map();
+  #batchQueue = new Map();
+  #batchDraining = new Set();
   #feishuPromptOrigins = new Map();
   #turnOrigin = new Map();
   #externalAsk = new Map();
@@ -269,7 +271,7 @@ export class FeishuBridge {
     const quotedParts = Array.isArray(quoted?.parts) ? quoted.parts : [];
     const promptParts = quotedParts.length > 0 ? [...quotedParts, ...parts] : parts;
 
-    const submitPrompt = (incomingParts, promptText) => this.#submitPrompt({
+    const submitPrompt = (incomingParts, promptText) => this.#deliver({
       chatKey,
       chatId: message.chat_id,
       chatType: message.chat_type,
@@ -278,6 +280,7 @@ export class FeishuBridge {
       parts: incomingParts,
       text: promptText,
       openId,
+      senderName,
       quoted,
     });
 
@@ -472,7 +475,63 @@ export class FeishuBridge {
     return result;
   }
 
-  async #submitPrompt({ chatKey, chatId, chatType, createTime, messageId, parts, text, openId, quoted = null }) {
+  /** 上一个回合还在跑时先攒着，回合结束后合并成一次派发。 */
+  async #deliver(args) {
+    const sessionId = this.#state.sessionFor(args.chatKey);
+    const busy = Boolean(sessionId) && (this.#turnOrigin.has(sessionId) || this.#batchDraining.has(args.chatKey));
+    if (busy) {
+      // 明确开了 steer 且当前是飞书轮次时，仍然按插话处理，不攒批。
+      const scopeKey = args.chatType === 'p2p' ? 'direct' : 'group';
+      const wanted = scopedValue(this.#config.busyMode, scopeKey, 'queue') === 'steer' ? 'steer' : 'queue';
+      const effective = wanted === 'steer' && this.#turnOrigin.get(sessionId) === 'feishu' ? 'steer' : 'queue';
+      if (effective === 'queue') {
+        const queue = this.#batchQueue.get(args.chatKey) ?? [];
+        queue.push(args);
+        this.#batchQueue.set(args.chatKey, queue);
+        return;
+      }
+    }
+    await this.#submitPrompt(args);
+  }
+
+  /** 把排队期间攒下的消息合并成一条 prompt 派发。 */
+  async #drainBatch(sessionId) {
+    const chatKey = this.#state.keyForSession(sessionId);
+    if (!chatKey) return;
+    const items = this.#batchQueue.get(chatKey);
+    if (!items || items.length === 0) return;
+    this.#batchQueue.delete(chatKey);
+    this.#batchDraining.add(chatKey);
+    try {
+      const first = items[0];
+      const parts = [{
+        type: 'text',
+        text: `[排队合并] 上一条回复期间又收到 ${items.length} 条消息，请一起处理：`,
+      }];
+      for (const item of items) {
+        parts.push({ type: 'text', text: `— ${item.senderName || '某人'}：` });
+        for (const part of item.parts ?? []) parts.push(part);
+      }
+      await this.#submitPrompt({
+        chatKey,
+        chatId: first.chatId,
+        chatType: first.chatType,
+        createTime: items.at(-1).createTime,
+        messageId: null,
+        parts,
+        text: '',
+        openId: items.at(-1).openId,
+        quoted: null,
+        batchIds: items.map((item) => item.messageId),
+      });
+    } catch (error) {
+      this.#log('warn', 'queued batch failed', error);
+    } finally {
+      this.#batchDraining.delete(chatKey);
+    }
+  }
+
+  async #submitPrompt({ chatKey, chatId, chatType, createTime, messageId, parts, text, openId, quoted = null, batchIds = null }) {
     let sessionId = this.#state.sessionFor(chatKey);
     const create = async () => {
       const override = this.#state.overrideFor?.(chatKey) ?? {};
@@ -568,7 +627,8 @@ export class FeishuBridge {
       try {
         // A Session may be shared by several chats. Key reactions by Session,
         // not chat, so turn/start and turn/end settle the originating message.
-        this.#trackReaction(sessionId, messageId, mode);
+        if (batchIds) this.#trackReactionGroup(sessionId, batchIds, mode);
+        else this.#trackReaction(sessionId, messageId, mode);
         this.#onContext(sessionId, injected);
         await this.#promptFeishu(sessionId, parts, { mode, chatKey, chatId });
         if (reserved) this.#eavesdrop.commit(chatKey, reserved.seq);
@@ -927,16 +987,22 @@ export class FeishuBridge {
 
   // ── turn events（实现在 turn.js） ──────────────────────────────────────────
 
-  /** Remember which inbound message a turn will settle, keyed by Session. */
+  /** Remember which inbound messages a turn will settle, keyed by Session. */
   #trackReaction(sessionId, messageId, mode) {
-    if (!sessionId || !messageId) return;
+    this.#trackReactionGroup(sessionId, [messageId], mode);
+  }
+
+  /** One queued turn may settle a batch of messages. */
+  #trackReactionGroup(sessionId, messageIds, mode = 'queue') {
+    const ids = (messageIds ?? []).filter(Boolean);
+    if (!sessionId || ids.length === 0) return;
     const active = this.#reactionActive.get(sessionId);
     if (mode === 'steer' && active && active.size > 0) {
-      active.add(messageId);
+      for (const id of ids) active.add(id);
       return;
     }
     const queue = this.#reactionQueue.get(sessionId) ?? [];
-    queue.push(messageId);
+    queue.push(ids);
     this.#reactionQueue.set(sessionId, queue);
   }
 
@@ -945,9 +1011,13 @@ export class FeishuBridge {
     if (!sessionId || !messageId) return;
     const queue = this.#reactionQueue.get(sessionId);
     if (queue) {
-      const index = queue.indexOf(messageId);
-      if (index >= 0) queue.splice(index, 1);
-      if (queue.length === 0) this.#reactionQueue.delete(sessionId);
+      for (const group of queue) {
+        const index = group.indexOf(messageId);
+        if (index >= 0) group.splice(index, 1);
+      }
+      const kept = queue.filter((group) => group.length > 0);
+      if (kept.length === 0) this.#reactionQueue.delete(sessionId);
+      else this.#reactionQueue.set(sessionId, kept);
     }
     this.#reactionActive.get(sessionId)?.delete(messageId);
   }
@@ -962,10 +1032,10 @@ export class FeishuBridge {
   #startTurnReactions(sessionId) {
     const queue = this.#reactionQueue.get(sessionId);
     if (!queue || queue.length === 0) return;
-    const messageId = queue.shift();
+    const group = queue.shift();
     if (queue.length === 0) this.#reactionQueue.delete(sessionId);
     const active = this.#reactionActive.get(sessionId) ?? new Set();
-    active.add(messageId);
+    for (const messageId of group) active.add(messageId);
     this.#reactionActive.set(sessionId, active);
   }
 
@@ -995,6 +1065,7 @@ export class FeishuBridge {
       this.#turnOrigin.delete(sessionId);
       this.#externalAsk.delete(sessionId);
       await this.#settleTurnReactions(sessionId, event?.data?.reason).catch(() => undefined);
+      await this.#drainBatch(sessionId);
     }
     return result;
   }

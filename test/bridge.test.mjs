@@ -764,13 +764,36 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
+// 13i2) 排队消息合并成一批：上一轮结束后只派发一次
+{
+  const { harness, bridge } = makeBridge();
+  await state.bindSession('chat:oc_batch', 'sess-batch');
+  await bridge.handleMessage(message({ chat_id: 'oc_batch', message_id: 'om_b1', content: JSON.stringify({ text: '第一条' }) }));
+  await bridge.onSessionEvent({ id: 'sess-batch' }, { type: 'turn/start', data: { turn: 1 } });
+  const before = harness.prompts.length;
+  await bridge.handleMessage(message({ chat_id: 'oc_batch', message_id: 'om_b2', content: JSON.stringify({ text: '第二条' }) }));
+  await bridge.handleMessage(message({ chat_id: 'oc_batch', message_id: 'om_b3', content: JSON.stringify({ text: '第三条' }) }));
+  assert.equal(harness.prompts.length, before, 'queued messages wait for the running turn');
+  await bridge.onSessionEvent({ id: 'sess-batch' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+  assert.equal(harness.prompts.length, before + 1, 'queued messages dispatch as one batch');
+  const batchText = harness.prompts.at(-1).content.map((part) => part.text ?? '').join('');
+  assert.match(batchText, /排队合并/);
+  assert.match(batchText, /第二条/);
+  assert.match(batchText, /第三条/);
+  bridge.dispose();
+}
+
 // 13j) 跨来源 steer 强制排队：Web 轮次运行时飞书消息不能插入
 {
   const { harness, bridge } = makeBridge({ busyMode: 'steer' });
   await state.bindSession('chat:oc_steer', 'sess-ext');
   await bridge.onSessionEvent({ id: 'sess-ext' }, { type: 'turn/start', data: { turn: 1 } });
+  const promptsBefore = harness.prompts.length;
   await bridge.handleMessage(message({ chat_id: 'oc_steer', content: JSON.stringify({ text: '插入试试' }) }));
-  assert.equal(harness.prompts.at(-1)?.options?.mode, 'queue', 'external turn forces queue');
+  assert.equal(harness.prompts.length, promptsBefore, 'external turn buffers instead of steering');
+  await bridge.onSessionEvent({ id: 'sess-ext' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+  assert.equal(harness.prompts.at(-1)?.options?.mode, 'queue', 'buffered batch runs as a queue');
+  assert.match(harness.prompts.at(-1).content[0].text, /排队合并/);
 
   const own = makeBridge({ busyMode: 'steer' });
   await state.bindSession('chat:oc_steer2', 'sess-own');
@@ -1717,4 +1740,4 @@ function message(overrides = {}) {
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 89 assertions passed');
+console.log('bridge: 93 assertions passed');
