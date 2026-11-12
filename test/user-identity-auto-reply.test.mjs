@@ -138,7 +138,7 @@ try {
   assert.match(prompts[0].text, new RegExp(chatId));
   assert.match(prompts[0].text, /feishu_avatar_send/);
   assert.match(prompts[0].text, /同一批次最多回复一次/);
-  assert.match(prompts[0].text, /om_1/, 'prompt lists message ids');
+  assert.doesNotMatch(prompts[0].text, /om_1/, 'direct chat prompt carries no message ids');
   assert.match(prompts[0].text, /replyToMessageId/, 'prompt explains reply threading');
 
   // 3) 派发后批次清空
@@ -341,9 +341,20 @@ try {
     chat: { chatId, name: '测试私聊', chatMode: 'p2p' },
     messages: [{ messageId: 'om_x', createTime: new Date(now).toISOString(), senderName: '朋友', text: '你好' }],
   });
-  assert.match(prompt, /1\. 朋友 · (?:[\d-]+ )?\d{2}:\d{2}（om_x）\n   你好/);
+  assert.match(prompt, /1\. 朋友 · (?:[\d-]+ )?\d{2}:\d{2}\n   你好/);
+  assert.doesNotMatch(prompt, /om_x/, 'direct chat carries no message id');
   assert.match(prompt, /不可信/);
   assert.match(prompt, /会话 id：oc_auto_chat/);
+
+  const groupPrompt = renderBatchPrompt({
+    chat: { chatId: 'oc_group_x', name: '测试群', chatMode: 'group' },
+    messages: [
+      { messageId: 'om_a', createTime: new Date(now).toISOString(), senderName: '甲', text: '第一句' },
+      { messageId: 'om_b', createTime: new Date(now).toISOString(), senderName: '乙', text: '第二句' },
+    ],
+  });
+  assert.doesNotMatch(groupPrompt, /om_a/, 'only the last message carries an id');
+  assert.match(groupPrompt, /2\. 乙 · (?:[\d-]+ )?\d{2}:\d{2}（om_b）\n   第二句/);
 
   // 10) 非 auto 会话不派发
 } finally {
@@ -351,4 +362,4 @@ try {
   await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-console.log('user identity auto reply: 35 assertions passed');
+console.log('user identity auto reply: 37 assertions passed');

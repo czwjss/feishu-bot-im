@@ -27,13 +27,16 @@ function stringOf(value) {
 /** Worker 收到的任务文本：一批消息 + 回复方式。 */
 export function renderBatchPrompt({ chat, messages }) {
   const label = chat.name || chat.chatId;
+  const group = chat.chatMode !== 'p2p';
   const lines = messages.map((message, index) => {
     const who = message.senderName || message.senderOpenId || '未知';
     const stamp = formatPromptTime(message.createTime);
     const body = String(message.text ?? '').trim().split('\n')
       .map((line) => `   ${line}`)
       .join('\n');
-    return `${index + 1}. ${who}${stamp ? ` · ${stamp}` : ''}（${message.messageId}）\n${body}`;
+    // 只有群聊可能需要引用，且只引用最后一条，所以只给它标消息 id。
+    const id = group && index === messages.length - 1 ? `（${message.messageId}）` : '';
+    return `${index + 1}. ${who}${stamp ? ` · ${stamp}` : ''}${id}\n${body}`;
   });
   return [
     '[飞书分身自动回复任务]',

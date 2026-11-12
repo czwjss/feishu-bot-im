@@ -400,3 +400,38 @@ console.log('user identity monitor cards: 7 assertions passed');
   }
 }
 console.log('user identity handoff keywords: 6 assertions passed');
+
+// 14) 机器人发送者用配置里的机器人名，而不是笼统的「机器人」。
+{
+  const dir7 = await mkdtemp(join(tmpdir(), 'im-feishu-appname-'));
+  try {
+    const store7 = new MonitorStore({
+      configPath: join(dir7, 'monitor.json'),
+      statePath: join(dir7, 'monitor-state.json'),
+    });
+    await store7.load();
+    await store7.saveConfig({ enabled: true, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all' }] });
+    const monitor7 = new UserMonitorManager({
+      auth: { async status() { return {}; }, async requireAccessToken() { return 'token'; } },
+      store: store7,
+      appNameFor: (appId) => (appId === 'cli_bot' ? '小金刚' : null),
+      now: () => now,
+      setInterval: () => ({ unref() {} }),
+      clearInterval: () => {},
+      chatMemberNames: async () => new Map(),
+      listMessages: async () => ({
+        items: [{
+          messageId: 'om_from_bot', createTime: new Date(now).toISOString(),
+          senderType: 'app', senderOpenId: 'cli_bot', msgType: 'text', text: '我是机器人',
+        }],
+        hasMore: false, pageToken: null,
+      }),
+    });
+    await store7.saveState({ chats: { [chatId]: { cursorTimeMs: now - 60_000, seen: [], messages: [] } } });
+    await monitor7.pollOnce();
+    assert.equal(store7.state.chats[chatId].messages[0].senderName, '小金刚');
+  } finally {
+    await rm(dir7, { recursive: true, force: true });
+  }
+}
+console.log('user identity bot sender name: 1 assertions passed');
