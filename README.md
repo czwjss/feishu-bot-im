@@ -71,7 +71,7 @@ feishu_avatar_me / feishu_avatar_messages / feishu_avatar_send
 子插件仍可保留，但已经是 no-op，不会重复注册。
 
 配置步骤、权限清单和错误码见 [docs/user-identity.md](docs/user-identity.md)。
-消息接入与回复的完整链路见 [docs/message-flow-architecture.html](docs/message-flow-architecture.html)。
+监听与自动回复的设计见 [docs/user-message-monitor-design.md](docs/user-message-monitor-design.md)，机器人侧入站流程见 [docs/bot-inbound-flow.html](docs/bot-inbound-flow.html)。
 
 ## 常用命令
 
