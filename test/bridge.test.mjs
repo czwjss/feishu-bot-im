@@ -1238,10 +1238,10 @@ function message(overrides = {}) {
 {
   const { bot, harness, bridge } = makeBridge();
   bot.cardKit = true;
-  const realSend = bot.replyCardRef.bind(bot);
+  const realSend = bot.sendCardRef.bind(bot);
   let attempts = 0;
   const uuids = [];
-  bot.replyCardRef = async (messageId, cardId, uuid) => {
+  bot.sendCardRef = async (chatId, cardId, uuid) => {
     attempts += 1;
     uuids.push(uuid);
     if (attempts === 1) {
@@ -1249,7 +1249,7 @@ function message(overrides = {}) {
       error.code = 'ECONNRESET';
       throw error;
     }
-    return realSend(messageId, cardId, uuid);
+    return realSend(chatId, cardId, uuid);
   };
   await state.bindSession('chat:oc_cardkit_send_retry', 'sess-cardkit-send');
   await bridge.handleMessage(message({ chat_id: 'oc_cardkit_send_retry', content: JSON.stringify({ text: '开始' }) }));
@@ -1264,6 +1264,32 @@ function message(overrides = {}) {
   assert.equal(uuids[0], uuids[1], 'retries reuse the same idempotency uuid');
   assert.equal(bot.cards.length, 0, 'no raw fallback after a successful retry');
   bridge.dispose();
+}
+
+// 13w) 群聊答案卡引用触发消息；私聊不引用
+{
+  const { bot, harness, bridge } = makeBridge();
+  bot.cardKit = true;
+  await state.bindSession('chat:oc_group_quote', 'sess-gq');
+  await bridge.handleMessage(message({
+    chat_id: 'oc_group_quote', chat_type: 'group', message_id: 'om_trigger',
+    mentions: [{ id: { open_id: 'ou_bot' } }], content: JSON.stringify({ text: '问个问题' }),
+  }));
+  const requestId = harness.prompts.at(-1).options.requestId;
+  await bridge.onSessionEvent({ id: 'sess-gq' }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: 'sess-gq' }, { type: 'user/message', data: { source: { kind: 'user', rpcId: requestId } } });
+  assert.equal(bot.cardRefs.at(-1)?.messageId, 'om_trigger', 'group answer card replies under the trigger');
+
+  const direct = makeBridge();
+  direct.bot.cardKit = true;
+  await state.bindSession('chat:oc_direct_quote', 'sess-dq');
+  await direct.bridge.handleMessage(message({ chat_id: 'oc_direct_quote', chat_type: 'p2p', message_id: 'om_dm', content: JSON.stringify({ text: '私聊问题' }) }));
+  const dmRequest = direct.harness.prompts.at(-1).options.requestId;
+  await direct.bridge.onSessionEvent({ id: 'sess-dq' }, { type: 'turn/start', data: { turn: 1 } });
+  await direct.bridge.onSessionEvent({ id: 'sess-dq' }, { type: 'user/message', data: { source: { kind: 'user', rpcId: dmRequest } } });
+  assert.equal(direct.bot.cardRefs.at(-1)?.chatId, 'oc_direct_quote', 'direct chat answer is not a quote reply');
+  bridge.dispose();
+  direct.bridge.dispose();
 }
 
 // 14) 群聊：回复机器人消息即视为被叫到
@@ -1750,4 +1776,4 @@ function message(overrides = {}) {
 }
 
 await rm(dir, { recursive: true, force: true });
-console.log('bridge: 93 assertions passed');
+console.log('bridge: 95 assertions passed');

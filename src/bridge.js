@@ -631,7 +631,8 @@ export class FeishuBridge {
         // not chat, so turn/start and turn/end settle the originating message.
         if (batchIds) this.#trackReactionGroup(sessionId, batchIds, mode);
         else this.#trackReaction(sessionId, messageId, mode);
-        this.#triggerMessages.set(sessionId, messageId ?? batchIds?.at(-1) ?? null);
+        // 私聊不引用；群聊才把回答卡片挂在触发消息下。
+        if (chatType !== 'p2p') this.#triggerMessages.set(sessionId, messageId ?? batchIds?.at(-1) ?? null);
         this.#onContext(sessionId, injected);
         await this.#promptFeishu(sessionId, parts, { mode, chatKey, chatId });
         if (reserved) this.#eavesdrop.commit(chatKey, reserved.seq);

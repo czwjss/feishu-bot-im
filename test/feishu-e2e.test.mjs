@@ -146,9 +146,8 @@ function inbound(text, extra = {}) {
     type: 'user/message',
     data: { source: { kind: 'user', rpcId: harness.prompts.at(-1).options.requestId } },
   });
-  const create = client.calls.find((c) => c.api === 'message.reply');
-  assert.ok(create, 'turn start replies with the answer card');
-  assert.equal(create.path.message_id, 'om_in_1', 'answer card hangs under the triggering message');
+  const create = client.calls.find((c) => c.api === 'message.create');
+  assert.ok(create, 'turn start sends the answer card in a direct chat');
   assert.equal(create.data.msg_type, 'interactive');
   assertCard(JSON.parse(create.data.content), 'first card');
   await bridge.onSessionEvent({ id: 'sess-1' }, { type: 'tool/call', data: { turn: 1, step: 1, callId: 'c1', name: 'bash', arguments: JSON.stringify({ command: 'ls -la' }) } });
@@ -358,9 +357,8 @@ function inbound(text, extra = {}) {
   const streamingCard = JSON.parse(created.data.data);
   assert.equal(streamingCard.config.streaming_mode, true);
   assert.equal(streamingCard.body.elements[0].element_id, 'answer');
-  const sent = client.calls.find((call) => (call.api === 'message.create' || call.api === 'message.reply') && String(call.data.content).includes('card_id'));
+  const sent = client.calls.find((call) => call.api === 'message.create' && String(call.data.content).includes('card_id'));
   assert.ok(sent, 'CardKit entity is sent as a message');
-  assert.equal(sent.api, 'message.reply', 'CardKit entity replies under the triggering message');
   const sentBody = JSON.parse(sent.data.content);
   assert.equal(sentBody.type, 'card');
   const realNow = Date.now;

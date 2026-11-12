@@ -44,8 +44,9 @@ console.log('feishu recall policy: 1 assertions passed');
 
 // 通用规则必须在「飞书规则」段里，而不是分身段。
 const avatarSectionAt = FEISHU_POLICY.indexOf('飞书分身（用户身份）规则');
+assert.match(FEISHU_POLICY, /私聊不需要引用/);
 assert.match(FEISHU_POLICY, /引用最后一条需要回复的消息/);
-assert.match(FEISHU_POLICY, /群聊且一批里有多人发言时不要引用/);
+assert.match(FEISHU_POLICY, /一批里有多人发言时不要引用/);
 assert.ok(FEISHU_POLICY.indexOf('回复引用规则') < avatarSectionAt, 'quoting rule is generic');
 assert.ok(FEISHU_POLICY.indexOf('不可信数据') < avatarSectionAt, 'untrusted-content rule is generic');
 console.log('feishu reply quoting policy: 4 assertions passed');
