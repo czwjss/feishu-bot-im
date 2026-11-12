@@ -212,3 +212,25 @@ for (const tool of createUserIdentityTools({ auth: {}, monitor: { createDraft: a
   assert.equal(typeof tool.output?.render, 'function', `${tool.name} declares a renderer`);
 }
 console.log('im-feishu user identity tool output: 8 assertions passed');
+
+// 发送工具支持「回复某条消息」：走 reply 接口而不是新发一条。
+{
+  const calls = [];
+  const tool = createSendTool({
+    auth: { async requireAccessToken() { return 'user-token'; } },
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), body: init?.body });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ code: 0, data: { message_id: 'om_reply', chat_id: 'oc_x', create_time: '1794393900323', msg_type: 'interactive' } }),
+      };
+    },
+  });
+  const value = await tool.execute({ chatId: 'oc_x', text: '收到', replyToMessageId: 'om_origin' });
+  assert.equal(value.messageId, 'om_reply');
+  assert.match(calls[0].url, /\/messages\/om_origin\/reply$/, 'reply uses the reply endpoint');
+  await assert.rejects(() => tool.execute({ chatId: 'oc_x', path: '/tmp/a.txt', replyToMessageId: 'om_1' }), /仅支持文本卡片/);
+  await assert.rejects(() => tool.execute({ openId: 'ou_x', text: 'hi', replyToMessageId: 'om_1' }), /需要同时提供 chatId/);
+}
+console.log('im-feishu user identity reply mode: 5 assertions passed');

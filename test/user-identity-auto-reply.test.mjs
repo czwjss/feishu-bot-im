@@ -140,6 +140,8 @@ try {
   assert.match(prompts[0].text, new RegExp(chatId));
   assert.match(prompts[0].text, /feishu_avatar_send/);
   assert.match(prompts[0].text, /同一批次最多回复一次/);
+  assert.match(prompts[0].text, /om_1/, 'prompt lists message ids');
+  assert.match(prompts[0].text, /replyToMessageId/, 'prompt explains reply threading');
 
   // 3) 派发即视为已处理：消息已读、批次清空
   const handled = store.state.chats[chatId];
