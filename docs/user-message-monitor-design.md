@@ -672,7 +672,7 @@ offline_access
   → 派给该会话专属 DSH Worker 会话（默认 standard 预设）
   → 派发成功即视为已处理：标记已读、清空批次
   → Worker 需要回复时自己调用 feishu_avatar_send（chatId 用提示里给的）
-    默认发纯文本（对方机器人也能处理）；带 replyToMessageId 则以「回复该消息」的形式发出
+    统一发交互卡片，title 可选（短对话不加，总结/长内容再加）；带 replyToMessageId 则以「回复该消息」的形式发出
 ```
 
 设计取舍：**不做 Host 侧校验，也不引入批次令牌或决策工具。**

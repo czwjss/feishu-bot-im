@@ -59,6 +59,11 @@ export function textOfContentOrPost(message) {
     return null;
   }
   if (message.message_type === 'text') return typeof parsed.text === 'string' ? parsed.text : null;
+  // 卡片消息：把标题和正文按顺序拼成可读文本，机器人才能当普通消息处理。
+  if (message.message_type === 'interactive') {
+    const flat = interactiveTextOfContent(parsed);
+    return flat || null;
+  }
   if (message.message_type === 'post') {
     const rows = Array.isArray(parsed?.content) ? parsed.content : [];
     const text = rows

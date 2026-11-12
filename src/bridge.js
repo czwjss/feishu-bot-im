@@ -218,9 +218,9 @@ export class FeishuBridge {
       }
     }
 
-    const supported = ['text', 'post', 'image', 'file'];
+    const supported = ['text', 'post', 'image', 'file', 'interactive'];
     if (!supported.includes(message.message_type)) {
-      await sendNotice(this.#bot, message.chat_id, '目前支持文字、图片和文件消息；语音和视频暂不支持。', '暂不支持');
+      await sendNotice(this.#bot, message.chat_id, '目前支持文字、卡片、图片和文件消息；语音和视频暂不支持。', '暂不支持');
       return;
     }
     // Resolve the quote only after commands / unsupported messages are handled:

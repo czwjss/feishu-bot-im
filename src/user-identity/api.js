@@ -495,65 +495,6 @@ function validateText(text) {
 }
 
 /**
- * 以授权用户身份发送纯文本。文本消息对方机器人也能处理，
- * 卡片消息对机器人来说是 interactive 类型，很多桥接会直接回「暂不支持」。
- */
-export async function sendTextMessage({
-  accessToken,
-  chatId,
-  openId,
-  email,
-  text,
-  fetchImpl,
-  timeoutMs,
-  signal,
-} = {}) {
-  const [receiveIdType, receiveId] = resolveReceiveTarget({ chatId, openId, email });
-  const value = validateText(text);
-  return postUserMessage({
-    accessToken,
-    receiveIdType,
-    receiveId,
-    msgType: 'text',
-    content: JSON.stringify({ text: value }),
-    fetchImpl,
-    timeoutMs,
-    signal,
-  });
-}
-
-/**
- * 以用户身份回复某条消息，正文用纯文本（保持引用关系）。
- */
-export async function replyTextMessage({
-  accessToken,
-  messageId,
-  text,
-  fetchImpl,
-  timeoutMs,
-  signal,
-} = {}) {
-  const id = stringOf(messageId).trim();
-  if (!id) throw new Error('messageId 不能为空');
-  const value = validateText(text);
-  const data = await requestFeishu({
-    path: `/open-apis/im/v1/messages/${encodeURIComponent(id)}/reply`,
-    method: 'POST',
-    body: { msg_type: 'text', content: JSON.stringify({ text: value }) },
-    accessToken,
-    fetchImpl,
-    timeoutMs,
-    signal,
-  });
-  return Object.freeze({
-    messageId: stringOf(data.message_id),
-    chatId: stringOf(data.chat_id),
-    createTime: formatCreateTime(data.create_time),
-    msgType: stringOf(data.msg_type) || 'text',
-  });
-}
-
-/**
  * 以授权用户身份发送交互卡片。正文用 Markdown，可选标题和标题颜色。
  */
 export async function sendCardMessage({
