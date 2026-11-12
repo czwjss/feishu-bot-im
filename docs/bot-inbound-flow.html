@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>机器人侧消息入站流程</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #16181d;
+    --sub: #5b6572;
+    --line: #dfe3e8;
+    --bot: #3370ff;
+    --bot-soft: #eaf1ff;
+    --user: #00b96b;
+    --user-soft: #e6f9ef;
+    --warn: #ff8800;
+    --warn-soft: #fff3e6;
+    --stop: #8a93a3;
+    --stop-soft: #eef0f3;
+    --code: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 24px 80px; background: var(--bg); color: var(--ink);
+    font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 25px; margin: 0 0 6px; letter-spacing: -0.3px; }
+  .lead { color: var(--sub); margin: 0 0 26px; }
+  h2 { font-size: 16px; margin: 34px 0 14px; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+  .step {
+    display: grid; grid-template-columns: 30px 1fr; gap: 12px; align-items: start;
+    padding: 9px 0; border-bottom: 1px dashed var(--line);
+  }
+  .step:last-child { border-bottom: 0; }
+  .num {
+    width: 24px; height: 24px; border-radius: 7px; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; color: #fff; background: var(--bot);
+  }
+  .title { font-weight: 600; }
+  .meta { color: var(--sub); font-size: 12.5px; }
+  .meta code, .tag {
+    font-family: var(--code); font-size: 11.5px; background: #f1f3f6;
+    padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line);
+  }
+  .branch { margin: 6px 0 0 42px; display: grid; gap: 8px; }
+  .box {
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #fbfcfd;
+  }
+  .box.stop { background: var(--stop-soft); border-color: #d6dae1; }
+  .box.hot { background: var(--warn-soft); border-color: #f3d5ae; }
+  .box.ok { background: var(--user-soft); border-color: #bfe8d2; }
+  .box .title { font-size: 13px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 820px) { .grid2 { grid-template-columns: 1fr; } }
+  .pill {
+    display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
+    background: var(--bot-soft); color: var(--bot); margin-right: 6px;
+  }
+  .arrow { text-align: center; color: #b8c0cc; font-size: 15px; line-height: 1; margin: 4px 0; }
+  .cardflow { display: grid; gap: 10px; }
+  .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  @media (max-width: 820px) { .row { grid-template-columns: 1fr 1fr; } }
+  .mini {
+    border: 1px solid var(--line); border-radius: 10px; background: #fbfcfd; padding: 10px;
+    font-size: 12.5px;
+  }
+  .mini b { display: block; margin-bottom: 2px; }
+  .mini code { font-family: var(--code); font-size: 11px; color: var(--sub); }
+  .note { color: var(--sub); font-size: 12.5px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>机器人侧消息入站流程</h1>
+  <p class="lead">飞书长连接推送 → 守卫 → 寻址 → 卡片收尾 → 内容组装 → 提交会话。流式卡片不阻塞其他消息。</p>
+
+  <h2>主流程</h2>
+  <div class="panel">
+
+    <div class="step">
+      <div class="num">1</div>
+      <div>
+        <div class="title">事件到达</div>
+        <div class="meta">飞书 <code>im.message.receive_v1</code> → <code>bridge.handleMessage(data)</code></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">2</div>
+      <div>
+        <div class="title">守卫</div>
+        <div class="meta">任一命中就退出</div>
+        <div class="branch">
+          <div class="box stop"><span class="title">插件已销毁 / 缺 message_id、chat_id</span></div>
+          <div class="box stop"><span class="title">发送者是机器人且配置禁止</span> <span class="meta">respondToBotMessages</span></div>
+          <div class="box stop"><span class="title">发送者是自己</span> <span class="meta">botOpenId</span></div>
+          <div class="box stop"><span class="title">message_id 已处理过</span> <span class="meta">hasSeen，重放的卡片会跳过这一步</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">3</div>
+      <div>
+        <div class="title">权限与寻址</div>
+        <div class="meta">白名单 → 计算 chatKey（群 / 话题）→ 缓存参与者姓名</div>
+        <div class="branch">
+          <div class="box"><span class="title">是否 addressed</span>
+            <div class="meta">话题内：必须 @机器人；话题外：@机器人 或 引用机器人消息</div>
+          </div>
+          <div class="box stop"><span class="title">未 addressed → 记入旁听上下文，结束</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">4</div>
+      <div>
+        <div class="title">卡片收尾检查</div>
+        <div class="meta">仅 <code>message_type = interactive</code>：先 getMessage 拿渲染内容</div>
+        <div class="branch">
+          <div class="box hot"><b class="title">streaming_mode = true</b>
+            <div class="meta">挂起：记入 pendingCards，直接 return（不建会话、不调模型）</div>
+          </div>
+          <div class="box ok"><b class="title">streaming_mode = false / 无该字段</b>
+            <div class="meta">用最新内容继续往下走</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">5</div>
+      <div>
+        <div class="title">文本与指令</div>
+        <div class="meta">展平 <code>text / post / interactive</code>，去掉 <code>@_user_1</code> 占位符</div>
+        <div class="branch">
+          <div class="box"><span class="title">话题内再发 /topic</span> <span class="meta">回提示卡，结束</span></div>
+          <div class="box"><span class="title">命中指令</span> <span class="meta">/menu、/topic 等先执行，命中即结束</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">6</div>
+      <div>
+        <div class="title">类型白名单</div>
+        <div class="meta"><code>text / post / image / file / interactive</code></div>
+        <div class="branch">
+          <div class="box stop"><span class="title">其他类型（语音、视频）</span> <span class="meta">回「暂不支持」，结束</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">7</div>
+      <div>
+        <div class="title">引用与附件</div>
+        <div class="meta">解析 <code>parent_id</code> 取被引用消息 → 图片/文件/富文本走 <code>#inbound.build</code> 下载</div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">8</div>
+      <div>
+        <div class="title">组装与提交</div>
+        <div class="branch">
+          <div class="box"><span class="title">只有裸 @，没有正文</span> <span class="meta">群里已有会话 → 最小 prompt；没有会话 → 提示卡片</span></div>
+          <div class="box ok"><span class="title">正常内容</span> <span class="meta">打 processing 表情 → <code>#submitPrompt</code> → 绑定/创建 Session → 跑一轮</span></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <h2>流式卡片的分支</h2>
+  <div class="panel cardflow">
+    <div class="row">
+      <div class="mini"><b>1. 挂起</b>streaming_mode=true<br><code>pendingCards.set(id)</code></div>
+      <div class="mini"><b>2. 复查</b>每 30 秒一次<br><code>getMessage(id)</code></div>
+      <div class="mini"><b>3. 判定</b>看 streaming_mode<br>和 update_time</div>
+      <div class="mini"><b>4. 出队</b>收尾重放 / 超时丢弃</div>
+    </div>
+    <div class="arrow">↓</div>
+    <div class="row">
+      <div class="mini" style="grid-column: span 2;"><b>收尾</b>streaming_mode=false → 用最新内容 <code>handleMessage(data, {resubmitted:true})</code> 重放，跳过 hasSeen</div>
+      <div class="mini" style="grid-column: span 2;"><b>丢弃</b>update_time 超 5 分钟未变，或创建超 10 分钟 → 移出列表，不入会话、不标记</div>
+    </div>
+  </div>
+
+  <h2>关键事实</h2>
+  <div class="panel">
+    <div class="grid2">
+      <div class="box"><b>卡片更新不会推送事件</b><div class="meta">一条卡片只推一次 receive；内容是初始态，所以必须主动 getMessage 查状态。</div></div>
+      <div class="box"><b>收尾判定靠 streaming_mode</b><div class="meta">卡片 JSON 2.0 的 config 字段；飞书 10 分钟后会自动关闭流式模式。</div></div>
+      <div class="box"><b>停滞判定靠 update_time</b><div class="meta">每次刷新都会推进；超过 5 分钟没变视为异常中断。</div></div>
+      <div class="box"><b>挂起不阻塞</b><div class="meta">挂起只影响这一条卡片，同聊天的其他消息照常入站。</div></div>
+    </div>
+    <p class="note">已知边界：挂起列表在内存里，插件重载后丢失；卡片收尾重放可能晚于期间到达的新消息。</p>
+  </div>
+
+</div>
+</body>
+</html>

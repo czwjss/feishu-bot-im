@@ -27,7 +27,8 @@
     "docs/user-message-monitor-design.md",
     "docs/user-message-monitor-design.html",
     "docs/message-flow-architecture.html",
-    "docs/tool-mounting-comparison.html"
+    "docs/tool-mounting-comparison.html",
+    "docs/bot-inbound-flow.html"
   ],
   "dsh": {
     "bundle": {
