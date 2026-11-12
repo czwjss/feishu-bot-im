@@ -139,14 +139,11 @@ export class UserMonitorManager {
       return {
         ...chat,
         unread,
-        handled: messages.filter((message) => message.outcome === 'dispatched' || message.outcome === 'dropped').length,
         sessionId: entry.sessionId ?? null,
         pendingBatch: entry.batch?.messageIds?.length ?? 0,
         lastDispatchAt: entry.lastDispatchAt ?? null,
-        cursorTimeMs: entry.cursorTimeMs ?? null,
         lastPollAt: entry.lastPollAt ?? null,
         lastError: entry.lastError ?? null,
-        lastDeliveredAt: entry.lastDeliveredAt ?? null,
         messages: messages.slice(-10),
       };
     });
@@ -593,13 +590,11 @@ export class UserMonitorManager {
 
       let cursorTimeMs = current.cursorTimeMs;
       let cursorMessageId = current.cursorMessageId ?? null;
-      let lastDeliveredAt = current.lastDeliveredAt ?? null;
       let nextMessages = messages;
       for (const { item, time, updateOf, nextText } of eligible) {
         seen.add(item.messageId);
         cursorTimeMs = time;
         cursorMessageId = item.messageId;
-        lastDeliveredAt = this.#now();
         if (updateOf) {
           nextMessages = nextMessages.map((message) => (
             message.messageId === updateOf ? { ...message, text: nextText, read: false } : message
@@ -653,7 +648,6 @@ export class UserMonitorManager {
         messages: nextMessages,
         seen: [...seen].slice(-MAX_SEEN_IDS),
         lastPollAt: this.#now(),
-        lastDeliveredAt,
         lastError: null,
       });
     } catch (error) {

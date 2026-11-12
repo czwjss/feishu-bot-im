@@ -184,37 +184,26 @@ var MESSAGES = Object.freeze({
   "\u6D88\u606F\u76D1\u542C": "Message monitoring",
   "\u505C\u6B62\u76D1\u542C": "Stop",
   "\u5F00\u59CB\u76D1\u542C": "Start",
-  "\u5B9A\u65F6\u68C0\u67E5\u5DF2\u9009\u4F1A\u8BDD\u7684\u65B0\u6D88\u606F\uFF0C\u8BB0\u5F55\u5230\u672C\u5730\u6536\u4EF6\u7BB1\u3002\u65B0\u589E\u76D1\u542C\u4ECE\u5F53\u524D\u65F6\u95F4\u5F00\u59CB\uFF0C\u4E0D\u56DE\u8865\u5386\u53F2\uFF1B\u4E0D\u8C03\u7528\u6A21\u578B\uFF0C\u4E5F\u4E0D\u81EA\u52A8\u56DE\u590D\u3002": "Polls selected chats and delivers new messages to DSH. New monitors start at the current time and do not backfill history.",
   "\u6B63\u5728\u8BFB\u53D6\u76D1\u542C\u72B6\u6001\u2026": "Loading monitor status\u2026",
   "\u76D1\u542C\u4E2D": "Watching",
   "\u5DF2\u6682\u505C": "Paused",
   "\u6700\u540E\u68C0\u67E5": "Last check",
   "\u7ACB\u5373\u68C0\u67E5": "Check now",
-  "\u8FD8\u6CA1\u6709\u76D1\u542C\u4F1A\u8BDD\u3002\u70B9\u201C\u9009\u62E9\u4F1A\u8BDD\u201D\u6DFB\u52A0\u3002": "No monitored chats yet. Choose chats to add.",
   "\u6CA1\u6709\u53EF\u6DFB\u52A0\u7684\u4F1A\u8BDD\u3002": "No chats available to add.",
   "\u9009\u62E9\u4F1A\u8BDD": "Choose chats",
   "\u6DFB\u52A0": "Add",
   "\u624B\u52A8\u586B chat_id\uFF08oc_\u2026\uFF09": "Enter chat_id (oc_\u2026)",
-  "\u4F1A\u8BDD\u5217\u8868\u5DF2\u540C\u65F6\u5305\u542B\u7FA4\u804A\u548C\u6700\u8FD1\u79C1\u804A\uFF1B\u627E\u4E0D\u5230\u65F6\u53EF\u624B\u52A8\u586B chat_id\u3002": "The picker includes groups and recent direct chats; enter a chat_id manually if one is missing.",
   "\u6761\u672A\u8BFB": "unread",
   "\u5168\u90E8\u5DF2\u8BFB": "Mark read",
   "\u6E05\u7A7A\u8BB0\u5F55": "Clear",
   "\u672A\u77E5": "Unknown",
   "\u5168\u90E8\u6D88\u606F": "All messages",
-  "\u4EC5@\u6211/\u56DE\u590D\u6211": "Mentions & replies",
   "\u5173\u952E\u8BCD": "Keywords",
-  "\u5173\u952E\u8BCD\uFF0C\u7528\u9017\u53F7\u5206\u9694": "Keywords, comma separated",
-  "\u56DE\u590D\u6D88\u606F": "reply",
-  "\u53D1\u9001": "Send",
-  "\u5FFD\u7565": "Ignore",
   "\u5904\u7406\u65B9\u5F0F": "Handling",
   "\u53EA\u8BB0\u5F55": "Record only",
   "\u81EA\u52A8\u56DE\u590D": "Auto reply",
   "\u81EA\u52A8\u56DE\u590D\uFF08\u542B\u673A\u5668\u4EBA\uFF09": "Auto reply (bots too)",
-  "\u5F85\u5904\u7406": "pending",
-  "\u4E0A\u6B21\u6D3E\u53D1": "last dispatch",
-  "\u5904\u7406\u5F85\u529E": "Flush pending",
-  "\u5DF2\u5904\u7406": "handled"
+  "\u4E0A\u6B21\u6D3E\u53D1": "last dispatch"
 });
 function dictionaries() {
   const zh = {};
@@ -606,6 +595,7 @@ function MonitorPanel({ connection }) {
   const [available, setAvailable] = import_react2.default.useState(null);
   const [manual, setManual] = import_react2.default.useState("");
   const [manualMode, setManualMode] = import_react2.default.useState("p2p");
+  const [showPicker, setShowPicker] = import_react2.default.useState(false);
   const [busy, setBusy] = import_react2.default.useState("");
   const [error, setError] = import_react2.default.useState(null);
   const [workerOptions, setWorkerOptions] = import_react2.default.useState({ workspaces: [], presets: [] });
@@ -647,29 +637,33 @@ function MonitorPanel({ connection }) {
     setError(null);
     try {
       const value = await operation();
-      if (value) {
-        setMonitor(value);
-      }
+      if (value) setMonitor(value);
     } catch (failure) {
       setError(failure?.message ?? String(failure));
     } finally {
       setBusy("");
     }
   };
-  const refreshChats = () => act("chats", async () => {
-    const value = await rpc(connection, API.userMonitorChats, {});
-    setAvailable(Array.isArray(value?.chats) ? value.chats : []);
-    return null;
-  });
   const add = (chat) => act(`add:${chat.chatId}`, () => rpc(connection, API.userMonitorAdd, chat));
   const remove = (chat) => act(`remove:${chat.chatId}`, () => rpc(connection, API.userMonitorRemove, { chatId: chat.chatId }));
   const setChat = (chat, patch) => act(`mode:${chat.chatId}`, () => rpc(connection, API.userMonitorChatSet, { chatId: chat.chatId, ...patch }));
   const setWorker = (patch) => act("worker", () => rpc(connection, API.userMonitorWorkerSet, patch));
-  const toggle = () => act("toggle", () => rpc(connection, API.userMonitorEnable, {
-    enabled: monitor?.enabled !== true
-  }));
+  const toggle = () => act("toggle", () => rpc(connection, API.userMonitorEnable, { enabled: monitor?.enabled !== true }));
   const poll = () => act("poll", () => rpc(connection, API.userMonitorPoll, {}));
   const flushPending = () => act("flush", () => rpc(connection, API.userMonitorFlush, {}));
+  const markRead = () => act("read", () => rpc(connection, API.userMonitorRead, {}));
+  const clearAll = () => act("clear", () => rpc(connection, API.userMonitorClear, {}));
+  const togglePicker = () => {
+    const next = !showPicker;
+    setShowPicker(next);
+    if (next && !available) {
+      void act("chats", async () => {
+        const value = await rpc(connection, API.userMonitorChats, {});
+        setAvailable(Array.isArray(value?.chats) ? value.chats : []);
+        return null;
+      });
+    }
+  };
   const addManual = () => {
     const chatId = manual.trim();
     if (!chatId) return;
@@ -679,79 +673,109 @@ function MonitorPanel({ connection }) {
       return value;
     });
   };
-  const markRead = () => act("read", () => rpc(connection, API.userMonitorRead, {}));
-  const clearAll = () => act("clear", () => rpc(connection, API.userMonitorClear, {}));
   const chats = Array.isArray(monitor?.chats) ? monitor.chats : [];
   const monitored = new Set(chats.map((chat) => chat.chatId));
   const candidates = (available ?? []).filter((chat) => !monitored.has(chat.chatId));
+  const pendingTotal = chats.reduce((sum, chat) => sum + (chat.pendingBatch || 0), 0);
+  const unreadChats = chats.filter((chat) => (chat.messages ?? []).some((message) => !message.read));
   const formatTime = (ms) => Number.isFinite(ms) && ms > 0 ? new Date(ms).toLocaleTimeString() : "\u2014";
-  const chatRows = chats.length === 0 ? h2("p", { style: S.hint }, t("\u8FD8\u6CA1\u6709\u76D1\u542C\u4F1A\u8BDD\u3002\u70B9\u201C\u9009\u62E9\u4F1A\u8BDD\u201D\u6DFB\u52A0\u3002", "No monitored chats yet. Choose chats to add.")) : chats.map((chat) => h2(
-    "div",
-    {
-      key: chat.chatId,
-      style: { display: "flex", alignItems: "center", gap: "8px", padding: "6px 0", borderTop: "1px solid var(--dsw-alias-border-l1)" }
-    },
-    h2(
+  const selectStyle = { ...S.input, width: "auto", height: "28px", fontSize: "12px", paddingRight: "26px" };
+  const sectionHead = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", margin: "2px 0 6px" };
+  const sectionTitle = { fontSize: "12px", fontWeight: 600 };
+  const divider = { borderTop: "1px solid var(--dsw-alias-border-l1)", paddingTop: "10px", marginTop: "2px" };
+  const chatRow = (chat) => {
+    const unread = (chat.messages ?? []).filter((message) => !message.read);
+    return h2(
       "div",
-      { style: { flex: 1, minWidth: 0 } },
-      h2("div", { style: { fontSize: "13px" } }, chat.name || chat.chatId),
+      { key: chat.chatId, style: { display: "grid", gap: "6px", padding: "9px 0", borderTop: "1px solid var(--dsw-alias-border-l1)" } },
       h2(
         "div",
-        { style: S.hint },
-        `${chat.chatMode === "p2p" ? t("\u79C1\u804A", "Direct") : t("\u7FA4\u804A", "Group")} \xB7 ${chat.chatId}`,
-        chat.pendingBatch ? ` \xB7 ${t("\u5F85\u5904\u7406", "pending")} ${chat.pendingBatch}` : "",
-        chat.handled ? ` \xB7 ${t("\u5DF2\u5904\u7406", "handled")} ${chat.handled}` : "",
-        chat.lastDispatchAt ? ` \xB7 ${t("\u4E0A\u6B21\u6D3E\u53D1", "last dispatch")} ${formatTime(chat.lastDispatchAt)}` : "",
-        chat.lastError ? h2("span", { style: { color: "var(--dsw-alias-state-error-primary)" } }, ` \xB7 ${chat.lastError}`) : null
-      )
-    ),
-    h2(
-      "select",
-      {
-        style: { ...S.input, width: "auto", height: "28px", fontSize: "12px" },
-        value: chat.mode ?? (chat.chatMode === "p2p" ? "all" : "mention"),
-        disabled: busy === `mode:${chat.chatId}`,
-        onChange: (event) => void setChat(chat, { mode: event.target.value })
-      },
-      h2("option", { value: "all" }, t("\u5168\u90E8\u6D88\u606F", "All")),
-      h2("option", { value: "mention" }, t("\u4EC5@\u6211/\u56DE\u590D\u6211", "Mentions & replies")),
-      h2("option", { value: "keyword" }, t("\u5173\u952E\u8BCD", "Keywords"))
-    ),
-    chat.mode === "keyword" ? h2("input", {
-      style: { ...S.input, width: "140px", height: "28px", fontSize: "12px" },
-      defaultValue: (chat.keywords ?? []).join("\uFF0C"),
-      placeholder: t("\u5173\u952E\u8BCD\uFF0C\u7528\u9017\u53F7\u5206\u9694", "Keywords, comma separated"),
-      onBlur: (event) => {
-        const keywords = event.target.value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
-        void setChat(chat, { keywords });
-      }
-    }) : null,
-    h2(
-      "select",
-      {
-        style: { ...S.input, width: "auto", height: "28px", fontSize: "12px" },
-        value: chat.replyMode === "auto" && chat.replyToBots ? "auto-bots" : chat.replyMode ?? "watch",
-        disabled: busy === `mode:${chat.chatId}`,
-        title: t("\u5904\u7406\u65B9\u5F0F", "Handling"),
-        onChange: (event) => {
-          const value = event.target.value;
-          void setChat(chat, value === "auto-bots" ? { replyMode: "auto", replyToBots: true } : { replyMode: value, replyToBots: false });
+        { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+        h2(
+          "div",
+          { style: { flex: "1 1 160px", minWidth: 0 } },
+          h2(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "6px" } },
+            h2(
+              "span",
+              { style: { fontSize: "13px", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } },
+              chat.name || chat.chatId
+            ),
+            unread.length > 0 ? h2("span", { style: S.badge("warn") }, unread.length) : null
+          ),
+          h2(
+            "div",
+            { style: { ...S.hint, marginTop: "1px" } },
+            `${chat.chatMode === "p2p" ? t("\u79C1\u804A", "Direct") : t("\u7FA4\u804A", "Group")} \xB7 ${chat.chatId}`,
+            chat.lastDispatchAt ? ` \xB7 ${t("\u4E0A\u6B21\u6D3E\u53D1", "last dispatch")} ${formatTime(chat.lastDispatchAt)}` : ""
+          )
+        ),
+        h2(
+          "select",
+          {
+            style: selectStyle,
+            "aria-label": t("\u89E6\u53D1\u89C4\u5219", "Trigger"),
+            value: chat.mode ?? (chat.chatMode === "p2p" ? "all" : "mention"),
+            disabled: busy === `mode:${chat.chatId}`,
+            onChange: (event) => void setChat(chat, { mode: event.target.value })
+          },
+          h2("option", { value: "all" }, t("\u5168\u90E8\u6D88\u606F", "All")),
+          h2("option", { value: "mention" }, t("@\u4E0E\u56DE\u590D", "Mentions")),
+          h2("option", { value: "keyword" }, t("\u5173\u952E\u8BCD", "Keywords"))
+        ),
+        h2(
+          "select",
+          {
+            style: selectStyle,
+            "aria-label": t("\u5904\u7406\u65B9\u5F0F", "Handling"),
+            value: chat.replyMode === "auto" && chat.replyToBots ? "auto-bots" : chat.replyMode ?? "watch",
+            disabled: busy === `mode:${chat.chatId}`,
+            onChange: (event) => {
+              const value = event.target.value;
+              void setChat(chat, value === "auto-bots" ? { replyMode: "auto", replyToBots: true } : { replyMode: value, replyToBots: false });
+            }
+          },
+          h2("option", { value: "watch" }, t("\u53EA\u8BB0\u5F55", "Record")),
+          h2("option", { value: "auto" }, t("\u81EA\u52A8\u56DE\u590D", "Auto reply")),
+          h2("option", { value: "auto-bots" }, t("\u81EA\u52A8\u56DE\u590D\uFF08\u542B\u673A\u5668\u4EBA\uFF09", "Auto reply (bots)"))
+        )
+      ),
+      chat.mode === "keyword" ? h2("input", {
+        style: { ...S.input, height: "30px", fontSize: "12px" },
+        defaultValue: (chat.keywords ?? []).join("\uFF0C"),
+        placeholder: t("\u5173\u952E\u8BCD\uFF0C\u7528\u9017\u53F7\u5206\u9694\uFF0C\u56DE\u8F66\u4FDD\u5B58", "Keywords, comma separated; blur to save"),
+        onBlur: (event) => {
+          const keywords = event.target.value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
+          void setChat(chat, { keywords });
         }
-      },
-      h2("option", { value: "watch" }, t("\u53EA\u8BB0\u5F55", "Record only")),
-      h2("option", { value: "auto" }, t("\u81EA\u52A8\u56DE\u590D", "Auto reply")),
-      h2("option", { value: "auto-bots" }, t("\u81EA\u52A8\u56DE\u590D\uFF08\u542B\u673A\u5668\u4EBA\uFF09", "Auto reply (bots too)"))
-    ),
-    h2(
-      "button",
-      { type: "button", className: "bxf-mini", disabled: busy === `remove:${chat.chatId}`, onClick: () => void remove(chat) },
-      t("\u79FB\u9664", "Remove")
-    )
-  ));
-  const candidateRows = available ? candidates.length === 0 ? h2("p", { style: S.hint }, t("\u6CA1\u6709\u53EF\u6DFB\u52A0\u7684\u4F1A\u8BDD\u3002", "No chats available to add.")) : h2(
+      }) : null,
+      chat.lastError ? h2("div", { style: { ...S.hint, color: "var(--dsw-alias-state-error-primary)" } }, chat.lastError) : null
+    );
+  };
+  const unreadSection = unreadChats.length > 0 ? h2(
     "div",
-    { style: { display: "grid", gap: "4px", maxHeight: "220px", overflow: "auto" } },
-    candidates.slice(0, 300).map((chat) => h2(
+    { style: { display: "grid", gap: "6px" } },
+    unreadChats.map((chat) => h2(
+      "div",
+      { key: `u:${chat.chatId}`, style: { display: "grid", gap: "2px" } },
+      h2("div", { style: { ...S.hint, fontWeight: 600 } }, `${chat.name || chat.chatId} \xB7 ${(chat.messages ?? []).filter((message) => !message.read).length}`),
+      (chat.messages ?? []).filter((message) => !message.read).slice(-3).map((message) => h2("div", {
+        key: message.messageId,
+        style: {
+          fontSize: "12px",
+          color: "var(--dsw-alias-label-secondary)",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis"
+        }
+      }, `${message.senderName || t("\u672A\u77E5", "Unknown")}\uFF1A${message.text}`))
+    ))
+  ) : null;
+  const pickerSection = showPicker ? h2(
+    "div",
+    { style: { display: "grid", gap: "2px", maxHeight: "240px", overflow: "auto", paddingTop: "4px" } },
+    available === null ? h2("p", { style: S.hint }, t("\u6B63\u5728\u8BFB\u53D6\u4F1A\u8BDD\u5217\u8868\u2026", "Loading chats\u2026")) : candidates.length === 0 ? h2("p", { style: S.hint }, t("\u6CA1\u6709\u53EF\u6DFB\u52A0\u7684\u4F1A\u8BDD\u3002", "No chats available to add.")) : candidates.slice(0, 300).map((chat) => h2(
       "div",
       {
         key: chat.chatId,
@@ -763,11 +787,12 @@ function MonitorPanel({ connection }) {
         h2("div", { style: { fontSize: "13px" } }, chat.name || chat.chatId),
         h2("div", { style: S.hint }, chat.chatMode === "p2p" ? t("\u79C1\u804A", "Direct") : t("\u7FA4\u804A", "Group"))
       ),
-      h2(
-        "button",
-        { type: "button", className: "bxf-mini", disabled: busy === `add:${chat.chatId}`, onClick: () => void add(chat) },
-        t("\u6DFB\u52A0", "Add")
-      )
+      h2("button", {
+        type: "button",
+        className: "bxf-mini",
+        disabled: busy === `add:${chat.chatId}`,
+        onClick: () => void add(chat)
+      }, busy === `add:${chat.chatId}` ? t("\u6DFB\u52A0\u4E2D\u2026", "Adding\u2026") : t("\u6DFB\u52A0", "Add"))
     ))
   ) : null;
   return h2(
@@ -786,152 +811,166 @@ function MonitorPanel({ connection }) {
       "p",
       { style: { ...S.hint, margin: "0 0 10px" } },
       t(
-        "\u5B9A\u65F6\u68C0\u67E5\u5DF2\u9009\u4F1A\u8BDD\u7684\u65B0\u6D88\u606F\uFF0C\u8BB0\u5F55\u5230\u672C\u5730\u6536\u4EF6\u7BB1\u3002\u65B0\u589E\u76D1\u542C\u4ECE\u5F53\u524D\u65F6\u95F4\u5F00\u59CB\uFF0C\u4E0D\u56DE\u8865\u5386\u53F2\uFF1B\u4E0D\u8C03\u7528\u6A21\u578B\uFF0C\u4E5F\u4E0D\u81EA\u52A8\u56DE\u590D\u3002",
-        "Polls selected chats into a local inbox. New monitors start at the current time and do not backfill; no model calls and no automatic replies."
-      ),
-      h2("br"),
-      t(
-        "\u4F1A\u8BDD\u5217\u8868\u5DF2\u540C\u65F6\u5305\u542B\u7FA4\u804A\u548C\u6700\u8FD1\u79C1\u804A\uFF1B\u627E\u4E0D\u5230\u65F6\u53EF\u624B\u52A8\u586B chat_id\u3002",
-        "The picker includes groups and recent direct chats; enter a chat_id manually if one is missing."
+        "\u5B9A\u65F6\u62C9\u53D6\u5DF2\u9009\u4F1A\u8BDD\u7684\u65B0\u6D88\u606F\u5E76\u8BB0\u5F55\uFF1B\u6D41\u5F0F\u5361\u7247\u6536\u5C3E\u540E\u624D\u5165\u5E93\u3002\u300C\u81EA\u52A8\u56DE\u590D\u300D\u4F1A\u628A\u65B0\u6D88\u606F\u6512\u6210\u4E00\u6279\u4EA4\u7ED9 Worker \u4F1A\u8BDD\u5904\u7406\u3002",
+        "Polls selected chats into a local inbox; streaming cards land after they finish. Auto reply hands each batch to the worker session."
       )
     ),
     error ? h2("div", { style: S.error }, error) : null,
     !monitor ? h2("p", { style: S.hint }, t("\u6B63\u5728\u8BFB\u53D6\u76D1\u542C\u72B6\u6001\u2026", "Loading monitor status\u2026")) : h2(
       "div",
-      { style: { display: "grid", gap: "8px" } },
+      { style: { display: "grid", gap: "10px" } },
       h2(
         "div",
-        { style: S.row },
+        { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
         h2(
           "span",
           { style: S.badge(monitor.enabled ? "ok" : "muted") },
           monitor.enabled ? t("\u76D1\u542C\u4E2D", "Watching") : t("\u5DF2\u6682\u505C", "Paused")
         ),
-        h2("span", { style: S.hint }, `${t("\u6700\u540E\u68C0\u67E5", "Last check")}\uFF1A${formatTime(chats[0]?.lastPollAt)}`),
-        h2(
-          "button",
-          { type: "button", className: "bxf-mini", disabled: busy === "poll", onClick: () => void poll() },
-          t("\u7ACB\u5373\u68C0\u67E5", "Check now")
-        ),
-        h2(
-          "button",
-          { type: "button", className: "bxf-mini", disabled: busy === "flush", onClick: () => void flushPending() },
-          t("\u5904\u7406\u5F85\u529E", "Flush pending")
-        )
-      ),
-      chatRows,
-      monitor.unreadTotal > 0 ? h2(
-        "div",
-        { style: { display: "grid", gap: "6px", paddingTop: "6px", borderTop: "1px solid var(--dsw-alias-border-l1)" } },
+        h2("span", { style: { ...S.hint, marginTop: 0 } }, `${t("\u6700\u540E\u68C0\u67E5", "Last check")} ${formatTime(chats[0]?.lastPollAt)}`),
         h2(
           "div",
-          { style: S.row },
-          h2("span", { style: S.badge("warn") }, `${monitor.unreadTotal} ${t("\u6761\u672A\u8BFB", "unread")}`),
+          { style: { ...S.row, marginLeft: "auto", gap: "6px" } },
           h2(
             "button",
-            { type: "button", className: "bxf-mini", disabled: busy === "read", onClick: () => void markRead() },
-            t("\u5168\u90E8\u5DF2\u8BFB", "Mark read")
+            { type: "button", className: "bxf-mini", disabled: busy === "poll", onClick: () => void poll() },
+            busy === "poll" ? t("\u68C0\u67E5\u4E2D\u2026", "Checking\u2026") : t("\u7ACB\u5373\u68C0\u67E5", "Check now")
+          ),
+          pendingTotal > 0 ? h2(
+            "button",
+            { type: "button", className: "bxf-mini", disabled: busy === "flush", onClick: () => void flushPending() },
+            busy === "flush" ? t("\u6D3E\u53D1\u4E2D\u2026", "Dispatching\u2026") : `${t("\u91CD\u8BD5\u6D3E\u53D1", "Retry dispatch")} ${pendingTotal}`
+          ) : null
+        )
+      ),
+      h2(
+        "div",
+        null,
+        h2("div", { style: sectionHead }, h2("span", { style: sectionTitle }, t("\u4F1A\u8BDD", "Chats"))),
+        chats.length === 0 ? h2("p", { style: S.hint }, t("\u8FD8\u6CA1\u6709\u76D1\u542C\u4F1A\u8BDD\uFF0C\u5148\u5728\u4E0B\u9762\u6DFB\u52A0\u4E00\u4E2A\u3002", "No chats yet \u2014 add one below.")) : h2("div", null, chats.map(chatRow))
+      ),
+      h2(
+        "div",
+        { style: divider },
+        h2(
+          "div",
+          { style: sectionHead },
+          h2("span", { style: sectionTitle }, t("\u6DFB\u52A0\u4F1A\u8BDD", "Add chat")),
+          h2(
+            "button",
+            { type: "button", className: "bxf-mini", disabled: busy === "chats", onClick: togglePicker },
+            busy === "chats" ? t("\u8BFB\u53D6\u4E2D\u2026", "Loading\u2026") : showPicker ? t("\u6536\u8D77", "Close") : t("\u9009\u62E9\u4F1A\u8BDD", "Choose")
+          )
+        ),
+        pickerSection,
+        h2(
+          "div",
+          { style: { ...S.row, marginTop: showPicker ? "6px" : 0 } },
+          h2("input", {
+            style: { ...S.input, flex: "1 1 180px", minWidth: 0, height: "30px", fontSize: "12px" },
+            value: manual,
+            placeholder: t("\u624B\u52A8\u586B chat_id\uFF08oc_\u2026\uFF09", "chat_id (oc_\u2026)"),
+            onChange: (event) => setManual(event.target.value),
+            onKeyDown: (event) => {
+              if (event.key === "Enter") addManual();
+            }
+          }),
+          h2(
+            "select",
+            {
+              style: { ...S.input, width: "auto", height: "30px", fontSize: "12px" },
+              value: manualMode,
+              "aria-label": t("\u4F1A\u8BDD\u7C7B\u578B", "Chat type"),
+              onChange: (event) => setManualMode(event.target.value)
+            },
+            h2("option", { value: "p2p" }, t("\u79C1\u804A", "Direct")),
+            h2("option", { value: "group" }, t("\u7FA4\u804A", "Group"))
+          ),
+          h2("button", {
+            type: "button",
+            className: "bxf-mini",
+            disabled: busy === "manual" || !manual.trim(),
+            onClick: addManual
+          }, busy === "manual" ? t("\u6DFB\u52A0\u4E2D\u2026", "Adding\u2026") : t("\u6DFB\u52A0", "Add"))
+        )
+      ),
+      h2(
+        "div",
+        { style: divider },
+        h2("div", { style: sectionHead }, h2("span", { style: sectionTitle }, t("Worker \u4F1A\u8BDD", "Worker session"))),
+        h2(
+          "div",
+          { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "8px" } },
+          h2(
+            "label",
+            { style: { display: "grid", gap: "4px" } },
+            h2("span", { style: { ...S.hint, marginTop: 0 } }, t("\u5206\u7EC4", "Group")),
+            h2(
+              "select",
+              {
+                style: { ...S.input, height: "30px", fontSize: "12px" },
+                value: monitor.worker?.workspaceId || "",
+                disabled: busy === "worker",
+                onChange: (event) => void setWorker({ workspaceId: event.target.value, workspacePath: "" })
+              },
+              h2("option", { value: "" }, t("\u9ED8\u8BA4\u5DE5\u4F5C\u533A", "Default workspace")),
+              workerOptions.workspaces.map((item) => h2(
+                "option",
+                { key: item.id, value: item.id },
+                `${item.title || item.id}${item.path ? ` \xB7 ${item.path}` : ""}`
+              ))
+            )
           ),
           h2(
-            "button",
-            { type: "button", className: "bxf-mini", disabled: busy === "clear", onClick: () => void clearAll() },
-            t("\u6E05\u7A7A\u8BB0\u5F55", "Clear")
-          )
-        ),
-        chats.filter((chat) => (chat.messages ?? []).some((message) => !message.read)).map((chat) => h2(
-          "div",
-          { key: `m:${chat.chatId}`, style: { display: "grid", gap: "2px" } },
-          h2("div", { style: S.hint }, `${chat.name || chat.chatId}${chat.unread ? ` \xB7 ${chat.unread}` : ""}`),
-          (chat.messages ?? []).filter((message) => !message.read).slice(-3).map((message) => h2("div", {
-            key: message.messageId,
-            style: { fontSize: "12px", color: "var(--dsw-alias-label-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }
-          }, `${message.senderName || t("\u672A\u77E5", "Unknown")}\uFF1A${message.text}`))
-        ))
-      ) : null,
-      h2(
-        "div",
-        { style: { display: "grid", gap: "6px", paddingTop: "8px", borderTop: "1px solid var(--dsw-alias-border-l1)" } },
-        h2("div", { style: { fontSize: "12px", fontWeight: 600 } }, t("Worker \u4F1A\u8BDD", "Worker session")),
-        h2(
-          "div",
-          { style: S.row },
-          h2("span", { style: { ...S.hint, minWidth: "42px" } }, t("\u5206\u7EC4", "Group")),
-          h2(
-            "select",
-            {
-              style: { ...S.input, flex: 1, minWidth: 0, height: "30px", fontSize: "12px" },
-              value: monitor.worker?.workspaceId || "",
-              disabled: busy === "worker",
-              onChange: (event) => void setWorker({ workspaceId: event.target.value, workspacePath: "" })
-            },
-            h2("option", { value: "" }, t("\u9ED8\u8BA4\u5DE5\u4F5C\u533A", "Default workspace")),
-            workerOptions.workspaces.map((item) => h2(
-              "option",
-              { key: item.id, value: item.id },
-              `${item.title || item.id}${item.path ? ` \xB7 ${item.path}` : ""}`
-            ))
+            "label",
+            { style: { display: "grid", gap: "4px" } },
+            h2("span", { style: { ...S.hint, marginTop: 0 } }, t("\u9884\u8BBE", "Preset")),
+            h2(
+              "select",
+              {
+                style: { ...S.input, height: "30px", fontSize: "12px" },
+                value: monitor.worker?.preset || "",
+                disabled: busy === "worker",
+                onChange: (event) => void setWorker({ preset: event.target.value })
+              },
+              h2("option", { value: "" }, t("\u9ED8\u8BA4\uFF08standard\uFF09", "Default (standard)")),
+              workerOptions.presets.map((item) => h2("option", { key: item.id, value: item.id }, item.name || item.id))
+            )
           )
         ),
         h2(
-          "div",
-          { style: S.row },
-          h2("span", { style: { ...S.hint, minWidth: "42px" } }, t("\u9884\u8BBE", "Preset")),
-          h2(
-            "select",
-            {
-              style: { ...S.input, flex: 1, minWidth: 0, height: "30px", fontSize: "12px" },
-              value: monitor.worker?.preset || "",
-              disabled: busy === "worker",
-              onChange: (event) => void setWorker({ preset: event.target.value })
-            },
-            h2("option", { value: "" }, t("\u9ED8\u8BA4\uFF08standard\uFF09", "Default (standard)")),
-            workerOptions.presets.map((item) => h2("option", { key: item.id, value: item.id }, item.name || item.id))
-          )
-        ),
-        h2(
-          "div",
+          "p",
           { style: S.hint },
           t(
-            "\u81EA\u52A8\u56DE\u590D\u7684 Worker \u4F1A\u8BDD\u4F1A\u5EFA\u5728\u8FD9\u4E2A\u5206\u7EC4\u4E0B\uFF1B\u6539\u52A8\u540E\u4E0B\u4E00\u6B21\u6D3E\u53D1\u81EA\u52A8\u6362\u65B0\u4F1A\u8BDD\u3002",
-            "Auto-reply workers are created in this group; changes take effect on the next dispatch."
+            "\u81EA\u52A8\u56DE\u590D\u7684 Worker \u4F1A\u8BDD\u5EFA\u5728\u8FD9\u4E2A\u5206\u7EC4\u4E0B\uFF1B\u6539\u52A8\u540E\u4E0B\u4E00\u6B21\u6D3E\u53D1\u81EA\u52A8\u6362\u65B0\u4F1A\u8BDD\u3002",
+            "Auto-reply workers are created in this group; changes apply on the next dispatch."
           )
         )
       ),
-      h2(
+      monitor.unreadTotal > 0 ? h2(
         "div",
-        { style: { ...S.row, marginTop: "4px" } },
+        { style: divider },
         h2(
-          "button",
-          { type: "button", className: "bxf-mini", disabled: busy === "chats", onClick: () => void refreshChats() },
-          busy === "chats" ? t("\u6B63\u5728\u8BFB\u53D6\u2026", "Loading\u2026") : t("\u9009\u62E9\u4F1A\u8BDD", "Choose chats")
-        )
-      ),
-      candidateRows,
-      h2(
-        "div",
-        { style: { ...S.row, marginTop: "4px" } },
-        h2("input", {
-          style: { ...S.input, flex: 1, minWidth: 0 },
-          value: manual,
-          placeholder: t("\u624B\u52A8\u586B chat_id\uFF08oc_\u2026\uFF09", "Enter chat_id (oc_\u2026)"),
-          onChange: (event) => setManual(event.target.value)
-        }),
-        h2(
-          "select",
-          {
-            style: S.input,
-            value: manualMode,
-            onChange: (event) => setManualMode(event.target.value)
-          },
-          h2("option", { value: "p2p" }, t("\u79C1\u804A", "Direct")),
-          h2("option", { value: "group" }, t("\u7FA4\u804A", "Group"))
+          "div",
+          { style: sectionHead },
+          h2("span", { style: sectionTitle }, `${monitor.unreadTotal} ${t("\u6761\u672A\u8BFB", "unread")}`),
+          h2(
+            "div",
+            { style: { ...S.row, gap: "6px" } },
+            h2(
+              "button",
+              { type: "button", className: "bxf-mini", disabled: busy === "read", onClick: () => void markRead() },
+              t("\u5168\u90E8\u5DF2\u8BFB", "Mark read")
+            ),
+            h2(
+              "button",
+              { type: "button", className: "bxf-mini", disabled: busy === "clear", onClick: () => void clearAll() },
+              t("\u6E05\u7A7A\u8BB0\u5F55", "Clear")
+            )
+          )
         ),
-        h2(
-          "button",
-          { type: "button", className: "bxf-mini", disabled: busy === "manual" || !manual.trim(), onClick: addManual },
-          t("\u6DFB\u52A0", "Add")
-        )
-      )
+        unreadSection
+      ) : null
     )
   );
 }

@@ -200,7 +200,6 @@ export function normalizeMonitorState(value) {
       seen: Object.freeze(seen),
       lastPollAt: cleanTime(entry.lastPollAt),
       lastError: cleanString(entry.lastError) || null,
-      lastDeliveredAt: cleanTime(entry.lastDeliveredAt),
     });
   }
   const pendingCards = [];

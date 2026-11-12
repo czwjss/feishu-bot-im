@@ -9,10 +9,11 @@ const h = React.createElement;
       const [available, setAvailable] = React.useState(null);
       const [manual, setManual] = React.useState('');
       const [manualMode, setManualMode] = React.useState('p2p');
+      const [showPicker, setShowPicker] = React.useState(false);
       const [busy, setBusy] = React.useState('');
       const [error, setError] = React.useState(null);
-
       const [workerOptions, setWorkerOptions] = React.useState({ workspaces: [], presets: [] });
+
       const load = React.useCallback(async () => {
         try {
           const value = await rpc(connection, API.userMonitorStatus, {});
@@ -47,9 +48,7 @@ const h = React.createElement;
         setError(null);
         try {
           const value = await operation();
-          if (value) {
-            setMonitor(value);
-          }
+          if (value) setMonitor(value);
         } catch (failure) {
           setError(failure?.message ?? String(failure));
         } finally {
@@ -57,20 +56,28 @@ const h = React.createElement;
         }
       };
 
-      const refreshChats = () => act('chats', async () => {
-        const value = await rpc(connection, API.userMonitorChats, {});
-        setAvailable(Array.isArray(value?.chats) ? value.chats : []);
-        return null;
-      });
       const add = (chat) => act(`add:${chat.chatId}`, () => rpc(connection, API.userMonitorAdd, chat));
       const remove = (chat) => act(`remove:${chat.chatId}`, () => rpc(connection, API.userMonitorRemove, { chatId: chat.chatId }));
       const setChat = (chat, patch) => act(`mode:${chat.chatId}`, () => rpc(connection, API.userMonitorChatSet, { chatId: chat.chatId, ...patch }));
       const setWorker = (patch) => act('worker', () => rpc(connection, API.userMonitorWorkerSet, patch));
-      const toggle = () => act('toggle', () => rpc(connection, API.userMonitorEnable, {
-        enabled: monitor?.enabled !== true,
-      }));
+      const toggle = () => act('toggle', () => rpc(connection, API.userMonitorEnable, { enabled: monitor?.enabled !== true }));
       const poll = () => act('poll', () => rpc(connection, API.userMonitorPoll, {}));
       const flushPending = () => act('flush', () => rpc(connection, API.userMonitorFlush, {}));
+      const markRead = () => act('read', () => rpc(connection, API.userMonitorRead, {}));
+      const clearAll = () => act('clear', () => rpc(connection, API.userMonitorClear, {}));
+
+      const togglePicker = () => {
+        const next = !showPicker;
+        setShowPicker(next);
+        if (next && !available) {
+          void act('chats', async () => {
+            const value = await rpc(connection, API.userMonitorChats, {});
+            setAvailable(Array.isArray(value?.chats) ? value.chats : []);
+            return null;
+          });
+        }
+      };
+
       const addManual = () => {
         const chatId = manual.trim();
         if (!chatId) return;
@@ -81,79 +88,103 @@ const h = React.createElement;
         });
       };
 
-      const markRead = () => act('read', () => rpc(connection, API.userMonitorRead, {}));
-      const clearAll = () => act('clear', () => rpc(connection, API.userMonitorClear, {}));
-
       const chats = Array.isArray(monitor?.chats) ? monitor.chats : [];
       const monitored = new Set(chats.map((chat) => chat.chatId));
       const candidates = (available ?? []).filter((chat) => !monitored.has(chat.chatId));
+      const pendingTotal = chats.reduce((sum, chat) => sum + (chat.pendingBatch || 0), 0);
+      const unreadChats = chats.filter((chat) => (chat.messages ?? []).some((message) => !message.read));
       const formatTime = (ms) => (Number.isFinite(ms) && ms > 0 ? new Date(ms).toLocaleTimeString() : '—');
 
-      const chatRows = chats.length === 0
-        ? h('p', { style: S.hint }, t('还没有监听会话。点“选择会话”添加。', 'No monitored chats yet. Choose chats to add.'))
-        : chats.map((chat) => h('div', {
-          key: chat.chatId,
-          style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0', borderTop: '1px solid var(--dsw-alias-border-l1)' },
-        },
-        h('div', { style: { flex: 1, minWidth: 0 } },
-          h('div', { style: { fontSize: '13px' } }, chat.name || chat.chatId),
-          h('div', { style: S.hint },
-            `${chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group')} · ${chat.chatId}`,
-            chat.pendingBatch ? ` · ${t('待处理', 'pending')} ${chat.pendingBatch}` : '',
-            chat.handled ? ` · ${t('已处理', 'handled')} ${chat.handled}` : '',
-            chat.lastDispatchAt ? ` · ${t('上次派发', 'last dispatch')} ${formatTime(chat.lastDispatchAt)}` : '',
-            chat.lastError ? h('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, ` · ${chat.lastError}`) : null)),
-        h('select', {
-          style: { ...S.input, width: 'auto', height: '28px', fontSize: '12px' },
-          value: chat.mode ?? (chat.chatMode === 'p2p' ? 'all' : 'mention'),
-          disabled: busy === `mode:${chat.chatId}`,
-          onChange: (event) => void setChat(chat, { mode: event.target.value }),
-        },
-        h('option', { value: 'all' }, t('全部消息', 'All')),
-        h('option', { value: 'mention' }, t('仅@我/回复我', 'Mentions & replies')),
-        h('option', { value: 'keyword' }, t('关键词', 'Keywords'))),
-        chat.mode === 'keyword'
-          ? h('input', {
-            style: { ...S.input, width: '140px', height: '28px', fontSize: '12px' },
-            defaultValue: (chat.keywords ?? []).join('，'),
-            placeholder: t('关键词，用逗号分隔', 'Keywords, comma separated'),
-            onBlur: (event) => {
-              const keywords = event.target.value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
-              void setChat(chat, { keywords });
-            },
-          })
-          : null,
-        h('select', {
-          style: { ...S.input, width: 'auto', height: '28px', fontSize: '12px' },
-          value: chat.replyMode === 'auto' && chat.replyToBots ? 'auto-bots' : (chat.replyMode ?? 'watch'),
-          disabled: busy === `mode:${chat.chatId}`,
-          title: t('处理方式', 'Handling'),
-          onChange: (event) => {
-            const value = event.target.value;
-            void setChat(chat, value === 'auto-bots'
-              ? { replyMode: 'auto', replyToBots: true }
-              : { replyMode: value, replyToBots: false });
-          },
-        },
-        h('option', { value: 'watch' }, t('只记录', 'Record only')),
-        h('option', { value: 'auto' }, t('自动回复', 'Auto reply')),
-        h('option', { value: 'auto-bots' }, t('自动回复（含机器人）', 'Auto reply (bots too)'))),
-        h('button', { type: 'button', className: 'bxf-mini', disabled: busy === `remove:${chat.chatId}`, onClick: () => void remove(chat) },
-          t('移除', 'Remove'))));
+      const selectStyle = { ...S.input, width: 'auto', height: '28px', fontSize: '12px', paddingRight: '26px' };
+      const sectionHead = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', margin: '2px 0 6px' };
+      const sectionTitle = { fontSize: '12px', fontWeight: 600 };
+      const divider = { borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: '10px', marginTop: '2px' };
 
-      const candidateRows = available
-        ? (candidates.length === 0
-          ? h('p', { style: S.hint }, t('没有可添加的会话。', 'No chats available to add.'))
-          : h('div', { style: { display: 'grid', gap: '4px', maxHeight: '220px', overflow: 'auto' } },
-            candidates.slice(0, 300).map((chat) => h('div', {
-              key: chat.chatId,
-              style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 0' },
+      const chatRow = (chat) => {
+        const unread = (chat.messages ?? []).filter((message) => !message.read);
+        return h('div', { key: chat.chatId, style: { display: 'grid', gap: '6px', padding: '9px 0', borderTop: '1px solid var(--dsw-alias-border-l1)' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
+            h('div', { style: { flex: '1 1 160px', minWidth: 0 } },
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+                h('span', { style: { fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } },
+                  chat.name || chat.chatId),
+                unread.length > 0 ? h('span', { style: S.badge('warn') }, unread.length) : null),
+              h('div', { style: { ...S.hint, marginTop: '1px' } },
+                `${chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group')} · ${chat.chatId}`,
+                chat.lastDispatchAt ? ` · ${t('上次派发', 'last dispatch')} ${formatTime(chat.lastDispatchAt)}` : '')),
+            h('select', {
+              style: selectStyle,
+              'aria-label': t('触发规则', 'Trigger'),
+              value: chat.mode ?? (chat.chatMode === 'p2p' ? 'all' : 'mention'),
+              disabled: busy === `mode:${chat.chatId}`,
+              onChange: (event) => void setChat(chat, { mode: event.target.value }),
             },
-            h('div', { style: { flex: 1, minWidth: 0 } },
-              h('div', { style: { fontSize: '13px' } }, chat.name || chat.chatId),
-              h('div', { style: S.hint }, chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group'))),
-            h('button', { type: 'button', className: 'bxf-mini', disabled: busy === `add:${chat.chatId}`, onClick: () => void add(chat) },
-              t('添加', 'Add'))))))
+            h('option', { value: 'all' }, t('全部消息', 'All')),
+            h('option', { value: 'mention' }, t('@与回复', 'Mentions')),
+            h('option', { value: 'keyword' }, t('关键词', 'Keywords'))),
+            h('select', {
+              style: selectStyle,
+              'aria-label': t('处理方式', 'Handling'),
+              value: chat.replyMode === 'auto' && chat.replyToBots ? 'auto-bots' : (chat.replyMode ?? 'watch'),
+              disabled: busy === `mode:${chat.chatId}`,
+              onChange: (event) => {
+                const value = event.target.value;
+                void setChat(chat, value === 'auto-bots'
+                  ? { replyMode: 'auto', replyToBots: true }
+                  : { replyMode: value, replyToBots: false });
+              },
+            },
+            h('option', { value: 'watch' }, t('只记录', 'Record')),
+            h('option', { value: 'auto' }, t('自动回复', 'Auto reply')),
+            h('option', { value: 'auto-bots' }, t('自动回复（含机器人）', 'Auto reply (bots)')))),
+          chat.mode === 'keyword'
+            ? h('input', {
+              style: { ...S.input, height: '30px', fontSize: '12px' },
+              defaultValue: (chat.keywords ?? []).join('，'),
+              placeholder: t('关键词，用逗号分隔，回车保存', 'Keywords, comma separated; blur to save'),
+              onBlur: (event) => {
+                const keywords = event.target.value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
+                void setChat(chat, { keywords });
+              },
+            })
+            : null,
+          chat.lastError
+            ? h('div', { style: { ...S.hint, color: 'var(--dsw-alias-state-error-primary)' } }, chat.lastError)
+            : null);
+      };
+
+      const unreadSection = unreadChats.length > 0
+        ? h('div', { style: { display: 'grid', gap: '6px' } },
+          unreadChats.map((chat) => h('div', { key: `u:${chat.chatId}`, style: { display: 'grid', gap: '2px' } },
+            h('div', { style: { ...S.hint, fontWeight: 600 } }, `${chat.name || chat.chatId} · ${(chat.messages ?? []).filter((message) => !message.read).length}`),
+            (chat.messages ?? []).filter((message) => !message.read).slice(-3).map((message) => h('div', {
+              key: message.messageId,
+              style: {
+                fontSize: '12px', color: 'var(--dsw-alias-label-secondary)',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              },
+            }, `${message.senderName || t('未知', 'Unknown')}：${message.text}`)))))
+        : null;
+
+      const pickerSection = showPicker
+        ? h('div', { style: { display: 'grid', gap: '2px', maxHeight: '240px', overflow: 'auto', paddingTop: '4px' } },
+          available === null
+            ? h('p', { style: S.hint }, t('正在读取会话列表…', 'Loading chats…'))
+            : candidates.length === 0
+              ? h('p', { style: S.hint }, t('没有可添加的会话。', 'No chats available to add.'))
+              : candidates.slice(0, 300).map((chat) => h('div', {
+                key: chat.chatId,
+                style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 0' },
+              },
+              h('div', { style: { flex: 1, minWidth: 0 } },
+                h('div', { style: { fontSize: '13px' } }, chat.name || chat.chatId),
+                h('div', { style: S.hint }, chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group'))),
+              h('button', {
+                type: 'button',
+                className: 'bxf-mini',
+                disabled: busy === `add:${chat.chatId}`,
+                onClick: () => void add(chat),
+              }, busy === `add:${chat.chatId}` ? t('添加中…', 'Adding…') : t('添加', 'Add')))))
         : null;
 
       return h(Panel, {
@@ -167,85 +198,97 @@ const h = React.createElement;
         }, monitor?.enabled ? t('停止监听', 'Stop') : t('开始监听', 'Start')),
       },
       h('p', { style: { ...S.hint, margin: '0 0 10px' } },
-        t('定时检查已选会话的新消息，记录到本地收件箱。新增监听从当前时间开始，不回补历史；不调用模型，也不自动回复。',
-          'Polls selected chats into a local inbox. New monitors start at the current time and do not backfill; no model calls and no automatic replies.'),
-        h('br'),
-        t('会话列表已同时包含群聊和最近私聊；找不到时可手动填 chat_id。',
-          'The picker includes groups and recent direct chats; enter a chat_id manually if one is missing.')),
+        t('定时拉取已选会话的新消息并记录；流式卡片收尾后才入库。「自动回复」会把新消息攒成一批交给 Worker 会话处理。',
+          'Polls selected chats into a local inbox; streaming cards land after they finish. Auto reply hands each batch to the worker session.')),
       error ? h('div', { style: S.error }, error) : null,
       !monitor
         ? h('p', { style: S.hint }, t('正在读取监听状态…', 'Loading monitor status…'))
-        : h('div', { style: { display: 'grid', gap: '8px' } },
-          h('div', { style: S.row },
+        : h('div', { style: { display: 'grid', gap: '10px' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
             h('span', { style: S.badge(monitor.enabled ? 'ok' : 'muted') },
               monitor.enabled ? t('监听中', 'Watching') : t('已暂停', 'Paused')),
-            h('span', { style: S.hint }, `${t('最后检查', 'Last check')}：${formatTime(chats[0]?.lastPollAt)}`),
-            h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'poll', onClick: () => void poll() },
-              t('立即检查', 'Check now')),
-            h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'flush', onClick: () => void flushPending() },
-              t('处理待办', 'Flush pending'))),
-          chatRows,
+            h('span', { style: { ...S.hint, marginTop: 0 } }, `${t('最后检查', 'Last check')} ${formatTime(chats[0]?.lastPollAt)}`),
+            h('div', { style: { ...S.row, marginLeft: 'auto', gap: '6px' } },
+              h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'poll', onClick: () => void poll() },
+                busy === 'poll' ? t('检查中…', 'Checking…') : t('立即检查', 'Check now')),
+              pendingTotal > 0
+                ? h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'flush', onClick: () => void flushPending() },
+                  busy === 'flush' ? t('派发中…', 'Dispatching…') : `${t('重试派发', 'Retry dispatch')} ${pendingTotal}`)
+                : null)),
+
+          h('div', null,
+            h('div', { style: sectionHead }, h('span', { style: sectionTitle }, t('会话', 'Chats'))),
+            chats.length === 0
+              ? h('p', { style: S.hint }, t('还没有监听会话，先在下面添加一个。', 'No chats yet — add one below.'))
+              : h('div', null, chats.map(chatRow))),
+
+          h('div', { style: divider },
+            h('div', { style: sectionHead },
+              h('span', { style: sectionTitle }, t('添加会话', 'Add chat')),
+              h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'chats', onClick: togglePicker },
+                busy === 'chats' ? t('读取中…', 'Loading…') : (showPicker ? t('收起', 'Close') : t('选择会话', 'Choose')))),
+            pickerSection,
+            h('div', { style: { ...S.row, marginTop: showPicker ? '6px' : 0 } },
+              h('input', {
+                style: { ...S.input, flex: '1 1 180px', minWidth: 0, height: '30px', fontSize: '12px' },
+                value: manual,
+                placeholder: t('手动填 chat_id（oc_…）', 'chat_id (oc_…)'),
+                onChange: (event) => setManual(event.target.value),
+                onKeyDown: (event) => { if (event.key === 'Enter') addManual(); },
+              }),
+              h('select', {
+                style: { ...S.input, width: 'auto', height: '30px', fontSize: '12px' },
+                value: manualMode,
+                'aria-label': t('会话类型', 'Chat type'),
+                onChange: (event) => setManualMode(event.target.value),
+              },
+              h('option', { value: 'p2p' }, t('私聊', 'Direct')),
+              h('option', { value: 'group' }, t('群聊', 'Group'))),
+              h('button', {
+                type: 'button', className: 'bxf-mini',
+                disabled: busy === 'manual' || !manual.trim(),
+                onClick: addManual,
+              }, busy === 'manual' ? t('添加中…', 'Adding…') : t('添加', 'Add')))),
+
+          h('div', { style: divider },
+            h('div', { style: sectionHead }, h('span', { style: sectionTitle }, t('Worker 会话', 'Worker session'))),
+            h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px' } },
+              h('label', { style: { display: 'grid', gap: '4px' } },
+                h('span', { style: { ...S.hint, marginTop: 0 } }, t('分组', 'Group')),
+                h('select', {
+                  style: { ...S.input, height: '30px', fontSize: '12px' },
+                  value: monitor.worker?.workspaceId || '',
+                  disabled: busy === 'worker',
+                  onChange: (event) => void setWorker({ workspaceId: event.target.value, workspacePath: '' }),
+                },
+                h('option', { value: '' }, t('默认工作区', 'Default workspace')),
+                workerOptions.workspaces.map((item) => h('option', { key: item.id, value: item.id },
+                  `${item.title || item.id}${item.path ? ` · ${item.path}` : ''}`)))),
+              h('label', { style: { display: 'grid', gap: '4px' } },
+                h('span', { style: { ...S.hint, marginTop: 0 } }, t('预设', 'Preset')),
+                h('select', {
+                  style: { ...S.input, height: '30px', fontSize: '12px' },
+                  value: monitor.worker?.preset || '',
+                  disabled: busy === 'worker',
+                  onChange: (event) => void setWorker({ preset: event.target.value }),
+                },
+                h('option', { value: '' }, t('默认（standard）', 'Default (standard)')),
+                workerOptions.presets.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id))))),
+            h('p', { style: S.hint },
+              t('自动回复的 Worker 会话建在这个分组下；改动后下一次派发自动换新会话。',
+                'Auto-reply workers are created in this group; changes apply on the next dispatch.'))),
+
           monitor.unreadTotal > 0
-            ? h('div', { style: { display: 'grid', gap: '6px', paddingTop: '6px', borderTop: '1px solid var(--dsw-alias-border-l1)' } },
-              h('div', { style: S.row },
-                h('span', { style: S.badge('warn') }, `${monitor.unreadTotal} ${t('条未读', 'unread')}`),
-                h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'read', onClick: () => void markRead() },
-                  t('全部已读', 'Mark read')),
-                h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'clear', onClick: () => void clearAll() },
-                  t('清空记录', 'Clear'))),
-              chats.filter((chat) => (chat.messages ?? []).some((message) => !message.read)).map((chat) => h('div', { key: `m:${chat.chatId}`, style: { display: 'grid', gap: '2px' } },
-                h('div', { style: S.hint }, `${chat.name || chat.chatId}${chat.unread ? ` · ${chat.unread}` : ''}`),
-                (chat.messages ?? []).filter((message) => !message.read).slice(-3).map((message) => h('div', {
-                  key: message.messageId,
-                  style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-                }, `${message.senderName || t('未知', 'Unknown')}：${message.text}`)))))
-            : null,
-          h('div', { style: { display: 'grid', gap: '6px', paddingTop: '8px', borderTop: '1px solid var(--dsw-alias-border-l1)' } },
-            h('div', { style: { fontSize: '12px', fontWeight: 600 } }, t('Worker 会话', 'Worker session')),
-            h('div', { style: S.row },
-              h('span', { style: { ...S.hint, minWidth: '42px' } }, t('分组', 'Group')),
-              h('select', {
-                style: { ...S.input, flex: 1, minWidth: 0, height: '30px', fontSize: '12px' },
-                value: monitor.worker?.workspaceId || '',
-                disabled: busy === 'worker',
-                onChange: (event) => void setWorker({ workspaceId: event.target.value, workspacePath: '' }),
-              },
-              h('option', { value: '' }, t('默认工作区', 'Default workspace')),
-              workerOptions.workspaces.map((item) => h('option', { key: item.id, value: item.id },
-                `${item.title || item.id}${item.path ? ` · ${item.path}` : ''}`)))),
-            h('div', { style: S.row },
-              h('span', { style: { ...S.hint, minWidth: '42px' } }, t('预设', 'Preset')),
-              h('select', {
-                style: { ...S.input, flex: 1, minWidth: 0, height: '30px', fontSize: '12px' },
-                value: monitor.worker?.preset || '',
-                disabled: busy === 'worker',
-                onChange: (event) => void setWorker({ preset: event.target.value }),
-              },
-              h('option', { value: '' }, t('默认（standard）', 'Default (standard)')),
-              workerOptions.presets.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id)))),
-            h('div', { style: S.hint },
-              t('自动回复的 Worker 会话会建在这个分组下；改动后下一次派发自动换新会话。',
-                'Auto-reply workers are created in this group; changes take effect on the next dispatch.'))),
-          h('div', { style: { ...S.row, marginTop: '4px' } },
-            h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'chats', onClick: () => void refreshChats() },
-              busy === 'chats' ? t('正在读取…', 'Loading…') : t('选择会话', 'Choose chats'))),
-          candidateRows,
-          h('div', { style: { ...S.row, marginTop: '4px' } },
-            h('input', {
-              style: { ...S.input, flex: 1, minWidth: 0 },
-              value: manual,
-              placeholder: t('手动填 chat_id（oc_…）', 'Enter chat_id (oc_…)'),
-              onChange: (event) => setManual(event.target.value),
-            }),
-            h('select', {
-              style: S.input,
-              value: manualMode,
-              onChange: (event) => setManualMode(event.target.value),
-            },
-            h('option', { value: 'p2p' }, t('私聊', 'Direct')),
-            h('option', { value: 'group' }, t('群聊', 'Group'))),
-            h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'manual' || !manual.trim(), onClick: addManual },
-              t('添加', 'Add')))));
+            ? h('div', { style: divider },
+              h('div', { style: sectionHead },
+                h('span', { style: sectionTitle }, `${monitor.unreadTotal} ${t('条未读', 'unread')}`),
+                h('div', { style: { ...S.row, gap: '6px' } },
+                  h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'read', onClick: () => void markRead() },
+                    t('全部已读', 'Mark read')),
+                  h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'clear', onClick: () => void clearAll() },
+                    t('清空记录', 'Clear')))),
+              unreadSection)
+            : null));
     }
 
 
