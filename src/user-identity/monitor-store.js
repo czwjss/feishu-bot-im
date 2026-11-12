@@ -127,6 +127,7 @@ export function normalizeMonitorMessage(value) {
     senderName: cleanString(source.senderName),
     senderOpenId: cleanString(source.senderOpenId),
     senderType: cleanString(source.senderType),
+    msgType: cleanString(source.msgType),
     createTime: cleanString(source.createTime),
     text,
     // outcome 非空表示已被自动回复或自动跳过；read 仍表示人工/流程已读。

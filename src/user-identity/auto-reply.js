@@ -57,6 +57,7 @@ export class AutoReplyEngine {
   #setTimeout;
   #clearTimeout;
   #sessionGuard;
+  #refreshMessage;
   #debounceMs;
   #maxWaitMs;
   #timers = new Map();
@@ -70,6 +71,7 @@ export class AutoReplyEngine {
     setTimeout: setTimeoutImpl = setTimeout,
     clearTimeout: clearTimeoutImpl = clearTimeout,
     sessionGuard = null,
+    refreshMessage = null,
     debounceMs = BATCH_DEBOUNCE_MS,
     maxWaitMs = BATCH_MAX_WAIT_MS,
   } = {}) {
@@ -82,6 +84,7 @@ export class AutoReplyEngine {
     this.#setTimeout = setTimeoutImpl;
     this.#clearTimeout = clearTimeoutImpl;
     this.#sessionGuard = sessionGuard;
+    this.#refreshMessage = refreshMessage;
     this.#debounceMs = debounceMs;
     this.#maxWaitMs = maxWaitMs;
   }
@@ -153,11 +156,22 @@ export class AutoReplyEngine {
       return null;
     }
 
+    let promptMessages = botOnly ? batchMessages : humanMessages;
+    const pendingCards = promptMessages.filter((message) => message.msgType === 'interactive');
+    if (pendingCards.length > 0) {
+      if (!(await this.#refreshCards(chat.chatId, pendingCards))) {
+        this.#logger?.info?.(`[im-feishu] ${chat.chatId} 卡片还在流式输出，等下一轮再派发`);
+        return null;
+      }
+      promptMessages = this.#storedMessages(chat.chatId, ids)
+        .filter((message) => (botOnly ? true : message.senderType !== 'app'));
+    }
+
     try {
       const sessionId = await this.#ensureSession(chat, entry);
       await this.#harness.prompt(sessionId, renderBatchPrompt({
         chat,
-        messages: previewMessages(botOnly ? batchMessages : humanMessages),
+        messages: previewMessages(promptMessages),
         batchId: batchIdOf(),
       }));
     } catch (error) {
@@ -218,6 +232,33 @@ export class AutoReplyEngine {
     if (guard.isArchived?.(sessionId)) return false;
     if (guard.exists?.(sessionId) === false) return false;
     return null;
+  }
+
+  /**
+   * 流式卡片会原地刷新：派发前重新拉一次最新文本。
+   * 仍在「正在处理」状态时返回 false，让批次留在队列里等下一轮。
+   */
+  async #refreshCards(chatId, messages) {
+    if (!this.#refreshMessage) return true;
+    const entry = this.#store.state.chats[chatId] ?? {};
+    let next = entry.messages ?? [];
+    for (const message of messages) {
+      const latest = await this.#refreshMessage(message.messageId).catch(() => null);
+      if (!latest?.text) continue;
+      if (/正在处理|处理中|已收到|正在思考|思考中/.test(latest.text)) return false;
+      if (latest.text === message.text) continue;
+      next = next.map((item) => (item.messageId === message.messageId
+        ? { ...item, text: latest.text }
+        : item));
+    }
+    if (next !== (entry.messages ?? [])) await this.#patch(chatId, { messages: next });
+    return true;
+  }
+
+  /** 从状态里取出这批消息的最新副本。 */
+  #storedMessages(chatId, ids) {
+    const set = new Set(ids);
+    return (this.#store.state.chats[chatId]?.messages ?? []).filter((message) => set.has(message.messageId));
   }
 
   /** 该会话在窗口内是否已经派发过（用于机器人批次限速）。 */

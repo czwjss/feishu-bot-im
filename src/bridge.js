@@ -178,7 +178,9 @@ export class FeishuBridge {
       return;
     }
 
-    const text = (textOfContentOrPost(message) ?? '').replace(/@_user_\d+/g, '').trim();
+    // 流式卡片会原地刷新：等它收尾再处理，否则模型只看到半截内容。
+    const settled = await this.#settleCardMessage(message);
+    const text = (textOfContentOrPost(settled) ?? '').replace(/@_user_\d+/g, '').trim();
     this.#chatTypes.set(chatKey, message.chat_type);
 
     if (topic && text) {
@@ -712,6 +714,30 @@ export class FeishuBridge {
   }
 
   /** The message the user replied to; Feishu events carry only its id. */
+  /**
+   * 流式卡片收尾：卡片内容会原地刷新，刚推送时往往只有「正在处理」。
+   * 这里等一小段时间并重新拉取，直到文本不再变化或到达尝试上限。
+   */
+  async #settleCardMessage(message) {
+    if (message?.message_type !== 'interactive') return message;
+    const transient = /正在处理|处理中|已收到|正在思考|思考中/;
+    let current = message;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 2_000);
+        timer?.unref?.();
+      });
+      const latest = await this.#bot.getMessage?.(message.message_id).catch(() => null);
+      if (!latest?.bodyContent) continue;
+      const next = { ...current, content: latest.bodyContent };
+      const text = textOfContentOrPost(next) ?? '';
+      const done = text && !transient.test(text) && text === textOfContentOrPost(current);
+      current = next;
+      if (done) return current;
+    }
+    return current;
+  }
+
   async #quotedMessage(message) {
     const parent = await this.#parentMessage(message);
     if (!parent) return null;

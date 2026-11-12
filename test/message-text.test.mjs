@@ -46,3 +46,9 @@ assert.equal(textOfContentOrPost({ message_type: 'interactive', content: cardCon
 assert.equal(textOfContentOrPost({ message_type: 'interactive', content: JSON.stringify({ schema: '2.0', body: { elements: [{ tag: 'markdown', content: '只有正文' }] } }) }), '只有正文');
 assert.equal(textOfContentOrPost({ message_type: 'interactive', content: '{}' }), null);
 console.log('feishu card inbound: 5 assertions passed');
+
+// 流式卡片收尾判定：正文里带「正在处理」就是还没写完。
+const streaming = (text) => /正在处理|处理中|已收到|正在思考|思考中/.test(text);
+assert.equal(streaming('⏳ 已收到，正在处理…'), true);
+assert.equal(streaming('评审改到下午三点'), false);
+console.log('feishu streaming card settle: 2 assertions passed');

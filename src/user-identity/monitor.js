@@ -77,6 +77,11 @@ export class UserMonitorManager {
           store,
           harness,
           sessionGuard,
+          refreshMessage: async (messageId) => {
+            const accessToken = await this.#auth.requireAccessToken();
+            const message = await this.#getMessage({ accessToken, messageId }).catch(() => null);
+            return message ? { text: message.text, msgType: message.msgType } : null;
+          },
           logger,
           now,
           setTimeout: setTimeoutImpl,
@@ -526,6 +531,7 @@ export class UserMonitorManager {
               || (item.senderType === 'app' ? '机器人' : ''),
             senderOpenId: item.senderOpenId ?? '',
             senderType: item.senderType ?? '',
+            msgType: item.msgType ?? '',
             createTime: item.createTime ?? new Date(time).toISOString(),
             text: this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, roster),
             read: false,

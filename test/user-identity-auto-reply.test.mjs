@@ -213,6 +213,39 @@ try {
   });
   assert.equal(await engine.flush({ ...botChat }), null, 'bot batches are throttled within 10 minutes');
 
+  // 6b) 流式卡片：仍在「正在处理」时不派发，收尾后才用完整文本派发。
+  let cardText = '⏳ 正在处理…';
+  const cardEngine = new AutoReplyEngine({
+    store,
+    harness,
+    now: clock.now,
+    refreshMessage: async () => ({ text: cardText, msgType: 'interactive' }),
+    setTimeout: clock.setTimeout.bind(clock),
+    clearTimeout: clock.clearTimeout.bind(clock),
+  });
+  const cardChat = { ...store.config.chats[0], replyMode: 'auto' };
+  await store.saveState({
+    chats: {
+      [chatId]: {
+        ...store.state.chats[chatId],
+        lastDispatchAt: 0,
+        messages: [{
+          messageId: 'om_card', senderName: '朋友', senderOpenId: 'ou_friend', senderType: 'user',
+          msgType: 'interactive', text: '⏳ 正在处理…', createTime: new Date(clock.now()).toISOString(), read: false,
+        }],
+        batch: { messageIds: ['om_card'], firstAt: clock.now(), lastAt: clock.now() },
+      },
+    },
+  });
+  const promptsBeforeCard = prompts.length;
+  assert.equal(await cardEngine.flush({ ...cardChat }), null, 'streaming card is not dispatched early');
+  assert.equal(prompts.length, promptsBeforeCard, 'no prompt while the card streams');
+  assert.equal(store.state.chats[chatId].batch.messageIds.length, 1, 'batch kept for the next round');
+
+  cardText = '评审改到下午三点';
+  assert.ok(await cardEngine.flush({ ...cardChat }), 'settled card dispatches');
+  assert.match(prompts.at(-1).text, /评审改到下午三点/, 'prompt uses the settled text');
+
   // 7) 工作区/预设变化会重建 Worker 会话
   await store.saveState({
     chats: {
@@ -275,4 +308,4 @@ try {
   await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-console.log('user identity auto reply: 32 assertions passed');
+console.log('user identity auto reply: 37 assertions passed');
