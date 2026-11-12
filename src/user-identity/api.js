@@ -8,7 +8,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, resolve } from 'node:path';
 
 import { normalizeCardColor, noticeCard } from '../cards.js';
-import { interactiveTextOfContent } from '../message-text.js';
+import { cardStreamingOf, interactiveTextOfContent } from '../message-text.js';
 import { FeishuApiError, describeApiCode } from './errors.js';
 
 export const FEISHU_API_ORIGIN = 'https://open.feishu.cn';
@@ -331,6 +331,7 @@ export function normalizeMessage(item) {
     senderType: stringOf(sender.sender_type),
     deleted: Boolean(source.deleted),
     mentions: normalizeMentions(source),
+    streaming: cardStreamingOf(source.body?.content),
     text: extractMessageText(source),
   });
 }

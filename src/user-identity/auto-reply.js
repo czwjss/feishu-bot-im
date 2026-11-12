@@ -235,8 +235,8 @@ export class AutoReplyEngine {
   }
 
   /**
-   * 流式卡片会原地刷新：派发前重新拉一次最新文本。
-   * 仍在「正在处理」状态时返回 false，让批次留在队列里等下一轮。
+   * 流式卡片会原地刷新：派发前重新拉一次最新内容。
+   * `config.streaming_mode` 仍为 true 时返回 false，让批次留在队列里等下一轮。
    */
   async #refreshCards(chatId, messages) {
     if (!this.#refreshMessage) return true;
@@ -244,11 +244,13 @@ export class AutoReplyEngine {
     let next = entry.messages ?? [];
     for (const message of messages) {
       const latest = await this.#refreshMessage(message.messageId).catch(() => null);
-      if (!latest?.text) continue;
-      if (/正在处理|处理中|已收到|正在思考|思考中/.test(latest.text)) return false;
-      if (latest.text === message.text) continue;
+      if (!latest) continue;
+      // config.streaming_mode 为 true 表示还在增量刷新，等它收尾。
+      if (latest.streaming === true) return false;
+      const text = typeof latest.text === 'string' ? latest.text : '';
+      if (!text || text === message.text) continue;
       next = next.map((item) => (item.messageId === message.messageId
-        ? { ...item, text: latest.text }
+        ? { ...item, text, streaming: latest.streaming ?? null }
         : item));
     }
     if (next !== (entry.messages ?? [])) await this.#patch(chatId, { messages: next });

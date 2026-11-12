@@ -669,12 +669,17 @@ offline_access
 飞书的流式卡片会**原地刷新**同一个 message_id，先推送「⏳ 已收到，正在处理…」，
 再逐步替换成完整正文。两处都做了收尾等待：
 
+判定依据是卡片 JSON 2.0 的 `config.streaming_mode`（不是猜文本）：
+
 | 位置 | 做法 |
 |---|---|
-| 机器人入站（`bridge.js`） | 收到 `interactive` 后等 2 秒重新拉取，最多 3 次，直到正文稳定且不含「正在处理」 |
-| 分身监听（`auto-reply.js`） | 派发前对批次里的卡片调用 `getMessage` 刷新文本；仍是流式状态就保留批次等下一轮 |
+| 机器人入站（`bridge.js`） | `streaming_mode === true` 时每 2 秒重新拉取，最多 6 次（约 12 秒），关闭后再处理 |
+| 分身监听（`auto-reply.js`） | 派发前对卡片调用 `getMessage` 刷新；`streaming_mode` 仍为 true 就保留批次等下一轮 |
 
-判定关键字：`正在处理 / 处理中 / 已收到 / 正在思考 / 思考中`。
+依据：飞书[流式更新说明](https://open.feishu.cn/document/cardkit-v1/streaming-updates-openapi-overview)里
+`config.streaming_mode` 表示卡片是否处于流式更新模式，收尾时发送方会置为 false。
+`getMessage` / `listMessages` 都带 `card_msg_content_type=user_card_content`，
+返回的就是带 `config` 的 JSON 2.0 内容，所以不需要额外的卡片接口。
 
 ### 自动回复（已实现，`replyMode: auto`）
 

@@ -215,11 +215,12 @@ try {
 
   // 6b) 流式卡片：仍在「正在处理」时不派发，收尾后才用完整文本派发。
   let cardText = '⏳ 正在处理…';
+  let cardStreaming = true;
   const cardEngine = new AutoReplyEngine({
     store,
     harness,
     now: clock.now,
-    refreshMessage: async () => ({ text: cardText, msgType: 'interactive' }),
+    refreshMessage: async () => ({ text: cardText, msgType: 'interactive', streaming: cardStreaming }),
     setTimeout: clock.setTimeout.bind(clock),
     clearTimeout: clock.clearTimeout.bind(clock),
   });
@@ -243,6 +244,7 @@ try {
   assert.equal(store.state.chats[chatId].batch.messageIds.length, 1, 'batch kept for the next round');
 
   cardText = '评审改到下午三点';
+  cardStreaming = false;
   assert.ok(await cardEngine.flush({ ...cardChat }), 'settled card dispatches');
   assert.match(prompts.at(-1).text, /评审改到下午三点/, 'prompt uses the settled text');
 

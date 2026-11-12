@@ -80,7 +80,7 @@ export class UserMonitorManager {
           refreshMessage: async (messageId) => {
             const accessToken = await this.#auth.requireAccessToken();
             const message = await this.#getMessage({ accessToken, messageId }).catch(() => null);
-            return message ? { text: message.text, msgType: message.msgType } : null;
+            return message ? { text: message.text, msgType: message.msgType, streaming: message.streaming } : null;
           },
           logger,
           now,
@@ -532,6 +532,7 @@ export class UserMonitorManager {
             senderOpenId: item.senderOpenId ?? '',
             senderType: item.senderType ?? '',
             msgType: item.msgType ?? '',
+            streaming: typeof item.streaming === 'boolean' ? item.streaming : null,
             createTime: item.createTime ?? new Date(time).toISOString(),
             text: this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, roster),
             read: false,

@@ -5,7 +5,7 @@
  * single edited message → final answer. One chat maps to one DSH Session.
  */
 import { TurnRunner } from './turn.js';
-import { chatIdOfKey, scopedValue, textOfContentOrPost } from './message-text.js';
+import { cardStreamingOf, chatIdOfKey, scopedValue, textOfContentOrPost } from './message-text.js';
 import { approvalCard, questionCard, resolvedApprovalText, newSessionCard, adjustCard, noticeCard } from './cards.js';
 import { isAddressed, isAllowed, senderOpenId } from './access.js';
 import { buildMenuCard, collectMenuData, currentMenuValue, menuOptionLabel, runCommand } from './commands.js';
@@ -715,25 +715,23 @@ export class FeishuBridge {
 
   /** The message the user replied to; Feishu events carry only its id. */
   /**
-   * 流式卡片收尾：卡片内容会原地刷新，刚推送时往往只有「正在处理」。
-   * 这里等一小段时间并重新拉取，直到文本不再变化或到达尝试上限。
+   * 流式卡片收尾：卡片 JSON 2.0 的 config.streaming_mode 为 true 时表示
+   * 内容还在增量刷新，收尾时发送方会置为 false。等它关闭后再交给模型。
    */
   async #settleCardMessage(message) {
     if (message?.message_type !== 'interactive') return message;
-    const transient = /正在处理|处理中|已收到|正在思考|思考中/;
+    // 事件里的卡片内容可能只是实体引用；统一走 getMessage 拿渲染后的 JSON 2.0。
     let current = message;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const streaming = cardStreamingOf(current.content);
+      if (streaming !== true) return current;
       await new Promise((resolve) => {
         const timer = setTimeout(resolve, 2_000);
         timer?.unref?.();
       });
       const latest = await this.#bot.getMessage?.(message.message_id).catch(() => null);
       if (!latest?.bodyContent) continue;
-      const next = { ...current, content: latest.bodyContent };
-      const text = textOfContentOrPost(next) ?? '';
-      const done = text && !transient.test(text) && text === textOfContentOrPost(current);
-      current = next;
-      if (done) return current;
+      current = { ...current, content: latest.bodyContent };
     }
     return current;
   }

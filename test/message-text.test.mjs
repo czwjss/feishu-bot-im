@@ -52,3 +52,11 @@ const streaming = (text) => /正在处理|处理中|已收到|正在思考|思�
 assert.equal(streaming('⏳ 已收到，正在处理…'), true);
 assert.equal(streaming('评审改到下午三点'), false);
 console.log('feishu streaming card settle: 2 assertions passed');
+
+// 卡片流式状态来自 JSON 2.0 的 config.streaming_mode。
+import { cardStreamingOf } from '../src/message-text.js';
+assert.equal(cardStreamingOf(JSON.stringify({ schema: '2.0', config: { streaming_mode: true } })), true);
+assert.equal(cardStreamingOf(JSON.stringify({ schema: '2.0', config: { streaming_mode: false } })), false);
+assert.equal(cardStreamingOf(JSON.stringify({ schema: '1.0', title: '旧卡片' })), null);
+assert.equal(cardStreamingOf('not json'), null);
+console.log('feishu card streaming flag: 4 assertions passed');
