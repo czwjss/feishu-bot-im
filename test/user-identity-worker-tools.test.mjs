@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 
+import { inject as pluginInject } from '../index.js';
 import { installWorkerTools } from '../src/user-identity/worker-tools.js';
+
+// installWorkerTools 会通过 ctx.agents 查找已存在的 Worker Agent；Host 插件
+// 必须先声明该服务注入，否则 Cordis 会在访问时直接抛错。
+assert.ok(pluginInject.includes('agents'), 'host plugin injects the agents service');
 
 const listeners = [];
 const cleanups = [];

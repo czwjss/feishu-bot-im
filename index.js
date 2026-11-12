@@ -25,7 +25,7 @@ import { UserMonitorManager } from './src/user-identity/monitor.js';
 import { MonitorStore, MONITOR_FILE, MONITOR_STATE_FILE } from './src/user-identity/monitor-store.js';
 
 export const name = 'feishu-bot-im';
-export const inject = ['connection', 'credentials', 'typertGateway'];
+export const inject = ['agents', 'connection', 'credentials', 'typertGateway'];
 
 async function version() {
   try {
@@ -129,14 +129,14 @@ export async function apply(ctx, config = {}) {
   const sessionGuard = {
     isArchived: (sessionId) => {
       try {
-        return ctx.workspaceRegistry?.archivedSessionIds?.includes(sessionId) === true;
+        return ctx.get('workspaceRegistry')?.archivedSessionIds?.includes(sessionId) === true;
       } catch {
         return false;
       }
     },
     exists: (sessionId) => {
       try {
-        return Boolean(ctx.sessions?.get?.(sessionId));
+        return Boolean(ctx.get('sessions')?.get?.(sessionId));
       } catch {
         return true;
       }
@@ -151,8 +151,13 @@ export async function apply(ctx, config = {}) {
     logger,
   });
   installUserIdentityContributions(ctx, userIdentityAuth, userMonitor);
-  const workerTools = installWorkerTools(ctx, userMonitor, logger);
-  userMonitor.setWorkerPreparer((sessionId) => workerTools.ensure(sessionId));
+  // 挂载失败不能拖垮整个插件，退化成“Worker 拿不到决策工具”并留下日志。
+  try {
+    const workerTools = installWorkerTools(ctx, userMonitor, logger);
+    userMonitor.setWorkerPreparer((sessionId) => workerTools.ensure(sessionId));
+  } catch (error) {
+    logger.warn?.('[im-feishu] Worker 工具安装失败', error?.message ?? error);
+  }
   userMonitor.start();
 
   const handler = createRpcHandler({ manager, harness, version: pluginVersion, userIdentity, userMonitor });

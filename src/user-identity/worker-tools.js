@@ -50,8 +50,16 @@ export function installWorkerTools(ctx, monitor, logger = null) {
       attach(agent);
     });
     return () => {
-      off?.();
-      dispose();
+      try {
+        off?.();
+      } catch {
+        // 监听可能已随 scope 一起释放
+      }
+      try {
+        dispose();
+      } catch (error) {
+        logger?.warn?.('[im-feishu] Worker 工具卸载失败', error?.message ?? error);
+      }
     };
   }, 'feishu-bot: worker tools');
 
@@ -64,7 +72,10 @@ export function installWorkerTools(ctx, monitor, logger = null) {
       if (agent) return attach(agent);
       if (ctx.agents?.get === undefined) return false;
       if (Date.now() >= deadline) return false;
-      await new Promise((resolve) => setTimeout(resolve, 50)).unref?.();
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 50);
+        timer?.unref?.();
+      });
     }
   };
 
@@ -80,11 +91,6 @@ export function installWorkerTools(ctx, monitor, logger = null) {
     }
     disposers.clear();
   };
-
-  // 插件重载后，把仍然存活的 Worker Agent 补挂一遍。
-  for (const sessionId of monitor.workerSessionIds?.() ?? []) {
-    void ensure(sessionId, { timeoutMs: 200 });
-  }
 
   return { attach, ensure, dispose };
 }
