@@ -83,6 +83,8 @@ class FakeBot {
 
 class FakeHarness {
   created = 0;
+  renames = [];
+  async renameSession(sessionId, title) { this.renames.push({ sessionId, title }); return title; }
   prompts = [];
   cancelled = [];
   models = [{ sessionId: 'sess-test', updatedAt: Date.now(), running: false }];
@@ -1677,6 +1679,15 @@ function message(overrides = {}) {
   const flat = JSON.stringify([...bot.cards.map((item) => item.card), ...bot.patches.map((item) => item.card)]);
   assert.ok(!flat.includes('<at'), 'mentions are erased when the feature is off');
   assert.ok(!flat.includes('ou_user'), 'the erased tag leaves no id behind');
+  bridge.dispose();
+}
+
+// 23b) 新会话按聊天名命名：私聊用对方名字
+{
+  const { harness, bridge } = makeBridge();
+  await bridge.handleMessage(message({ chat_id: 'oc_dm_name', content: JSON.stringify({ text: '你好' }) }));
+  assert.equal(harness.renames.length, 1, 'new session is renamed once');
+  assert.equal(harness.renames[0].title, '测试用户', 'session is titled after the direct chat peer');
   bridge.dispose();
 }
 

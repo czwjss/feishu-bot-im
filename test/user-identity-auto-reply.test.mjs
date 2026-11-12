@@ -160,6 +160,41 @@ try {
   assert.equal(prompts.length, promptsBeforeHandoff, 'no worker prompt for handoff batch');
   assert.deepEqual(store.state.chats[chatId].batch.messageIds, [], 'handoff batch is dropped');
 
+  // 3c) Worker 会话标题跟随聊天名
+  {
+    const titleStore = new MonitorStore({
+      configPath: join(dir, 'title-monitor.json'),
+      statePath: join(dir, 'title-state.json'),
+    });
+    await titleStore.load();
+    await titleStore.saveConfig({ enabled: true, chats: [{ chatId, name: '小金刚', chatMode: 'p2p', mode: 'all' }] });
+    const renames = [];
+    const titleEngine = new AutoReplyEngine({
+      store: titleStore,
+      harness: {
+        async createSession() { return 'sess-titled'; },
+        async prompt() {},
+        async renameSession(sessionId, title) { renames.push({ sessionId, title }); return title; },
+      },
+      now: clock.now,
+      setTimeout: clock.setTimeout.bind(clock),
+      clearTimeout: clock.clearTimeout.bind(clock),
+    });
+    await titleStore.saveState({
+      chats: {
+        [chatId]: {
+          cursorTimeMs: clock.now(),
+          seen: [],
+          messages: [userMessage('om_title', '在吗')],
+          batch: { messageIds: ['om_title'], firstAt: clock.now(), lastAt: clock.now() },
+        },
+      },
+    });
+    assert.ok(await titleEngine.flush({ ...titleStore.config.chats[0] }));
+    assert.deepEqual(renames, [{ sessionId: 'sess-titled', title: '小金刚' }], 'worker session is titled after the chat');
+    assert.equal(titleStore.state.chats[chatId].titleName, '小金刚');
+  }
+
   // 4) 派发失败保留批次，等重试
   failPrompt = true;
   await store.saveState({

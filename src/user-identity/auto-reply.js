@@ -192,7 +192,17 @@ export class AutoReplyEngine {
       sessionId = await this.#harness.createSession(await this.#workerTarget(chat));
       await this.#patch(chat.chatId, { sessionId, workerConfigKey: workerKey });
     }
+    await this.#syncTitle(chat, sessionId, this.#store.state.chats[chat.chatId] ?? entry);
     return sessionId;
+  }
+
+  /** 会话标题跟聊天名保持一致：私聊用对方名字，群聊用群名。 */
+  async #syncTitle(chat, sessionId, entry) {
+    const title = String(chat.name || chat.chatId).trim();
+    if (!title || entry.titleName === title) return;
+    if (typeof this.#harness.renameSession !== 'function') return;
+    const accepted = await this.#harness.renameSession(sessionId, title).catch(() => null);
+    if (accepted) await this.#patch(chat.chatId, { titleName: accepted });
   }
 
   /** Worker 的工作区/预设指纹：变了就换新会话。 */

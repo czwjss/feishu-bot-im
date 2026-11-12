@@ -99,6 +99,14 @@ export class HarnessAdapter {
     return value.sessionId;
   }
 
+  /** Set a user-owned title (pins it against automatic retitling). */
+  async renameSession(sessionId, title) {
+    const value = title === undefined || title === null ? '' : String(title).trim();
+    if (!sessionId || !value) return null;
+    const accepted = await this.invoke('session', 'rename', { request: { sessionId, title: value } });
+    return accepted?.title ?? null;
+  }
+
   async prompt(sessionId, content, { mode = 'queue', signal, requestId } = {}) {
     const parts = typeof content === 'string' ? [{ type: 'text', text: content }] : content;
     const request = {

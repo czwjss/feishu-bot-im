@@ -9,20 +9,8 @@
 export const HANDOFF_KEYWORDS = Object.freeze([
   '转人工',
   '人工客服',
-  '人工处理',
   '找真人',
-  '要真人',
-  '真人客服',
-  '别用机器人',
-  '机器人别回',
-  '找你们负责人',
-  '叫你们负责人',
-  '找你们领导',
   '我要投诉',
-  'human agent',
-  'real person',
-  'talk to a human',
-  'speak to a human',
 ]);
 
 /**

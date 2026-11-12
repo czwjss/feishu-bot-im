@@ -491,10 +491,13 @@ export class FeishuBridge {
         ? { workspaceId, agentPreset: preset }
         : { cwd: workspace, agentPreset: preset });
       await this.#state.bindSession(chatKey, created);
+      const title = await this.#sessionTitle(chatId, chatType, openId);
+      await this.#renameSession(created, title);
       await this.#state.setSessionMeta?.(created, {
         workspace: workspace || null,
         preset: preset ?? null,
         model: override.model ?? this.#config.model ?? null,
+        titleName: title,
       });
       const model = override.model ?? this.#config.model;
       if (model) {
@@ -547,6 +550,7 @@ export class FeishuBridge {
       .filter(Boolean)
       .join('\n\n');
 
+    if (sessionId) await this.#syncSessionTitle(sessionId, chatId, chatType, openId);
     for (let attempt = 0; attempt < 2; attempt += 1) {
       if (!sessionId) {
         try {
@@ -586,6 +590,31 @@ export class FeishuBridge {
   }
 
   /** Cached display name; a failed lookup is remembered briefly. */
+  /** 旧会话第一次见到时补一次标题，之后按 meta 记录跳过。 */
+  async #syncSessionTitle(sessionId, chatId, chatType, openId) {
+    const title = await this.#sessionTitle(chatId, chatType, openId);
+    const meta = this.#state.meta?.[sessionId] ?? {};
+    if (!title || meta.titleName === title) return;
+    await this.#renameSession(sessionId, title);
+    await this.#state.setSessionMeta?.(sessionId, { titleName: title });
+  }
+
+  /** 改名失败不影响主流程（部分部署没有挂载 session-title）。 */
+  async #renameSession(sessionId, title) {
+    if (typeof this.#harness.renameSession !== 'function') return;
+    await this.#harness.renameSession(sessionId, title).catch(() => undefined);
+  }
+
+  /** 会话标题：私聊用对方名字，群聊用群名，取不到时退回 chatId。 */
+  async #sessionTitle(chatId, chatType, openId) {
+    if (chatType === 'p2p') {
+      const name = await this.#senderName(openId);
+      if (name) return name;
+    }
+    const title = await this.#chatName(chatId);
+    return title || chatId;
+  }
+
   async #senderName(openId) {
     if (!openId) return null;
     const cached = this.#userNames.get(openId);
@@ -656,6 +685,8 @@ export class FeishuBridge {
     const sessionId = await this.#harness.createSession(workspaceId
       ? { workspaceId, agentPreset: preset }
       : { cwd: workspace, agentPreset: preset });
+    const topicChatName = await this.#chatName(chatId);
+    await this.#renameSession(sessionId, topicChatName ? `${topicChatName} · ${cleanTitle}` : cleanTitle);
     await this.#state.setSessionMeta?.(sessionId, {
       workspace: workspace || null, preset: preset ?? null, model,
     });
