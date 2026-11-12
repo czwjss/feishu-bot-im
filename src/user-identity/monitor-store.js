@@ -29,7 +29,6 @@ export const DEFAULT_WORKER_PRESET = 'standard';
 export const MAX_WORKER_PRESET = 40;
 export const MAX_PENDING_CARDS = 20;
 /** 消息处理结果：批次已派发给 Worker，后续不再由插件跟踪。 */
-export const MESSAGE_OUTCOMES = Object.freeze(['dispatched', 'dropped']);
 export const DEFAULT_POLL_INTERVAL_MS = 60_000;
 export const MIN_POLL_INTERVAL_MS = 5_000;
 export const MAX_POLL_INTERVAL_MS = 60_000;
@@ -77,7 +76,6 @@ export function normalizeMonitorChat(value) {
     external: source.external === true,
     mode,
     keywords: normalizeKeywords(source.keywords),
-    preset: cleanString(source.preset),
     /** 是否允许“只有机器人消息”的批次触发自动回复（默认关，仅用于测试）。 */
     replyToBots: source.replyToBots === true,
   });
@@ -120,7 +118,6 @@ export function normalizeMonitorMessage(value) {
   const messageId = cleanString(source.messageId);
   if (!messageId) return null;
   const text = stringOf(source.text).slice(0, MAX_MESSAGE_TEXT);
-  const outcome = MESSAGE_OUTCOMES.includes(source.outcome) ? source.outcome : '';
   return Object.freeze({
     messageId,
     senderName: cleanString(source.senderName),
@@ -128,9 +125,6 @@ export function normalizeMonitorMessage(value) {
     senderType: cleanString(source.senderType),
     createTime: cleanString(source.createTime),
     text,
-    // outcome 非空表示已被自动回复或自动跳过。
-    outcome,
-    handledAt: cleanTime(source.handledAt),
   });
 }
 

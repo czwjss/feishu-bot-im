@@ -115,7 +115,6 @@ try {
   const fromColleague = recorded.find((m) => m.messageId === 'm-new');
   assert.equal(bot.senderName, '机器人');
   assert.equal(fromColleague.senderName, '同事', 'sender name resolved from chat members');
-  assert.equal(fromColleague.outcome, '');
   assert.equal(fromColleague.text, '@同事 你好', 'at tag is rendered as a readable name');
   assert.deepEqual(nameCalls, [chatId]);
   assert.equal(store.state.chats[chatId].cursorTimeMs, now - 5_000);
@@ -358,7 +357,6 @@ console.log('user identity monitor: 27 assertions passed');
     assert.equal(store.state.pendingCards.length, 0, 'settled card leaves the pending list');
     assert.equal(store.state.chats[chatId].messages.length, 1, 'settled card enters the inbox');
     assert.match(store.state.chats[chatId].messages[0].text, /评审改到下午三点/);
-    assert.equal(store.state.chats[chatId].messages[0].outcome, '');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -784,8 +784,8 @@ function MonitorPanel({ connection }) {
       "p",
       { style: { ...S.hint, margin: "0 0 10px" } },
       t(
-        "\u5B9A\u65F6\u62C9\u53D6\u5DF2\u9009\u4F1A\u8BDD\u7684\u65B0\u6D88\u606F\u5E76\u8BB0\u5F55\uFF1B\u6D41\u5F0F\u5361\u7247\u6536\u5C3E\u540E\u624D\u5165\u5E93\u3002\u300C\u81EA\u52A8\u56DE\u590D\u300D\u4F1A\u628A\u65B0\u6D88\u606F\u6512\u6210\u4E00\u6279\u4EA4\u7ED9 Worker \u4F1A\u8BDD\u5904\u7406\u3002",
-        "Polls selected chats into a local inbox; streaming cards land after they finish. Auto reply hands each batch to the worker session."
+        "\u5B9A\u65F6\u62C9\u53D6\u5DF2\u9009\u4F1A\u8BDD\u7684\u65B0\u6D88\u606F\uFF1B\u6D41\u5F0F\u5361\u7247\u6536\u5C3E\u540E\u624D\u8BB0\u5F55\u3002\u65B0\u6D88\u606F\u4F1A\u6512\u6210\u4E00\u6279\u4EA4\u7ED9 Worker \u4F1A\u8BDD\u5904\u7406\u3002",
+        "Polls selected chats for new messages; streaming cards land after they finish. Each batch goes to the worker session."
       )
     ),
     error ? h2("div", { style: S.error }, error) : null,

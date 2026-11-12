@@ -50,7 +50,7 @@ feishu_avatar_send / feishu_avatar_messages（用户身份）
 listMessages 发现 streaming_mode=true
   → 记入 pendingCards（不可见、不记录）
   → 每轮轮询 getMessage 复查
-      ├─ streaming_mode=false → 补进收件箱（未读）→ 按需入批
+      ├─ streaming_mode=false → 补进消息列表 → 按需入批
       ├─ 仍在流式 → 刷新文本，继续等
       └─ 创建超 10 分钟 → 静默丢弃（平台 10 分钟自动关流式模式）
 ```
@@ -75,7 +75,7 @@ listMessages 发现 streaming_mode=true
 ## 5. 状态与并发
 
 - 每个会话保存游标、seen 集合（500 条）、最近 50 条消息；
-- 同一条消息只记一次；卡片原地刷新只更新文本，不新增未读；
+- 同一条消息只记一次；卡片原地刷新只更新文本；
 - 轮询串行执行，避免同一 token 并发；
 - Worker 会话复用；工作区/预设变更、会话归档或丢失时重建。
 

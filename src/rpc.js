@@ -251,27 +251,7 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
           mode: input.mode,
           keywords: input.keywords,
           replyToBots: input.replyToBots,
-          preset: input.preset,
         }));
-
-      // ── 兼容层：旧版单机器人设置页仍可工作 ─────────────────────────────
-      case 'connection.status': {
-        const { bots } = await manager.status();
-        return ok(bots[0] ?? { state: 'idle', configured: false });
-      }
-      case 'bot.bind-credentials':
-        return ok(await manager.addBot({
-          appId: input.appId, appSecret: input.appSecret, alias: input.alias,
-        }));
-      case 'bot.delete': {
-        const { bots } = await manager.status();
-        if (!bots[0]) return ok({ bots: [] });
-        await manager.removeBot(bots[0].id);
-        return ok(await manager.status());
-      }
-      case 'connection.test':
-      case 'connection.disconnect':
-        return ok({ ok: true });
 
       default:
         return fail('bad-request', `unknown method: ${String(method)}`);

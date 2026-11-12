@@ -409,7 +409,7 @@ export async function listMessages({
 /**
  * 会话成员姓名表（open_id → 姓名）。
  *
- * 消息列表不返回发送者姓名，收件箱展示需要另取一次成员表。
+ * 消息列表不返回发送者姓名，展示时需要另取一次成员表。
  * 读不到成员（外部群等）时返回空 Map，调用方退化为 open_id。
  */
 export async function chatMemberNames({

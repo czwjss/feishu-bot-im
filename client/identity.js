@@ -196,8 +196,8 @@ const h = React.createElement;
         }, monitor?.enabled ? t('停止监听', 'Stop') : t('开始监听', 'Start')),
       },
       h('p', { style: { ...S.hint, margin: '0 0 10px' } },
-        t('定时拉取已选会话的新消息并记录；流式卡片收尾后才入库。「自动回复」会把新消息攒成一批交给 Worker 会话处理。',
-          'Polls selected chats into a local inbox; streaming cards land after they finish. Auto reply hands each batch to the worker session.')),
+        t('定时拉取已选会话的新消息；流式卡片收尾后才记录。新消息会攒成一批交给 Worker 会话处理。',
+          'Polls selected chats for new messages; streaming cards land after they finish. Each batch goes to the worker session.')),
       error ? h('div', { style: S.error }, error) : null,
       !monitor
         ? h('p', { style: S.hint }, t('正在读取监听状态…', 'Loading monitor status…'))

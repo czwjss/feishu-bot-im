@@ -149,7 +149,7 @@ export class AutoReplyEngine {
         : (this.#dispatchedWithin(chat.chatId, 10 * 60_000) ? '十分钟内已派发过机器人批次，跳过' : '');
       if (reason) {
         this.#logger?.info?.(`[im-feishu] ${chat.chatId} ${reason}`);
-        await this.#clearBatch(chat.chatId, messages, { markHandled: true });
+        await this.#clearBatch(chat.chatId);
         return null;
       }
     }
@@ -168,7 +168,7 @@ export class AutoReplyEngine {
     }
 
     await this.#patch(chat.chatId, { lastDispatchAt: this.#now() });
-    await this.#clearBatch(chat.chatId, messages, { markHandled: true });
+    await this.#clearBatch(chat.chatId);
     return chat.chatId;
   }
 
@@ -199,7 +199,7 @@ export class AutoReplyEngine {
   /** session.create 的目标：显式配置优先，否则落在默认工作区。 */
   async #workerTarget(chat) {
     const worker = this.#store.config.worker ?? {};
-    const request = { agentPreset: chat.preset || worker.preset || DEFAULT_WORKER_PRESET };
+    const request = { agentPreset: worker.preset || DEFAULT_WORKER_PRESET };
     if (worker.workspaceId) {
       request.workspaceId = worker.workspaceId;
       return request;
@@ -237,18 +237,9 @@ export class AutoReplyEngine {
       .filter((message) => set.has(message.messageId));
   }
 
-  /** 清空批次；markHandled 时把消息标记为已处理。 */
-  async #clearBatch(chatId, messages = [], { markHandled = false } = {}) {
-    const entry = this.#store.state.chats[chatId] ?? {};
-    const handled = new Set(messages.map((message) => message.messageId));
-    await this.#patch(chatId, {
-      messages: markHandled
-        ? (entry.messages ?? []).map((message) => (handled.has(message.messageId)
-          ? { ...message, outcome: 'dispatched', handledAt: this.#now() }
-          : message))
-        : entry.messages ?? [],
-      batch: { messageIds: [], firstAt: null, lastAt: null },
-    });
+  /** 清空批次。 */
+  async #clearBatch(chatId) {
+    await this.#patch(chatId, { batch: { messageIds: [], firstAt: null, lastAt: null } });
   }
 
   /** 该会话在窗口内是否已经派发过（用于机器人批次限速）。 */

@@ -138,9 +138,7 @@ export class UserMonitorManager {
       const messages = entry.messages ?? [];
       return {
         ...chat,
-        sessionId: entry.sessionId ?? null,
         pendingBatch: entry.batch?.messageIds?.length ?? 0,
-        lastDispatchAt: entry.lastDispatchAt ?? null,
         lastPollAt: entry.lastPollAt ?? null,
         lastError: entry.lastError ?? null,
       };
@@ -238,7 +236,6 @@ export class UserMonitorManager {
       worker: {
         workspaceId: patch.workspaceId === undefined ? current.workspaceId : patch.workspaceId,
         workspacePath: patch.workspacePath === undefined ? current.workspacePath : patch.workspacePath,
-        preset: patch.preset === undefined ? current.preset : patch.preset,
       },
     });
     return this.status();
@@ -305,7 +302,6 @@ export class UserMonitorManager {
         mode: patch.mode === undefined ? chat.mode : patch.mode,
         keywords: patch.keywords === undefined ? chat.keywords : patch.keywords,
         replyToBots: patch.replyToBots === undefined ? chat.replyToBots : patch.replyToBots,
-        preset: patch.preset === undefined ? chat.preset : patch.preset,
       });
     });
     await this.#store.saveConfig({ chats });
@@ -325,7 +321,7 @@ export class UserMonitorManager {
     await this.#store.saveState({ ...this.#store.state, pendingCards: pending });
   }
 
-  /** 检查待收尾卡片：收尾了就补进收件箱，超时就彻底丢掉。 */
+  /** 检查待收尾卡片：收尾了就补进消息列表，超时就彻底丢掉。 */
   async #settlePendingCards(chat, accessToken) {
     const pending = this.#store.state.pendingCards ?? [];
     if (pending.length === 0) return 0;
@@ -361,7 +357,7 @@ export class UserMonitorManager {
     return revived.length;
   }
 
-  /** 收尾的卡片补进收件箱，并按需交给自动回复。 */
+  /** 收尾的卡片补进消息列表，并按需交给自动回复。 */
   async #reviveCards(chat, revived) {
     const entry = this.#store.state.chats[chat.chatId] ?? {};
     const messages = [...(entry.messages ?? [])];
@@ -522,7 +518,7 @@ export class UserMonitorManager {
           skipped.push({ item, time });
           continue;
         }
-        // 流式卡片：先不进入收件箱，等收尾后再补进来。
+        // 流式卡片：先不进入消息列表，等收尾后再补进来。
         if (item.msgType === 'interactive' && item.streaming === true) {
           await this.#trackPendingCard(chat.chatId, item, time);
           seen.add(item.messageId);
