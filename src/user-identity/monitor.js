@@ -77,11 +77,6 @@ export class UserMonitorManager {
           store,
           harness,
           sessionGuard,
-          refreshMessage: async (messageId) => {
-            const accessToken = await this.#auth.requireAccessToken();
-            const message = await this.#getMessage({ accessToken, messageId }).catch(() => null);
-            return message ? { text: message.text, msgType: message.msgType, streaming: message.streaming } : null;
-          },
           logger,
           now,
           setTimeout: setTimeoutImpl,
@@ -421,8 +416,6 @@ export class UserMonitorManager {
         senderName: message.senderName || (message.senderType === 'app' ? '机器人' : ''),
         senderOpenId: message.senderOpenId ?? '',
         senderType: message.senderType ?? '',
-        msgType: 'interactive',
-        streaming: false,
         createTime: message.createTime || card.createTime,
         text: message.text || card.lastText,
         read: false,
@@ -605,8 +598,6 @@ export class UserMonitorManager {
               || (item.senderType === 'app' ? '机器人' : ''),
             senderOpenId: item.senderOpenId ?? '',
             senderType: item.senderType ?? '',
-            msgType: item.msgType ?? '',
-            streaming: typeof item.streaming === 'boolean' ? item.streaming : null,
             createTime: item.createTime ?? new Date(time).toISOString(),
             text: this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, roster),
             read: false,

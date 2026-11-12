@@ -29,8 +29,6 @@ export const BATCH_MAX_MESSAGES = 10;
 export const DEFAULT_WORKER_PRESET = 'standard';
 export const MAX_WORKER_PRESET = 40;
 export const MAX_PENDING_CARDS = 20;
-/** 流式卡片等待中的批次，多久再看一次。 */
-export const CARD_RETRY_MS = 30_000;
 /** 消息处理结果：批次已派发给 Worker，后续不再由插件跟踪。 */
 export const MESSAGE_OUTCOMES = Object.freeze(['dispatched', 'dropped']);
 export const DEFAULT_POLL_INTERVAL_MS = 60_000;
@@ -130,8 +128,6 @@ export function normalizeMonitorMessage(value) {
     senderName: cleanString(source.senderName),
     senderOpenId: cleanString(source.senderOpenId),
     senderType: cleanString(source.senderType),
-    msgType: cleanString(source.msgType),
-    streaming: typeof source.streaming === 'boolean' ? source.streaming : null,
     createTime: cleanString(source.createTime),
     text,
     // outcome 非空表示已被自动回复或自动跳过；read 仍表示人工/流程已读。
