@@ -107,10 +107,10 @@
       <div class="num">3</div>
       <div>
         <div class="title">权限与寻址</div>
-        <div class="meta">白名单 → 计算 chatKey（群 / 话题）→ 缓存参与者姓名</div>
+        <div class="meta">白名单 → 计算 chatKey → 缓存参与者姓名</div>
         <div class="branch">
           <div class="box"><span class="title">是否 addressed</span>
-            <div class="meta">话题内：必须 @机器人；话题外：@机器人 或 引用机器人消息</div>
+            <div class="meta">@机器人 或 引用机器人消息</div>
           </div>
           <div class="box stop"><span class="title">未 addressed → 记入旁听上下文，结束</span></div>
         </div>
@@ -139,8 +139,7 @@
         <div class="title">文本与指令</div>
         <div class="meta">展平 <code>text / post / interactive</code>，去掉 <code>@_user_1</code> 占位符</div>
         <div class="branch">
-          <div class="box"><span class="title">话题内再发 /topic</span> <span class="meta">回提示卡，结束</span></div>
-          <div class="box"><span class="title">命中指令</span> <span class="meta">/menu、/topic 等先执行，命中即结束</span></div>
+          <div class="box"><span class="title">命中指令</span> <span class="meta">/menu、/new、/stop 先执行，命中即结束</span></div>
         </div>
       </div>
     </div>

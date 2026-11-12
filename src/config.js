@@ -248,13 +248,7 @@ export class StateStore {
     const usage = parsed && typeof parsed.usage === 'object' && parsed.usage ? parsed.usage : {};
     const stats = parsed && typeof parsed.stats === 'object' && parsed.stats ? parsed.stats : {};
     const tools = parsed && typeof parsed.tools === 'object' && parsed.tools ? parsed.tools : {};
-    // 旧状态里的 topic: 绑定已经废弃，加载时直接丢弃。
-    const cleanSessions = {};
-    for (const [key, value] of Object.entries(sessions)) {
-      if (key.startsWith('topic:')) continue;
-      cleanSessions[key] = value;
-    }
-    this.#value = { sessions: cleanSessions, seen, meta: { ...meta }, overrides: { ...overrides }, usage: { ...usage }, stats: { ...stats }, tools: { ...tools } };
+    this.#value = { sessions: { ...sessions }, seen, meta: { ...meta }, overrides: { ...overrides }, usage: { ...usage }, stats: { ...stats }, tools: { ...tools } };
     return this;
   }
 
