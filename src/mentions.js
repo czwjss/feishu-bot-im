@@ -2,11 +2,11 @@
  * Feishu @ mentions in model output.
  *
  * The model writes the card syntax `<at id=ou_xxx></at>`. This module validates
- * the id against the people seen in the current chat and then:
+ * the id shape and then:
  *
  *   - card: keeps/normalizes `<at id=ou_xxx></at>`;
  *   - text: converts to `<at user_id="ou_xxx">name</at>`;
- *   - mentions off / unknown id / malformed tag / @all forbidden: erases it.
+ *   - mentions off / malformed tag / @all forbidden: erases it.
  *
  * The prompt asks the model to mention the decision/confirmation owner;
  * the enforcement
@@ -15,6 +15,8 @@
 
 const AT_TAG_PATTERN = /<at\b[^>]*>[\s\S]*?<\/at>|<at\b[^>]*\/>/gi;
 const AT_ID_PATTERN = /(?:id|user_id)\s*=\s*["']?([A-Za-z0-9_-]+)["']?/i;
+/** open_id 形状：ou_ 开头，后面是字母数字下划线/连字符。 */
+const OPEN_ID_PATTERN = /^ou_[A-Za-z0-9_-]+$/;
 
 /** `{ enabled: true, allowAll: false }` by default: @ on, @all off. */
 export function normalizeMentionsConfig(value) {
@@ -25,28 +27,9 @@ export function normalizeMentionsConfig(value) {
   });
 }
 
-function cleanName(value, fallback) {
-  const name = String(value ?? '').replace(/[<>&\r\n]/g, '').trim();
-  return name || fallback;
-}
-
-/** Collect the open_ids explicitly written in `<at>` tags. */
-export function extractMentionIds(text) {
-  if (typeof text !== 'string' || !text) return [];
-  const ids = new Set();
-  for (const tag of text.match(AT_TAG_PATTERN) ?? []) {
-    const id = AT_ID_PATTERN.exec(tag)?.[1];
-    if (id) ids.add(id);
-  }
-  return [...ids];
-}
-
-/**
- * Rewrite every `<at>` tag for one output mode. `directory` maps a known
- * open_id to its display name; ids not in it are treated as invalid.
- */
+/** Rewrite every `<at>` tag for one output mode. */
 export function renderMentions(text, {
-  mode = 'card', enabled = true, allowAll = false, directory = new Map(),
+  mode = 'card', enabled = true, allowAll = false,
 } = {}) {
   if (typeof text !== 'string' || !text) return text;
   return text.replace(AT_TAG_PATTERN, (tag) => {
@@ -57,10 +40,8 @@ export function renderMentions(text, {
       if (!allowAll) return '';
       return mode === 'text' ? '<at user_id="all">所有人</at>' : '<at id=all></at>';
     }
-    if (!directory.has(id)) return '';
-    if (mode === 'text') {
-      return `<at user_id="${id}">${cleanName(directory.get(id), id)}</at>`;
-    }
+    if (!OPEN_ID_PATTERN.test(id)) return '';
+    if (mode === 'text') return `<at user_id="${id}">${id}</at>`;
     return `<at id=${id}></at>`;
   });
 }

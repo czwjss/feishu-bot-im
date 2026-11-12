@@ -495,7 +495,6 @@ export class BotRuntime {
     const needle = String(query ?? '').normalize('NFKC').toLowerCase().replace(/\s+/g, '');
     if (!needle) throw new Error('查询关键词不能为空');
     const members = await this.#bot.getChatMembers(chatId, { refresh });
-    this.#bridge?.rememberPeople?.(chatId, members);
     const ranked = [];
     for (const member of members) {
       const name = String(member.name ?? '').normalize('NFKC').toLowerCase().replace(/\s+/g, '');

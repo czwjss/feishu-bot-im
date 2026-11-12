@@ -78,13 +78,4 @@ assert.equal(rewriteInjectedContextMessages(onlyBlock), null, 'empty body must k
   assert.equal(rewritten[1].content[0].text, '正文');
 }
 
-// 10) 本条消息被 at 的人：也拆成独立行
-{
-  const PEOPLE = '<feishu_bot_people>\n本条消息被 at 的人：张三(ou_zhang)\n</feishu_bot_people>';
-  const splitPeople = splitLeadingInjectedContext(`${PEOPLE}\n\n正文`);
-  assert.equal(splitPeople.blocks.length, 1);
-  assert.equal(splitPeople.blocks[0].form, 'people');
-  assert.equal(splitPeople.rest, '正文');
-}
-
-console.log('injected context: 10 scenarios passed');
+console.log('injected context: 9 scenarios passed');

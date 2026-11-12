@@ -21,8 +21,6 @@ export const INJECTED_CONTEXT_TAGS = Object.freeze({
   guidanceClose: '</feishu_bot_source_guidance>',
   eavesdropOpen: '<feishu_bot_eavesdrop>',
   eavesdropClose: '</feishu_bot_eavesdrop>',
-  peopleOpen: '<feishu_bot_people>',
-  peopleClose: '</feishu_bot_people>',
   quoteOpen: '<feishu_bot_quote>',
   quoteClose: '</feishu_bot_quote>',
 });

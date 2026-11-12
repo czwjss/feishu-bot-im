@@ -14,7 +14,7 @@ import { approvalCard, questionCard, resolvedApprovalText, newSessionCard, adjus
 import { isAddressed, isAllowed, senderOpenId } from './access.js';
 import { buildMenuCard, collectMenuData, currentMenuValue, menuOptionLabel, runCommand } from './commands.js';
 import { DEFAULT_EAVESDROP_LIMIT, EavesdropStore, describeMessageForEavesdrop, renderEavesdropBlock } from './eavesdrop.js';
-import { extractMentionIds, renderMentions } from './mentions.js';
+import { renderMentions } from './mentions.js';
 import { InboundContent } from './inbound.js';
 import { renderGuidanceBlock, renderQuoteBlock, renderSourceBlock } from './context-enhancement.js';
 import { appendFile, mkdir } from 'node:fs/promises';
@@ -84,7 +84,6 @@ export class FeishuBridge {
   #userNames = new Map();
   #messageCache = new Map();
   #eavesdrop = new EavesdropStore();
-  #participants = new Map();
   #onContext;
   #stats = { messagesReceived: 0, events: 0, lastEventAt: null, lastEventType: null };
   #saveWorkspace;
@@ -124,7 +123,7 @@ export class FeishuBridge {
       onTurnOrigin: (sessionId, kind) => this.#turnOrigin.set(sessionId, kind),
       showStats: (chatKey) => this.#state.statsFor?.(chatKey) === true,
       showTools: (chatKey) => this.#state.toolsFor?.(chatKey) === true,
-      renderMentions: (text, { chatKey, mode }) => this.#renderMentions(text, chatKey, mode),
+      renderMentions: (text, { mode }) => this.#renderMentions(text, mode),
       replyToOf: (sessionId) => this.#triggerMessages.get(sessionId) ?? null,
     });
   }
@@ -200,15 +199,6 @@ export class FeishuBridge {
     const wantsMentions = this.#config.mentions?.enabled !== false;
     const wantsName = wantsMentions || this.#config.eavesdrop?.enabled === true;
     const senderName = wantsName && openId ? await this.#senderName(openId) : null;
-    if (wantsMentions) {
-      this.#rememberParticipant(chatKey, openId, senderName);
-      for (const mention of Array.isArray(message.mentions) ? message.mentions : []) {
-        const mentionId = mention?.id?.open_id;
-        if (!mentionId) continue;
-        this.#rememberParticipant(chatKey, mentionId, mention.name);
-        if (mentionId === this.#config.botOpenId) continue;
-      }
-    }
     // 被 @ 或被引用机器人消息都算被叫到。
     const addressed = isAddressed(this.#config, message) || await this.#isReplyToBot(message);
     if (!addressed) {
@@ -397,46 +387,12 @@ export class FeishuBridge {
     }, this.#config.eavesdrop.limit || DEFAULT_EAVESDROP_LIMIT);
   }
 
-  /** Keep the people seen in this chat so mentions can be validated. */
-  #rememberParticipant(chatKey, openId, name) {
-    if (!openId || openId === this.#config.botOpenId) return;
-    let people = this.#participants.get(chatKey);
-    if (!people) {
-      people = new Map();
-      this.#participants.set(chatKey, people);
-    }
-    const current = people.get(openId);
-    people.set(openId, name || current || null);
-  }
-
-  /** Publish a roster learned through the people tool to this chat. */
-  rememberPeople(chatId, people) {
-    if (!chatId || !Array.isArray(people)) return;
-    const keys = new Set(
-      Object.keys(this.#state.value.sessions ?? {}).filter((key) => chatIdOfKey(key) === chatId),
-    );
-    keys.add(`chat:${chatId}`);
-    for (const key of keys) {
-      for (const person of people) this.#rememberParticipant(key, person?.openId, person?.name);
-    }
-  }
-
-  /** open_id → name for everyone the model could legitimately @ here. */
-  #mentionDirectory(chatKey) {
-    const directory = new Map();
-    for (const [id, name] of this.#participants.get(chatKey) ?? []) {
-      directory.set(id, name || id);
-    }
-    return directory;
-  }
-
-  #renderMentions(text, chatKey, mode) {
+  #renderMentions(text, mode) {
     const config = this.#config.mentions ?? {};
     return renderMentions(text, {
       mode,
       enabled: config.enabled !== false,
       allowAll: config.allowAll === true,
-      directory: this.#mentionDirectory(chatKey),
     });
   }
 
@@ -667,27 +623,6 @@ export class FeishuBridge {
     const name = await Promise.resolve(this.#bot.getUserName?.(openId)).catch(() => null) ?? null;
     this.#userNames.set(openId, { name, expiresAt: Date.now() + 30 * 60_000 });
     return name;
-  }
-
-  /**
-   * A schedule reminder has no sender of its own. Its prompt is the user's
-   * instruction, so ids explicitly written there are legitimate @ targets even
-   * after a restart emptied the in-memory roster.
-   */
-  async #seedScheduleMentions(sessionId, content) {
-    if (this.#config.mentions?.enabled === false) return;
-    const chatKey = this.#state.keyForSession?.(sessionId);
-    if (!chatKey) return;
-    const text = typeof content === 'string'
-      ? content
-      : Array.isArray(content)
-        ? content.map((part) => (part?.type === 'text' ? String(part.text ?? '') : '')).join('\n')
-        : '';
-    for (const id of extractMentionIds(text).slice(0, 20)) {
-      if (id === 'all' || id === this.#config.botOpenId) continue;
-      const name = await this.#senderName(id);
-      this.#rememberParticipant(chatKey, id, name);
-    }
   }
 
   /** Swap the status reaction on one inbound message. */
@@ -952,9 +887,6 @@ export class FeishuBridge {
   }
 
   async onSessionEvent(session, event) {
-    if (event?.type === 'user/message' && event.data?.source?.kind === 'schedule') {
-      await this.#seedScheduleMentions(session?.id, event.data?.content);
-    }
     const sessionId = session?.id;
     if (sessionId && event?.type === 'turn/start') this.#startTurnReactions(sessionId);
     const result = await this.#turns.onSessionEvent(session, event);

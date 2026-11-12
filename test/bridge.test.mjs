@@ -863,32 +863,6 @@ function message(overrides = {}) {
   bridge.dispose();
 }
 
-// 13r) 定时任务 prompt 里明确写出的 @ 会加入校验名单
-{
-  const { bot, bridge } = makeBridge();
-  await state.bindSession('chat:oc_sched_at', 'sess-sched-at');
-  await bridge.onSessionEvent({ id: 'sess-sched-at' }, { type: 'turn/start', data: { turn: 1 } });
-  await bridge.onSessionEvent({ id: 'sess-sched-at' }, {
-    type: 'user/message',
-    data: {
-      source: { kind: 'schedule' },
-      content: [{
-        type: 'text',
-        text: '[SCHEDULE REMINDER] reminders_json: [{"reminder_prompt":"先输出 <at id=ou_user></at>，再夸一句"}]',
-      }],
-    },
-  });
-  await bridge.onSessionEvent({ id: 'sess-sched-at' }, {
-    type: 'assistant/message',
-    data: { turn: 1, message: { content: [{ type: 'text', text: '<at id=ou_user></at> 你很帅 <at id=ou_nobody></at>' }] } },
-  });
-  await bridge.onSessionEvent({ id: 'sess-sched-at' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
-  const flat = JSON.stringify([...bot.cards.map((item) => item.card), ...bot.patches.map((item) => item.card)]);
-  assert.match(flat, /<at id=ou_user><\/at>/, 'schedule prompt mention is kept');
-  assert.ok(!flat.includes('ou_nobody'), 'unknown ids are still erased');
-  bridge.dispose();
-}
-
 // 13s) Token 统计与工具调用面板可独立开关
 {
   const { bot, harness, bridge } = makeBridge();
@@ -1527,7 +1501,6 @@ function message(overrides = {}) {
     content: JSON.stringify({ text: '请通知一下' }),
   }));
   const context = contextBySession.get('sess-mention') ?? '';
-  assert.ok(!context.includes('<feishu_bot_people>'), 'the people block is no longer injected');
   const sessionId = 'sess-mention';
   const requestId = harness.prompts.at(-1).options.requestId;
   await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/start', data: { turn: 1 } });
@@ -1543,7 +1516,7 @@ function message(overrides = {}) {
   const flat = JSON.stringify([...bot.cards.map((item) => item.card), ...bot.patches.map((item) => item.card)]);
   assert.match(flat, /<at id=ou_user><\/at>/, 'current sender is mentionable');
   assert.match(flat, /<at id=ou_zhang><\/at>/, 'mentioned person is mentionable');
-  assert.ok(!flat.includes('ou_nobody'), 'unknown ids are erased');
+  assert.match(flat, /<at id=ou_nobody><\/at>/, 'open_id-shaped ids are kept');
   assert.ok(!flat.includes('id=all'), '@all is erased by default');
   bridge.dispose();
 }

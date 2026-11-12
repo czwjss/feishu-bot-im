@@ -22,7 +22,6 @@ function escapePattern(text) {
 const SOURCE_PATTERN = new RegExp(`${escapePattern(INJECTED_CONTEXT_TAGS.sourceOpen)}([\\s\\S]*?)${escapePattern(INJECTED_CONTEXT_TAGS.sourceClose)}`);
 const GUIDANCE_PATTERN = new RegExp(`${escapePattern(INJECTED_CONTEXT_TAGS.guidanceOpen)}([\\s\\S]*?)${escapePattern(INJECTED_CONTEXT_TAGS.guidanceClose)}`);
 const EAVESDROP_PATTERN = new RegExp(`${escapePattern(INJECTED_CONTEXT_TAGS.eavesdropOpen)}([\\s\\S]*?)${escapePattern(INJECTED_CONTEXT_TAGS.eavesdropClose)}`);
-const PEOPLE_PATTERN = new RegExp(`${escapePattern(INJECTED_CONTEXT_TAGS.peopleOpen)}([\\s\\S]*?)${escapePattern(INJECTED_CONTEXT_TAGS.peopleClose)}`);
 
 /**
  * Split the leading injected blocks off one text part.
@@ -44,12 +43,6 @@ export function splitLeadingInjectedContext(text) {
     if (eavesdrop && eavesdrop.index === 0) {
       blocks.push({ form: 'eavesdrop', text: eavesdrop[0] });
       rest = rest.slice(eavesdrop[0].length);
-      continue;
-    }
-    const people = PEOPLE_PATTERN.exec(rest);
-    if (people && people.index === 0) {
-      blocks.push({ form: 'people', text: people[0] });
-      rest = rest.slice(people[0].length);
       continue;
     }
     const guidance = GUIDANCE_PATTERN.exec(rest);
