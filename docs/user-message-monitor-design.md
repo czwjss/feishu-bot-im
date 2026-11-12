@@ -16,7 +16,7 @@
 不能做：
 
 - 收不到飞书个人收件箱的实时事件，只能轮询；
-- 没有可靠的“未读数”，未读只表示“游标之后、尚未处理”；
+- 没有可靠的“未读数”，这里只按游标记录新消息；
 - 无法保证离线期间一条不漏。
 
 ## 2. 数据流
@@ -29,7 +29,7 @@ GET /im/v1/messages（用户 token）
       ▼
 逐条判定
   ├─ 流式卡片（streaming_mode=true）→ pendingCards，不入库
-  ├─ 命中触发规则 → 记为未读
+  ├─ 命中触发规则 → 记录并计入批次
   └─ 其余 → 记 seen、推进游标
       │
       ▼
@@ -48,7 +48,7 @@ feishu_avatar_send / feishu_avatar_messages（用户身份）
 
 ```text
 listMessages 发现 streaming_mode=true
-  → 记入 pendingCards（不可见、不计未读）
+  → 记入 pendingCards（不可见、不记录）
   → 每轮轮询 getMessage 复查
       ├─ streaming_mode=false → 补进收件箱（未读）→ 按需入批
       ├─ 仍在流式 → 刷新文本，继续等

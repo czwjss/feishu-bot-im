@@ -130,8 +130,7 @@ export function normalizeMonitorMessage(value) {
     senderType: cleanString(source.senderType),
     createTime: cleanString(source.createTime),
     text,
-    // outcome 非空表示已被自动回复或自动跳过；read 仍表示人工/流程已读。
-    read: source.read === true || outcome !== '',
+    // outcome 非空表示已被自动回复或自动跳过。
     outcome,
     handledAt: cleanTime(source.handledAt),
   });

@@ -246,7 +246,7 @@ export class AutoReplyEngine {
     await this.#patch(chatId, {
       messages: markHandled
         ? (entry.messages ?? []).map((message) => (handled.has(message.messageId)
-          ? { ...message, read: true, outcome: 'dispatched', handledAt: this.#now() }
+          ? { ...message, outcome: 'dispatched', handledAt: this.#now() }
           : message))
         : entry.messages ?? [],
       batch: { messageIds: [], firstAt: null, lastAt: null },

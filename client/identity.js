@@ -63,7 +63,6 @@ const h = React.createElement;
       const toggle = () => act('toggle', () => rpc(connection, API.userMonitorEnable, { enabled: monitor?.enabled !== true }));
       const poll = () => act('poll', () => rpc(connection, API.userMonitorPoll, {}));
       const flushPending = () => act('flush', () => rpc(connection, API.userMonitorFlush, {}));
-      const markRead = () => act('read', () => rpc(connection, API.userMonitorRead, {}));
       const clearAll = () => act('clear', () => rpc(connection, API.userMonitorClear, {}));
 
       const togglePicker = () => {
@@ -92,7 +91,6 @@ const h = React.createElement;
       const monitored = new Set(chats.map((chat) => chat.chatId));
       const candidates = (available ?? []).filter((chat) => !monitored.has(chat.chatId));
       const pendingTotal = chats.reduce((sum, chat) => sum + (chat.pendingBatch || 0), 0);
-      const unreadChats = chats.filter((chat) => (chat.messages ?? []).some((message) => !message.read));
       const formatTime = (ms) => (Number.isFinite(ms) && ms > 0 ? new Date(ms).toLocaleTimeString() : '—');
 
       const selectStyle = { ...S.input, width: 'auto', height: '28px', fontSize: '12px', paddingRight: '26px' };
@@ -101,14 +99,14 @@ const h = React.createElement;
       const divider = { borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: '10px', marginTop: '2px' };
 
       const chatRow = (chat) => {
-        const unread = (chat.messages ?? []).filter((message) => !message.read);
+        const recorded = (chat.messages ?? []).length;
         return h('div', { key: chat.chatId, style: { display: 'grid', gap: '6px', padding: '9px 0', borderTop: '1px solid var(--dsw-alias-border-l1)' } },
           h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
             h('div', { style: { flex: '1 1 160px', minWidth: 0 } },
               h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
                 h('span', { style: { fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } },
                   chat.name || chat.chatId),
-                unread.length > 0 ? h('span', { style: S.badge('warn') }, unread.length) : null),
+                recorded > 0 ? h('span', { style: S.badge('muted') }, recorded) : null),
               h('div', { style: { ...S.hint, marginTop: '1px' } },
                 `${chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group')} · ${chat.chatId}`,
                 chat.lastDispatchAt ? ` · ${t('上次派发', 'last dispatch')} ${formatTime(chat.lastDispatchAt)}` : '')),
@@ -153,17 +151,20 @@ const h = React.createElement;
             : null);
       };
 
-      const unreadSection = unreadChats.length > 0
+      const recentSection = chats.some((chat) => (chat.messages ?? []).length > 0)
         ? h('div', { style: { display: 'grid', gap: '6px' } },
-          unreadChats.map((chat) => h('div', { key: `u:${chat.chatId}`, style: { display: 'grid', gap: '2px' } },
-            h('div', { style: { ...S.hint, fontWeight: 600 } }, `${chat.name || chat.chatId} · ${(chat.messages ?? []).filter((message) => !message.read).length}`),
-            (chat.messages ?? []).filter((message) => !message.read).slice(-3).map((message) => h('div', {
-              key: message.messageId,
-              style: {
-                fontSize: '12px', color: 'var(--dsw-alias-label-secondary)',
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-              },
-            }, `${message.senderName || t('未知', 'Unknown')}：${message.text}`)))))
+          chats.filter((chat) => (chat.messages ?? []).length > 0).map((chat) => h('div', {
+            key: `r:${chat.chatId}`,
+            style: { display: 'grid', gap: '2px' },
+          },
+          h('div', { style: { ...S.hint, fontWeight: 600 } }, chat.name || chat.chatId),
+          (chat.messages ?? []).slice(-3).map((message) => h('div', {
+            key: message.messageId,
+            style: {
+              fontSize: '12px', color: 'var(--dsw-alias-label-secondary)',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            },
+          }, `${message.outcome === 'dispatched' ? '✓ ' : ''}${message.senderName || t('未知', 'Unknown')}：${message.text}`)))))
         : null;
 
       const pickerSection = showPicker
@@ -278,16 +279,13 @@ const h = React.createElement;
               t('自动回复的 Worker 会话建在这个分组下；改动后下一次派发自动换新会话。',
                 'Auto-reply workers are created in this group; changes apply on the next dispatch.'))),
 
-          monitor.unreadTotal > 0
+          recentSection
             ? h('div', { style: divider },
               h('div', { style: sectionHead },
-                h('span', { style: sectionTitle }, `${monitor.unreadTotal} ${t('条未读', 'unread')}`),
-                h('div', { style: { ...S.row, gap: '6px' } },
-                  h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'read', onClick: () => void markRead() },
-                    t('全部已读', 'Mark read')),
-                  h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'clear', onClick: () => void clearAll() },
-                    t('清空记录', 'Clear')))),
-              unreadSection)
+                h('span', { style: sectionTitle }, t('最近记录', 'Recent')),
+                h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'clear', onClick: () => void clearAll() },
+                  t('清空记录', 'Clear'))),
+              recentSection)
             : null));
     }
 

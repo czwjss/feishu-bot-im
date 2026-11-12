@@ -46,7 +46,6 @@ const RPC_ENDPOINT = 'im-feishu';
       userMonitorPoll: 'user.monitor.poll',
       userMonitorFlush: 'user.monitor.flush',
       userMonitorChatSet: 'user.monitor.chat.set',
-      userMonitorRead: 'user.monitor.read',
       userMonitorClear: 'user.monitor.clear',
     };
 

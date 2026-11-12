@@ -125,20 +125,16 @@ export class UserMonitorManager {
     return this.#autoReply;
   }
 
-  /** 监听状态 + 每会话未读数和最近消息（受上限约束）。 */
+  /** 监听状态 + 每会话最近消息（受上限约束）。 */
   async status() {
     const auth = await this.#auth.status().catch(() => null);
     const config = this.#store.config;
     const state = this.#store.state;
-    let unreadTotal = 0;
     const chats = config.chats.map((chat) => {
       const entry = state.chats[chat.chatId] ?? {};
       const messages = entry.messages ?? [];
-      const unread = messages.filter((message) => !message.read).length;
-      unreadTotal += unread;
       return {
         ...chat,
-        unread,
         sessionId: entry.sessionId ?? null,
         pendingBatch: entry.batch?.messageIds?.length ?? 0,
         lastDispatchAt: entry.lastDispatchAt ?? null,
@@ -151,7 +147,6 @@ export class UserMonitorManager {
       enabled: config.enabled,
       pollIntervalMs: config.pollIntervalMs,
       worker: config.worker,
-      unreadTotal,
       authorization: auth
         ? {
           authorized: Boolean(auth.authorization?.authorized),
@@ -263,21 +258,6 @@ export class UserMonitorManager {
   async setEnabled(enabled) {
     await this.#store.saveConfig({ enabled: enabled === true });
     if (enabled === true) void this.pollOnce();
-    return this.status();
-  }
-
-  /** 标记某会话（或全部）消息已读。 */
-  async markRead(chatId = '') {
-    const id = stringOf(chatId).trim();
-    const state = { ...this.#store.state, chats: { ...this.#store.state.chats } };
-    for (const [key, entry] of Object.entries(state.chats)) {
-      if (id && key !== id) continue;
-      state.chats[key] = {
-        ...entry,
-        messages: (entry.messages ?? []).map((message) => ({ ...message, read: true })),
-      };
-    }
-    await this.#store.saveState(state);
     return this.status();
   }
 
@@ -401,7 +381,6 @@ export class UserMonitorManager {
         senderType: message.senderType ?? '',
         createTime: message.createTime || card.createTime,
         text: message.text || card.lastText,
-        read: false,
       });
       fresh.push(card.messageId);
     }
@@ -458,7 +437,7 @@ export class UserMonitorManager {
 
   /**
    * 机器人临时状态文案（“已收到 / 正在处理”）：同一轮回答里会被最终消息取代，
-   * 记录后一旦出现同一发送者的新消息就丢掉，避免一次回答占两三条未读。
+   * 记录后一旦出现同一发送者的新消息就丢掉，避免一次回答占两三条记录。
    */
   #isTransientStatus(text) {
     const value = stringOf(text);
@@ -493,7 +472,7 @@ export class UserMonitorManager {
 
   async #pollChat(chat, accessToken, selfOpenId) {
     const current = this.#store.state.chats[chat.chatId] ?? {};
-    // 每轮顺手丢掉过期的临时状态，避免历史残留一直占未读。
+    // 每轮顺手丢掉过期的临时状态，避免历史残留一直占记录。
     const messages = (current.messages ?? []).filter((message) => !this.#isStaleTransient(message));
     if (!Number.isFinite(current.cursorTimeMs)) {
       await this.#patchChat(chat.chatId, {
@@ -529,7 +508,7 @@ export class UserMonitorManager {
         if (!item.messageId) continue;
         const time = messageTime(item);
         if (time === null) continue;
-        // 卡片在原地刷新：同一个 message_id 出现新文本时更新旧记录，不新增未读。
+        // 卡片在原地刷新：同一个 message_id 出现新文本时更新旧记录，不新增记录。
         const existing = storedById.get(item.messageId);
         if (existing) {
           const nextText = this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, await namesOf());
@@ -570,7 +549,7 @@ export class UserMonitorManager {
         cursorMessageId = item.messageId;
         if (updateOf) {
           nextMessages = nextMessages.map((message) => (
-            message.messageId === updateOf ? { ...message, text: nextText, read: false } : message
+            message.messageId === updateOf ? { ...message, text: nextText } : message
           ));
         } else {
           const entry = {
@@ -581,9 +560,8 @@ export class UserMonitorManager {
             senderType: item.senderType ?? '',
             createTime: item.createTime ?? new Date(time).toISOString(),
             text: this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, roster),
-            read: false,
           };
-          // 同一发送者的上一条临时状态被这条取代，直接丢掉，避免重复未读。
+          // 同一发送者的上一条临时状态被这条取代，直接丢掉，避免重复记录。
           if (item.senderType && item.senderType !== 'user') {
             const last = nextMessages[nextMessages.length - 1];
             if (last && last.senderOpenId === entry.senderOpenId && this.#isTransientStatus(last.text)) {

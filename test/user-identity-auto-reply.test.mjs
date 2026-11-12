@@ -48,7 +48,6 @@ function userMessage(id, text) {
     senderType: 'user',
     text,
     createTime: new Date(now).toISOString(),
-    read: false,
   };
 }
 
@@ -60,7 +59,6 @@ function botMessage(id, text) {
     senderType: 'app',
     text,
     createTime: new Date(now).toISOString(),
-    read: false,
   };
 }
 
@@ -145,7 +143,7 @@ try {
 
   // 3) 派发即视为已处理：消息已读、批次清空
   const handled = store.state.chats[chatId];
-  assert.ok(handled.messages.every((message) => message.read), 'dispatch marks messages read');
+  assert.ok(handled.messages.every((message) => message.outcome === 'dispatched'), 'dispatch marks messages handled');
   assert.ok(handled.messages.every((message) => message.outcome === 'dispatched'), 'outcome recorded');
   assert.equal(handled.batch.messageIds.length, 0, 'batch cleared after dispatch');
 
@@ -162,7 +160,7 @@ try {
   });
   assert.equal(await engine.flush({ ...chat }), null, 'failed dispatch returns null');
   assert.equal(store.state.chats[chatId].batch.messageIds.length, 1, 'batch kept for retry');
-  assert.equal(store.state.chats[chatId].messages[0].read, false, 'message stays unread');
+  assert.equal(store.state.chats[chatId].messages[0].outcome, '', 'message stays unhandled');
   failPrompt = false;
 
   // 5) 只有机器人消息：默认跳过但标记已处理
@@ -178,7 +176,7 @@ try {
   const promptsBeforeBot = prompts.length;
   assert.equal(await engine.flush({ ...chat }), null, 'bot-only batch is not dispatched');
   assert.equal(prompts.length, promptsBeforeBot, 'no worker prompt for bot-only batch');
-  assert.equal(store.state.chats[chatId].messages[0].read, true, 'bot-only batch is marked handled');
+  assert.equal(store.state.chats[chatId].messages[0].outcome, 'dispatched', 'bot-only batch is marked handled');
 
   // 6) 显式允许机器人消息时派发，但十分钟内只放行一次
   await store.saveConfig({

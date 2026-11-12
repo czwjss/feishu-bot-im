@@ -42,7 +42,6 @@ const state = normalizeMonitorState({
 });
 assert.equal(state.chats[chatId].seen.length, MAX_SEEN_IDS);
 assert.equal(state.chats[chatId].messages.length, MAX_MESSAGES_PER_CHAT);
-assert.equal(state.chats[chatId].messages[0].read, false);
 
 // 3) listChats 同时请求私聊和群聊。
 const calls = [];
@@ -116,7 +115,7 @@ try {
   const fromColleague = recorded.find((m) => m.messageId === 'm-new');
   assert.equal(bot.senderName, '机器人');
   assert.equal(fromColleague.senderName, '同事', 'sender name resolved from chat members');
-  assert.equal(fromColleague.read, false);
+  assert.equal(fromColleague.outcome, '');
   assert.equal(fromColleague.text, '@同事 你好', 'at tag is rendered as a readable name');
   assert.deepEqual(nameCalls, [chatId]);
   assert.equal(store.state.chats[chatId].cursorTimeMs, now - 5_000);
@@ -125,12 +124,9 @@ try {
   await monitor.pollOnce();
   assert.equal(store.state.chats[chatId].messages.length, 2);
 
-  // 5) status 统计未读；标记已读后归零。
+  // 5) status 返回记录的消息。
   const status = await monitor.status();
-  assert.equal(status.unreadTotal, 2);
   assert.equal(status.chats[0].messages.length, 2);
-  await monitor.markRead();
-  assert.equal((await monitor.status()).unreadTotal, 0);
 
   // 7) 清空记录但保留游标。
   await monitor.clearMessages();
@@ -229,7 +225,6 @@ try {
     await monitor4.pollOnce();
     assert.equal(store4.state.chats[chatId].messages.length, 1);
     assert.match(store4.state.chats[chatId].messages[0].text, /正在处理/);
-    await monitor4.markRead();
     await store4.saveState({
       ...store4.state,
       chats: { ...store4.state.chats, [chatId]: { ...store4.state.chats[chatId], seen: [] } },
@@ -241,7 +236,6 @@ try {
     const refreshed = store4.state.chats[chatId].messages;
     assert.equal(refreshed.length, 1, 'card refresh updates in place');
     assert.equal(refreshed[0].text, '在的，你说。');
-    assert.equal(refreshed[0].read, false, 'updated card becomes unread again');
   } finally {
     await rm(dir4, { recursive: true, force: true });
   }
@@ -369,7 +363,7 @@ console.log('user identity monitor: 27 assertions passed');
     assert.equal(store.state.pendingCards.length, 0, 'settled card leaves the pending list');
     assert.equal(store.state.chats[chatId].messages.length, 1, 'settled card enters the inbox');
     assert.match(store.state.chats[chatId].messages[0].text, /评审改到下午三点/);
-    assert.equal(store.state.chats[chatId].messages[0].read, false, 'revived card counts as unread');
+    assert.equal(store.state.chats[chatId].messages[0].outcome, '');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
