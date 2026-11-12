@@ -195,7 +195,6 @@ export function normalizeMonitorState(value) {
         messageIds: Object.freeze(pendingIds),
         firstAt: cleanTime(batch.firstAt),
         lastAt: cleanTime(batch.lastAt),
-        token: cleanString(batch.token) || null,
       }),
       lastDispatchAt: cleanTime(entry.lastDispatchAt),
       seen: Object.freeze(seen),

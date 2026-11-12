@@ -6,6 +6,7 @@ import {
   createMessagesTool,
   MESSAGES_TOOL_NAME,
   createPeopleTool,
+  createRecallTool,
   createSendTool,
   PEOPLE_TOOL_NAME,
   SEND_TOOL_NAME,
@@ -170,3 +171,17 @@ console.log('feishu tool naming: 4 assertions passed');
   }
 }
 console.log('feishu tool output schema: 8 assertions passed');
+
+// 撤回工具：只声明一个 messageId，结果二值。
+{
+  const calls = [];
+  const tool = createRecallTool({ recall: async (input) => { calls.push(input); return { recalled: true, messageId: input.messageId }; } });
+  assert.equal(tool.name, 'feishu_bot_recall');
+  const value = await tool.execute({ messageId: 'om_1' });
+  assert.equal(value.recalled, true);
+  assert.deepEqual(calls, [{ bot: undefined, messageId: 'om_1' }]);
+  await assert.rejects(() => tool.execute({}), /messageId/);
+  const text = tool.output.render({}, { recalled: false, messageId: 'om_2' })[0].text;
+  assert.match(text, /撤回失败/);
+}
+console.log('feishu recall tool: 5 assertions passed');

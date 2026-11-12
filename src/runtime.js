@@ -353,6 +353,12 @@ export class BotRuntime {
     if (!inChat) throw new Error(`机器人 ${label} 不在群 ${chatId}；请换 bot 或先把机器人拉进群`);
   }
 
+  /** Recall one of this bot's own messages; false when Feishu refuses. */
+  async recallMessage(messageId) {
+    if (!this.#bot) throw new Error('机器人尚未连接');
+    return this.#bot.deleteMessage(messageId);
+  }
+
   /** Send a standalone interactive card with Markdown text. */
   async sendCardText(chatId, text, title = null, color = null) {
     if (!this.#bot) throw new Error('机器人尚未连接');
@@ -839,6 +845,15 @@ export class RuntimeManager {
     }
     const result = await resolved.runtime.sendFileToChat(resolved.target, path, name, signal);
     return { ...result, kind: 'file' };
+  }
+
+  /** Recall one message the bot itself sent. */
+  async recall({ bot, messageId }) {
+    const id = typeof messageId === 'string' ? messageId.trim() : '';
+    if (!id) throw new Error('缺少 messageId');
+    const runtime = this.#runtimeForDelivery({ bot });
+    const ok = await runtime.recallMessage(id);
+    return { recalled: ok, messageId: id };
   }
 
   async listMessages({ sessionId, bot, chatId, ...options }) {

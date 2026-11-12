@@ -287,6 +287,7 @@ export function createChatsTool({ list }) {
 
 
 export const PEOPLE_TOOL_NAME = 'feishu_bot_people';
+export const RECALL_TOOL_NAME = 'feishu_bot_recall';
 
 /** Resolve a group member's exact open_id without dumping the roster. */
 export function createPeopleTool({ find }) {
@@ -353,6 +354,53 @@ export function createPeopleTool({ find }) {
         query: args?.query,
         refresh: args?.refresh === true,
       });
+    },
+  });
+}
+
+
+/** Recall one message the bot sent itself. */
+export function createRecallTool({ recall }) {
+  return Object.freeze({
+    name: RECALL_TOOL_NAME,
+    description: '撤回机器人自己发出的一条飞书消息（误发到群里时用）。'
+      + '只能撤回机器人自己发的消息；撤销时限由企业管理员配置；批量发送的消息不支持。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        bot: {
+          type: 'string',
+          description: '机器人别名、名称或 id；多机器人且当前会话未绑定时需要。',
+        },
+        messageId: {
+          type: 'string',
+          description: '要撤回的消息 id（om_…）。',
+        },
+      },
+      required: ['messageId'],
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          recalled: { type: 'boolean' },
+          messageId: { type: 'string' },
+        },
+        required: ['recalled', 'messageId'],
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.recalled
+          ? `已撤回消息 ${value.messageId}。`
+          : `撤回失败：${value.messageId}（只能撤回机器人自己发的消息，或已超过允许的时限）。`,
+      }],
+    },
+    async execute(args) {
+      const messageId = typeof args?.messageId === 'string' ? args.messageId.trim() : '';
+      if (!messageId) throw new Error('messageId 不能为空');
+      return recall({ bot: args?.bot, messageId });
     },
   });
 }

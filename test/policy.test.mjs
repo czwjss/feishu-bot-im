@@ -38,3 +38,7 @@ for (const rule of [
   assert.match(FEISHU_POLICY, rule);
 }
 console.log('feishu policy guardrails: 7 assertions passed');
+
+// 撤回规则同样写在唯一的策略里。
+assert.match(FEISHU_POLICY, /feishu_bot_recall/);
+console.log('feishu recall policy: 1 assertions passed');
