@@ -7,9 +7,8 @@ const h = React.createElement;
     function MonitorPanel({ connection }) {
       const [monitor, setMonitor] = React.useState(null);
       const [available, setAvailable] = React.useState(null);
-      const [manual, setManual] = React.useState('');
-      const [manualMode, setManualMode] = React.useState('p2p');
       const [showPicker, setShowPicker] = React.useState(false);
+      const [chatFilter, setChatFilter] = React.useState('');
       const [busy, setBusy] = React.useState('');
       const [error, setError] = React.useState(null);
       const [workerOptions, setWorkerOptions] = React.useState({ workspaces: [], presets: [], defaultWorkspaceId: null });
@@ -77,16 +76,6 @@ const h = React.createElement;
         }
       };
 
-      const addManual = () => {
-        const chatId = manual.trim();
-        if (!chatId) return;
-        void act('manual', async () => {
-          const value = await rpc(connection, API.userMonitorAdd, { chatId, chatMode: manualMode });
-          setManual('');
-          return value;
-        });
-      };
-
       const chats = Array.isArray(monitor?.chats) ? monitor.chats : [];
       const monitored = new Set(chats.map((chat) => chat.chatId));
       const candidates = (available ?? []).filter((chat) => !monitored.has(chat.chatId));
@@ -105,40 +94,28 @@ const h = React.createElement;
 
       const chatRow = (chat) => {
         const mode = chat.mode ?? (chat.chatMode === 'p2p' ? 'all' : 'mention');
+        const control = { ...S.input, height: '27px', fontSize: '12px', flex: 'none' };
         return h('div', {
           key: chat.chatId,
-          style: { display: 'grid', gap: '7px', padding: '10px 0', borderTop: '1px solid var(--dsw-alias-border-l1)' },
+          style: { display: 'grid', gap: '5px', padding: '9px 0', borderTop: '1px solid var(--dsw-alias-border-l1)' },
         },
-        h('div', { style: { display: 'flex', alignItems: 'baseline', gap: '8px' } },
-          h('div', { style: { flex: 1, minWidth: 0 } },
-            h('div', {
-              style: { fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-              title: chat.name || chat.chatId,
-            }, chat.name || chat.chatId),
-            h('div', {
-              style: { ...S.hint, marginTop: '1px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-              title: chat.chatId,
-            },
-            `${chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group')} · ${chat.chatId}`)),
-          h('button', {
-            type: 'button',
-            className: 'bxf-mini bxf-danger',
-            disabled: busy === `remove:${chat.chatId}`,
-            onClick: () => void remove(chat),
-          }, t('移除', 'Remove'))),
-        h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' } },
+          h('div', {
+            style: { flex: '1 1 110px', minWidth: 0, fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+            title: chat.name || chat.chatId,
+          }, chat.name || chat.chatId),
           h('select', {
-            style: { ...S.input, height: '30px', fontSize: '12px' },
+            style: { ...control, width: '110px' },
             'aria-label': t('触发规则', 'Trigger'),
             value: mode,
             disabled: busy === `mode:${chat.chatId}`,
             onChange: (event) => void setChat(chat, { mode: event.target.value }),
           },
-          h('option', { value: 'all' }, t('全部消息', 'All messages')),
-          h('option', { value: 'mention' }, t('仅 @ 与回复', 'Mentions & replies')),
+          h('option', { value: 'all' }, t('全部消息', 'All')),
+          h('option', { value: 'mention' }, t('仅 @ 与回复', 'Mentions')),
           h('option', { value: 'keyword' }, t('关键词', 'Keywords'))),
           h('select', {
-            style: { ...S.input, height: '30px', fontSize: '12px' },
+            style: { ...control, width: '132px' },
             'aria-label': t('处理方式', 'Handling'),
             value: chat.replyMode === 'auto' && chat.replyToBots ? 'auto-bots' : (chat.replyMode ?? 'watch'),
             disabled: busy === `mode:${chat.chatId}`,
@@ -149,13 +126,22 @@ const h = React.createElement;
                 : { replyMode: value, replyToBots: false });
             },
           },
-          h('option', { value: 'watch' }, t('只记录', 'Record only')),
-          h('option', { value: 'auto' }, t('自动回复', 'Auto reply')),
-          h('option', { value: 'auto-bots' }, t('自动回复（含机器人）', 'Auto reply (bots too)'))),
-        ),
+          h('option', { value: 'watch' }, t('只记录', 'Record')),
+          h('option', { value: 'auto' }, t('自动回复', 'Auto')),
+          h('option', { value: 'auto-bots' }, t('自动（含机器人）', 'Auto + bots'))),
+          h('button', {
+            type: 'button',
+            className: 'bxf-mini bxf-danger',
+            disabled: busy === `remove:${chat.chatId}`,
+            onClick: () => void remove(chat),
+          }, t('移除', 'Remove'))),
+        h('div', {
+          style: { ...S.hint, marginTop: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+          title: chat.chatId,
+        }, `${chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group')} · ${chat.chatId}`),
         mode === 'keyword'
           ? h('input', {
-            style: { ...S.input, height: '30px', fontSize: '12px' },
+            style: { ...S.input, height: '28px', fontSize: '12px' },
             defaultValue: (chat.keywords ?? []).join('，'),
             placeholder: t('关键词，逗号分隔', 'Keywords, comma separated'),
             onBlur: (event) => {
@@ -169,25 +155,40 @@ const h = React.createElement;
           : null);
       };
 
+      const keyword = chatFilter.trim().toLowerCase();
+      const filtered = keyword
+        ? candidates.filter((chat) => (chat.name || '').toLowerCase().includes(keyword)
+          || chat.chatId.toLowerCase().includes(keyword))
+        : candidates;
       const pickerSection = showPicker
-        ? h('div', { style: { display: 'grid', gap: '2px', maxHeight: '240px', overflow: 'auto', paddingTop: '4px' } },
+        ? h('div', { style: { display: 'grid', gap: '6px', paddingTop: '4px' } },
+          h('input', {
+            style: { ...S.input, height: '30px', fontSize: '12px' },
+            value: chatFilter,
+            placeholder: t('搜索名称或 chat_id', 'Search name or chat_id'),
+            autoFocus: true,
+            onChange: (event) => setChatFilter(event.target.value),
+          }),
           available === null
             ? h('p', { style: S.hint }, t('正在读取会话列表…', 'Loading chats…'))
-            : candidates.length === 0
-              ? h('p', { style: S.hint }, t('没有可添加的会话。', 'No chats available to add.'))
-              : candidates.slice(0, 300).map((chat) => h('div', {
-                key: chat.chatId,
-                style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 0' },
-              },
-              h('div', { style: { flex: 1, minWidth: 0 } },
-                h('div', { style: { fontSize: '13px' } }, chat.name || chat.chatId),
-                h('div', { style: S.hint }, chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group'))),
-              h('button', {
-                type: 'button',
-                className: 'bxf-mini',
-                disabled: busy === `add:${chat.chatId}`,
-                onClick: () => void add(chat),
-              }, busy === `add:${chat.chatId}` ? t('添加中…', 'Adding…') : t('添加', 'Add')))))
+            : filtered.length === 0
+              ? h('p', { style: S.hint }, t('没有匹配的会话。', 'No matching chats.'))
+              : h('div', { style: { display: 'grid', gap: '2px', maxHeight: '260px', overflow: 'auto' } },
+                h('div', { style: S.hint }, `${t('共', 'Total')} ${filtered.length} ${t('个', '')}`),
+                filtered.map((chat) => h('div', {
+                  key: chat.chatId,
+                  style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 0' },
+                },
+                h('div', { style: { flex: 1, minWidth: 0 } },
+                  h('div', { style: { fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } },
+                    chat.name || chat.chatId),
+                  h('div', { style: S.hint }, chat.chatMode === 'p2p' ? t('私聊', 'Direct') : t('群聊', 'Group'))),
+                h('button', {
+                  type: 'button',
+                  className: 'bxf-mini',
+                  disabled: busy === `add:${chat.chatId}`,
+                  onClick: () => void add(chat),
+                }, busy === `add:${chat.chatId}` ? t('添加中…', 'Adding…') : t('添加', 'Add'))))))
         : null;
 
       return h(Panel, {
@@ -231,28 +232,7 @@ const h = React.createElement;
               h('span', { style: sectionTitle }, t('添加会话', 'Add chat')),
               h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'chats', onClick: togglePicker },
                 busy === 'chats' ? t('读取中…', 'Loading…') : (showPicker ? t('收起', 'Close') : t('选择会话', 'Choose')))),
-            pickerSection,
-            h('div', { style: { ...S.row, marginTop: showPicker ? '6px' : 0 } },
-              h('input', {
-                style: { ...S.input, flex: '1 1 180px', minWidth: 0, height: '30px', fontSize: '12px' },
-                value: manual,
-                placeholder: t('手动填 chat_id（oc_…）', 'chat_id (oc_…)'),
-                onChange: (event) => setManual(event.target.value),
-                onKeyDown: (event) => { if (event.key === 'Enter') addManual(); },
-              }),
-              h('select', {
-                style: { ...S.input, width: 'auto', height: '30px', fontSize: '12px' },
-                value: manualMode,
-                'aria-label': t('会话类型', 'Chat type'),
-                onChange: (event) => setManualMode(event.target.value),
-              },
-              h('option', { value: 'p2p' }, t('私聊', 'Direct')),
-              h('option', { value: 'group' }, t('群聊', 'Group'))),
-              h('button', {
-                type: 'button', className: 'bxf-mini',
-                disabled: busy === 'manual' || !manual.trim(),
-                onClick: addManual,
-              }, busy === 'manual' ? t('添加中…', 'Adding…') : t('添加', 'Add')))),
+            pickerSection),
 
           h('div', { style: divider },
             h('div', { style: sectionHead }, h('span', { style: sectionTitle }, t('Worker 会话', 'Worker session'))),

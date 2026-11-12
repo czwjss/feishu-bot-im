@@ -588,9 +588,8 @@ var h2 = import_react2.default.createElement;
 function MonitorPanel({ connection }) {
   const [monitor, setMonitor] = import_react2.default.useState(null);
   const [available, setAvailable] = import_react2.default.useState(null);
-  const [manual, setManual] = import_react2.default.useState("");
-  const [manualMode, setManualMode] = import_react2.default.useState("p2p");
   const [showPicker, setShowPicker] = import_react2.default.useState(false);
+  const [chatFilter, setChatFilter] = import_react2.default.useState("");
   const [busy, setBusy] = import_react2.default.useState("");
   const [error, setError] = import_react2.default.useState(null);
   const [workerOptions, setWorkerOptions] = import_react2.default.useState({ workspaces: [], presets: [], defaultWorkspaceId: null });
@@ -658,15 +657,6 @@ function MonitorPanel({ connection }) {
       });
     }
   };
-  const addManual = () => {
-    const chatId = manual.trim();
-    if (!chatId) return;
-    void act("manual", async () => {
-      const value = await rpc(connection, API.userMonitorAdd, { chatId, chatMode: manualMode });
-      setManual("");
-      return value;
-    });
-  };
   const chats = Array.isArray(monitor?.chats) ? monitor.chats : [];
   const monitored = new Set(chats.map((chat) => chat.chatId));
   const candidates = (available ?? []).filter((chat) => !monitored.has(chat.chatId));
@@ -683,58 +673,37 @@ function MonitorPanel({ connection }) {
   const divider = { borderTop: "1px solid var(--dsw-alias-border-l1)", paddingTop: "10px", marginTop: "2px" };
   const chatRow = (chat) => {
     const mode = chat.mode ?? (chat.chatMode === "p2p" ? "all" : "mention");
+    const control = { ...S.input, height: "27px", fontSize: "12px", flex: "none" };
     return h2(
       "div",
       {
         key: chat.chatId,
-        style: { display: "grid", gap: "7px", padding: "10px 0", borderTop: "1px solid var(--dsw-alias-border-l1)" }
+        style: { display: "grid", gap: "5px", padding: "9px 0", borderTop: "1px solid var(--dsw-alias-border-l1)" }
       },
       h2(
         "div",
-        { style: { display: "flex", alignItems: "baseline", gap: "8px" } },
-        h2(
-          "div",
-          { style: { flex: 1, minWidth: 0 } },
-          h2("div", {
-            style: { fontSize: "13px", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-            title: chat.name || chat.chatId
-          }, chat.name || chat.chatId),
-          h2(
-            "div",
-            {
-              style: { ...S.hint, marginTop: "1px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-              title: chat.chatId
-            },
-            `${chat.chatMode === "p2p" ? t("\u79C1\u804A", "Direct") : t("\u7FA4\u804A", "Group")} \xB7 ${chat.chatId}`
-          )
-        ),
-        h2("button", {
-          type: "button",
-          className: "bxf-mini bxf-danger",
-          disabled: busy === `remove:${chat.chatId}`,
-          onClick: () => void remove(chat)
-        }, t("\u79FB\u9664", "Remove"))
-      ),
-      h2(
-        "div",
-        { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" } },
+        { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+        h2("div", {
+          style: { flex: "1 1 110px", minWidth: 0, fontSize: "13px", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+          title: chat.name || chat.chatId
+        }, chat.name || chat.chatId),
         h2(
           "select",
           {
-            style: { ...S.input, height: "30px", fontSize: "12px" },
+            style: { ...control, width: "110px" },
             "aria-label": t("\u89E6\u53D1\u89C4\u5219", "Trigger"),
             value: mode,
             disabled: busy === `mode:${chat.chatId}`,
             onChange: (event) => void setChat(chat, { mode: event.target.value })
           },
-          h2("option", { value: "all" }, t("\u5168\u90E8\u6D88\u606F", "All messages")),
-          h2("option", { value: "mention" }, t("\u4EC5 @ \u4E0E\u56DE\u590D", "Mentions & replies")),
+          h2("option", { value: "all" }, t("\u5168\u90E8\u6D88\u606F", "All")),
+          h2("option", { value: "mention" }, t("\u4EC5 @ \u4E0E\u56DE\u590D", "Mentions")),
           h2("option", { value: "keyword" }, t("\u5173\u952E\u8BCD", "Keywords"))
         ),
         h2(
           "select",
           {
-            style: { ...S.input, height: "30px", fontSize: "12px" },
+            style: { ...control, width: "132px" },
             "aria-label": t("\u5904\u7406\u65B9\u5F0F", "Handling"),
             value: chat.replyMode === "auto" && chat.replyToBots ? "auto-bots" : chat.replyMode ?? "watch",
             disabled: busy === `mode:${chat.chatId}`,
@@ -743,13 +712,23 @@ function MonitorPanel({ connection }) {
               void setChat(chat, value === "auto-bots" ? { replyMode: "auto", replyToBots: true } : { replyMode: value, replyToBots: false });
             }
           },
-          h2("option", { value: "watch" }, t("\u53EA\u8BB0\u5F55", "Record only")),
-          h2("option", { value: "auto" }, t("\u81EA\u52A8\u56DE\u590D", "Auto reply")),
-          h2("option", { value: "auto-bots" }, t("\u81EA\u52A8\u56DE\u590D\uFF08\u542B\u673A\u5668\u4EBA\uFF09", "Auto reply (bots too)"))
-        )
+          h2("option", { value: "watch" }, t("\u53EA\u8BB0\u5F55", "Record")),
+          h2("option", { value: "auto" }, t("\u81EA\u52A8\u56DE\u590D", "Auto")),
+          h2("option", { value: "auto-bots" }, t("\u81EA\u52A8\uFF08\u542B\u673A\u5668\u4EBA\uFF09", "Auto + bots"))
+        ),
+        h2("button", {
+          type: "button",
+          className: "bxf-mini bxf-danger",
+          disabled: busy === `remove:${chat.chatId}`,
+          onClick: () => void remove(chat)
+        }, t("\u79FB\u9664", "Remove"))
       ),
+      h2("div", {
+        style: { ...S.hint, marginTop: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+        title: chat.chatId
+      }, `${chat.chatMode === "p2p" ? t("\u79C1\u804A", "Direct") : t("\u7FA4\u804A", "Group")} \xB7 ${chat.chatId}`),
       mode === "keyword" ? h2("input", {
-        style: { ...S.input, height: "30px", fontSize: "12px" },
+        style: { ...S.input, height: "28px", fontSize: "12px" },
         defaultValue: (chat.keywords ?? []).join("\uFF0C"),
         placeholder: t("\u5173\u952E\u8BCD\uFF0C\u9017\u53F7\u5206\u9694", "Keywords, comma separated"),
         onBlur: (event) => {
@@ -760,28 +739,46 @@ function MonitorPanel({ connection }) {
       chat.lastError ? h2("div", { style: { ...S.hint, color: "var(--dsw-alias-state-error-primary)" } }, chat.lastError) : null
     );
   };
+  const keyword = chatFilter.trim().toLowerCase();
+  const filtered = keyword ? candidates.filter((chat) => (chat.name || "").toLowerCase().includes(keyword) || chat.chatId.toLowerCase().includes(keyword)) : candidates;
   const pickerSection = showPicker ? h2(
     "div",
-    { style: { display: "grid", gap: "2px", maxHeight: "240px", overflow: "auto", paddingTop: "4px" } },
-    available === null ? h2("p", { style: S.hint }, t("\u6B63\u5728\u8BFB\u53D6\u4F1A\u8BDD\u5217\u8868\u2026", "Loading chats\u2026")) : candidates.length === 0 ? h2("p", { style: S.hint }, t("\u6CA1\u6709\u53EF\u6DFB\u52A0\u7684\u4F1A\u8BDD\u3002", "No chats available to add.")) : candidates.slice(0, 300).map((chat) => h2(
+    { style: { display: "grid", gap: "6px", paddingTop: "4px" } },
+    h2("input", {
+      style: { ...S.input, height: "30px", fontSize: "12px" },
+      value: chatFilter,
+      placeholder: t("\u641C\u7D22\u540D\u79F0\u6216 chat_id", "Search name or chat_id"),
+      autoFocus: true,
+      onChange: (event) => setChatFilter(event.target.value)
+    }),
+    available === null ? h2("p", { style: S.hint }, t("\u6B63\u5728\u8BFB\u53D6\u4F1A\u8BDD\u5217\u8868\u2026", "Loading chats\u2026")) : filtered.length === 0 ? h2("p", { style: S.hint }, t("\u6CA1\u6709\u5339\u914D\u7684\u4F1A\u8BDD\u3002", "No matching chats.")) : h2(
       "div",
-      {
-        key: chat.chatId,
-        style: { display: "flex", alignItems: "center", gap: "8px", padding: "5px 0" }
-      },
-      h2(
+      { style: { display: "grid", gap: "2px", maxHeight: "260px", overflow: "auto" } },
+      h2("div", { style: S.hint }, `${t("\u5171", "Total")} ${filtered.length} ${t("\u4E2A", "")}`),
+      filtered.map((chat) => h2(
         "div",
-        { style: { flex: 1, minWidth: 0 } },
-        h2("div", { style: { fontSize: "13px" } }, chat.name || chat.chatId),
-        h2("div", { style: S.hint }, chat.chatMode === "p2p" ? t("\u79C1\u804A", "Direct") : t("\u7FA4\u804A", "Group"))
-      ),
-      h2("button", {
-        type: "button",
-        className: "bxf-mini",
-        disabled: busy === `add:${chat.chatId}`,
-        onClick: () => void add(chat)
-      }, busy === `add:${chat.chatId}` ? t("\u6DFB\u52A0\u4E2D\u2026", "Adding\u2026") : t("\u6DFB\u52A0", "Add"))
-    ))
+        {
+          key: chat.chatId,
+          style: { display: "flex", alignItems: "center", gap: "8px", padding: "5px 0" }
+        },
+        h2(
+          "div",
+          { style: { flex: 1, minWidth: 0 } },
+          h2(
+            "div",
+            { style: { fontSize: "13px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } },
+            chat.name || chat.chatId
+          ),
+          h2("div", { style: S.hint }, chat.chatMode === "p2p" ? t("\u79C1\u804A", "Direct") : t("\u7FA4\u804A", "Group"))
+        ),
+        h2("button", {
+          type: "button",
+          className: "bxf-mini",
+          disabled: busy === `add:${chat.chatId}`,
+          onClick: () => void add(chat)
+        }, busy === `add:${chat.chatId}` ? t("\u6DFB\u52A0\u4E2D\u2026", "Adding\u2026") : t("\u6DFB\u52A0", "Add"))
+      ))
+    )
   ) : null;
   return h2(
     Panel,
@@ -854,37 +851,7 @@ function MonitorPanel({ connection }) {
             busy === "chats" ? t("\u8BFB\u53D6\u4E2D\u2026", "Loading\u2026") : showPicker ? t("\u6536\u8D77", "Close") : t("\u9009\u62E9\u4F1A\u8BDD", "Choose")
           )
         ),
-        pickerSection,
-        h2(
-          "div",
-          { style: { ...S.row, marginTop: showPicker ? "6px" : 0 } },
-          h2("input", {
-            style: { ...S.input, flex: "1 1 180px", minWidth: 0, height: "30px", fontSize: "12px" },
-            value: manual,
-            placeholder: t("\u624B\u52A8\u586B chat_id\uFF08oc_\u2026\uFF09", "chat_id (oc_\u2026)"),
-            onChange: (event) => setManual(event.target.value),
-            onKeyDown: (event) => {
-              if (event.key === "Enter") addManual();
-            }
-          }),
-          h2(
-            "select",
-            {
-              style: { ...S.input, width: "auto", height: "30px", fontSize: "12px" },
-              value: manualMode,
-              "aria-label": t("\u4F1A\u8BDD\u7C7B\u578B", "Chat type"),
-              onChange: (event) => setManualMode(event.target.value)
-            },
-            h2("option", { value: "p2p" }, t("\u79C1\u804A", "Direct")),
-            h2("option", { value: "group" }, t("\u7FA4\u804A", "Group"))
-          ),
-          h2("button", {
-            type: "button",
-            className: "bxf-mini",
-            disabled: busy === "manual" || !manual.trim(),
-            onClick: addManual
-          }, busy === "manual" ? t("\u6DFB\u52A0\u4E2D\u2026", "Adding\u2026") : t("\u6DFB\u52A0", "Add"))
-        )
+        pickerSection
       ),
       h2(
         "div",
