@@ -29,7 +29,7 @@ export const BATCH_MAX_MESSAGES = 10;
 export const DEFAULT_WORKER_PRESET = 'standard';
 export const MAX_WORKER_PRESET = 40;
 /** 消息处理结果：批次已派发给 Worker，后续不再由插件跟踪。 */
-export const MESSAGE_OUTCOMES = Object.freeze(['dispatched']);
+export const MESSAGE_OUTCOMES = Object.freeze(['dispatched', 'dropped']);
 export const DEFAULT_POLL_INTERVAL_MS = 60_000;
 export const MIN_POLL_INTERVAL_MS = 5_000;
 export const MAX_POLL_INTERVAL_MS = 60_000;

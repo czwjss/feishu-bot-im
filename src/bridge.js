@@ -5,7 +5,7 @@
  * single edited message → final answer. One chat maps to one DSH Session.
  */
 import { TurnRunner } from './turn.js';
-import { cardStreamingOf, chatIdOfKey, scopedValue, textOfContentOrPost } from './message-text.js';
+import { CARD_STUCK_MS, cardStreamingOf, chatIdOfKey, scopedValue, textOfContentOrPost } from './message-text.js';
 import { approvalCard, questionCard, resolvedApprovalText, newSessionCard, adjustCard, noticeCard } from './cards.js';
 import { isAddressed, isAllowed, senderOpenId } from './access.js';
 import { buildMenuCard, collectMenuData, currentMenuValue, menuOptionLabel, runCommand } from './commands.js';
@@ -180,6 +180,8 @@ export class FeishuBridge {
 
     // 流式卡片会原地刷新：等它收尾再处理，否则模型只看到半截内容。
     const settled = await this.#settleCardMessage(message);
+    // 卡片超过 15 分钟仍未收尾：直接丢弃，不进入会话。
+    if (!settled) return;
     const text = (textOfContentOrPost(settled) ?? '').replace(/@_user_\d+/g, '').trim();
     this.#chatTypes.set(chatKey, message.chat_type);
 
@@ -720,11 +722,17 @@ export class FeishuBridge {
    */
   async #settleCardMessage(message) {
     if (message?.message_type !== 'interactive') return message;
+    const created = Number(message.create_time) || Date.now();
+    const age = () => Date.now() - created;
     // 事件里的卡片内容可能只是实体引用；统一走 getMessage 拿渲染后的 JSON 2.0。
     let current = message;
-    for (let attempt = 0; attempt < 6; attempt += 1) {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
       const streaming = cardStreamingOf(current.content);
       if (streaming !== true) return current;
+      if (age() > CARD_STUCK_MS) {
+        this.#logger?.warn?.('[im-feishu] 卡片超过 15 分钟未收尾，丢弃', message.message_id);
+        return null;
+      }
       await new Promise((resolve) => {
         const timer = setTimeout(resolve, 2_000);
         timer?.unref?.();
@@ -733,7 +741,9 @@ export class FeishuBridge {
       if (!latest?.bodyContent) continue;
       current = { ...current, content: latest.bodyContent };
     }
-    return current;
+    // 等满一分钟仍在流式输出，按异常中断处理。
+    this.#logger?.warn?.('[im-feishu] 卡片流式等待超时，丢弃', message.message_id);
+    return null;
   }
 
   async #quotedMessage(message) {

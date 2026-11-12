@@ -243,8 +243,42 @@ try {
   assert.equal(prompts.length, promptsBeforeCard, 'no prompt while the card streams');
   assert.equal(store.state.chats[chatId].batch.messageIds.length, 1, 'batch kept for the next round');
 
+  // 6c) 超过 15 分钟都没收尾：直接丢弃，不派发。
+  cardStreaming = true;
+  await store.saveState({
+    chats: {
+      [chatId]: {
+        ...store.state.chats[chatId],
+        messages: [{
+          messageId: 'om_stuck', senderName: '朋友', senderOpenId: 'ou_friend', senderType: 'user',
+          msgType: 'interactive', text: '⏳ 正在处理…', streaming: true,
+          createTime: new Date(clock.now() - 16 * 60_000).toISOString(), read: false,
+        }],
+        batch: { messageIds: ['om_stuck'], firstAt: clock.now(), lastAt: clock.now() },
+      },
+    },
+  });
+  const promptsBeforeStuck = prompts.length;
+  assert.equal(await cardEngine.flush({ ...cardChat }), null, 'stuck card is dropped');
+  assert.equal(prompts.length, promptsBeforeStuck, 'dropped card never reaches the worker');
+  assert.equal(store.state.chats[chatId].batch.messageIds.length, 0, 'batch cleared');
+  assert.equal(store.state.chats[chatId].messages[0].outcome, 'dropped', 'dropped outcome recorded');
+
   cardText = '评审改到下午三点';
   cardStreaming = false;
+  await store.saveState({
+    chats: {
+      [chatId]: {
+        ...store.state.chats[chatId],
+        messages: [{
+          messageId: 'om_card2', senderName: '朋友', senderOpenId: 'ou_friend', senderType: 'user',
+          msgType: 'interactive', text: '⏳ 正在处理…', streaming: true,
+          createTime: new Date(clock.now()).toISOString(), read: false,
+        }],
+        batch: { messageIds: ['om_card2'], firstAt: clock.now(), lastAt: clock.now() },
+      },
+    },
+  });
   assert.ok(await cardEngine.flush({ ...cardChat }), 'settled card dispatches');
   assert.match(prompts.at(-1).text, /评审改到下午三点/, 'prompt uses the settled text');
 
@@ -310,4 +344,4 @@ try {
   await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-console.log('user identity auto reply: 37 assertions passed');
+console.log('user identity auto reply: 41 assertions passed');

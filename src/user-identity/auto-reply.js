@@ -10,6 +10,7 @@
  * 这里不再校验 Worker 的回复：没有批次令牌，也没有决策工具。
  * 派发失败时保留批次，下一轮或手动「处理待办」会重试。
  */
+import { CARD_STUCK_MS } from '../message-text.js';
 import {
   BATCH_DEBOUNCE_MS,
   BATCH_MAX_MESSAGES,
@@ -159,7 +160,13 @@ export class AutoReplyEngine {
     let promptMessages = botOnly ? batchMessages : humanMessages;
     const pendingCards = promptMessages.filter((message) => message.msgType === 'interactive');
     if (pendingCards.length > 0) {
-      if (!(await this.#refreshCards(chat.chatId, pendingCards))) {
+      const settled = await this.#refreshCards(chat.chatId, pendingCards);
+      if (settled === 'stuck') {
+        this.#logger?.warn?.(`[im-feishu] ${chat.chatId} 卡片超过 15 分钟未收尾，丢弃`);
+        await this.#clearBatch(chat.chatId, batchMessages, { markHandled: true, outcome: 'dropped' });
+        return null;
+      }
+      if (settled === false) {
         this.#logger?.info?.(`[im-feishu] ${chat.chatId} 卡片还在流式输出，等下一轮再派发`);
         return null;
       }
@@ -242,19 +249,27 @@ export class AutoReplyEngine {
     if (!this.#refreshMessage) return true;
     const entry = this.#store.state.chats[chatId] ?? {};
     let next = entry.messages ?? [];
+    let changed = false;
     for (const message of messages) {
       const latest = await this.#refreshMessage(message.messageId).catch(() => null);
       if (!latest) continue;
-      // config.streaming_mode 为 true 表示还在增量刷新，等它收尾。
-      if (latest.streaming === true) return false;
+      // config.streaming_mode 为 true 表示还在增量刷新：正常就等下一轮，超时则丢弃。
+      if (latest.streaming === true) return this.#isStuckCard(message) ? 'stuck' : false;
       const text = typeof latest.text === 'string' ? latest.text : '';
       if (!text || text === message.text) continue;
       next = next.map((item) => (item.messageId === message.messageId
         ? { ...item, text, streaming: latest.streaming ?? null }
         : item));
+      changed = true;
     }
-    if (next !== (entry.messages ?? [])) await this.#patch(chatId, { messages: next });
+    if (changed) await this.#patch(chatId, { messages: next });
     return true;
+  }
+
+  /** 卡片推送超过阈值仍在流式输出，视为异常中断。 */
+  #isStuckCard(message) {
+    const created = Date.parse(stringOf(message.createTime));
+    return Number.isFinite(created) && this.#now() - created > CARD_STUCK_MS;
   }
 
   /** 从状态里取出这批消息的最新副本。 */
@@ -270,12 +285,12 @@ export class AutoReplyEngine {
   }
 
   /** 清空批次；markHandled 时把消息标记为已处理。 */
-  async #clearBatch(chatId, messages, { markHandled = false } = {}) {
+  async #clearBatch(chatId, messages, { markHandled = false, outcome = 'dispatched' } = {}) {
     const entry = this.#store.state.chats[chatId] ?? {};
     const idSet = new Set((messages ?? []).map((message) => message.messageId));
     const nextMessages = markHandled
       ? (entry.messages ?? []).map((message) => (idSet.has(message.messageId)
-        ? { ...message, read: true, outcome: 'dispatched', handledAt: this.#now() }
+        ? { ...message, read: true, outcome, handledAt: this.#now() }
         : message))
       : entry.messages ?? [];
     await this.#patch(chatId, {

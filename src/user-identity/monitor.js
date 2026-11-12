@@ -142,7 +142,7 @@ export class UserMonitorManager {
       return {
         ...chat,
         unread,
-        handled: messages.filter((message) => message.outcome === 'dispatched').length,
+        handled: messages.filter((message) => message.outcome === 'dispatched' || message.outcome === 'dropped').length,
         sessionId: entry.sessionId ?? null,
         pendingBatch: entry.batch?.messageIds?.length ?? 0,
         lastDispatchAt: entry.lastDispatchAt ?? null,

@@ -12,6 +12,9 @@ export function scopedValue(value, scope, fallback) {
   return value ?? fallback;
 }
 
+/** 流式卡片超过这个时间还没收尾，视为异常中断。 */
+export const CARD_STUCK_MS = 15 * 60_000;
+
 /**
  * 卡片是否仍在流式输出。
  * 飞书卡片 JSON 2.0 在 config.streaming_mode 里标明状态：true 表示还在增量刷新，
