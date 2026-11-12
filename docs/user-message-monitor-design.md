@@ -638,6 +638,17 @@ offline_access
 - 触发规则（阶段 1 的 A）：私聊默认全收，群聊默认只收 @我 / 回复我，也可改成关键词模式；
 - 草稿确认（阶段 2 的 B）：`feishu_avatar_draft` 只创建草稿，用户在设置页点「发送」才以本人身份发出，30 分钟过期。
 
+### 决策记录：Worker 工具用 Agent 作用域挂载
+
+结论：`feishu_avatar_reply` / `feishu_avatar_skip` 注册到 Worker Agent 自己的
+`agent.ctx.tools.register(...)`，不写进预设。
+
+- 备选方案对比见 [tool-mounting-comparison.html](./tool-mounting-comparison.html)。
+- 没选预设作用域的原因是**预设之间无法继承或叠加**：Worker 需要复用 standard
+  预设里的其他能力，做成独立预设只能把整份插件列表复制一遍，后续两边漂移。
+- 已知代价：Worker 每轮多约 250 token；其他会话零开销。
+- 需要守住的三点：Agent 就绪后再注册、卸载时逐个 try/catch 释放、会话归档后重建。
+
 ### 自动回复（已实现，`replyMode: auto`）
 
 ```text
