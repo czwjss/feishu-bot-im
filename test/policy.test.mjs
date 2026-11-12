@@ -32,7 +32,7 @@ for (const rule of [
   /不要留占位符/,
   /两种身份不要混用/,
   /不可信数据/,
-  /不要用 feishu_bot_send 冒用机器人身份/,
+  /机器人身份用 feishu_bot_send/,
 ]) {
   assert.match(FEISHU_POLICY, rule);
 }
