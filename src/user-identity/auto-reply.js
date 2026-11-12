@@ -138,15 +138,15 @@ export class AutoReplyEngine {
     const botOnly = batchMessages.length > 0 && humanMessages.length === 0;
 
     // 只有机器人消息时默认不回复，避免和机器人互相刷屏。
-    if (botOnly && chat.replyToBots !== true) {
-      this.#logger?.info?.(`[im-feishu] ${chat.chatId} 本批只有机器人消息，跳过`);
-      await this.#clearBatch(chat.chatId, batchMessages, { markHandled: true });
-      return null;
-    }
-    if (botOnly && this.#dispatchedWithin(chat.chatId, 10 * 60_000)) {
-      this.#logger?.info?.(`[im-feishu] ${chat.chatId} 十分钟内已自动回复过机器人，跳过本轮`);
-      await this.#clearBatch(chat.chatId, batchMessages, { markHandled: true });
-      return null;
+    if (botOnly) {
+      const reason = chat.replyToBots !== true
+        ? '本批只有机器人消息，跳过'
+        : (this.#dispatchedWithin(chat.chatId, 10 * 60_000) ? '十分钟内已派发过机器人批次，跳过' : '');
+      if (reason) {
+        this.#logger?.info?.(`[im-feishu] ${chat.chatId} ${reason}`);
+        await this.#clearBatch(chat.chatId, batchMessages, { markHandled: true });
+        return null;
+      }
     }
     if (batchMessages.length === 0) {
       await this.#patch(chat.chatId, { batch: { messageIds: [], firstAt: null, lastAt: null } });

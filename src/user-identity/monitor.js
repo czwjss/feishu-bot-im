@@ -13,8 +13,6 @@ import {
   MAX_MESSAGES_PER_CHAT,
   MAX_SEEN_IDS,
   normalizeMonitorChat,
-  normalizeMonitorConfig,
-  normalizeMonitorState,
 } from './monitor-store.js';
 
 const MAX_MESSAGES_PER_POLL = 100;
@@ -364,6 +362,17 @@ export class UserMonitorManager {
     return this.status();
   }
 
+  /** 只更新某个会话的状态字段。 */
+  async #patchChat(chatId, patch) {
+    await this.#store.saveState({
+      ...this.#store.state,
+      chats: {
+        ...this.#store.state.chats,
+        [chatId]: { ...(this.#store.state.chats[chatId] ?? {}), ...patch },
+      },
+    });
+  }
+
   /** 父消息发送者（用于判断“回复我”），带缓存。 */
   async #parentSenderOf(messageId, accessToken) {
     if (!messageId) return null;
@@ -438,19 +447,13 @@ export class UserMonitorManager {
     // 每轮顺手丢掉过期的临时状态，避免历史残留一直占未读。
     const messages = (current.messages ?? []).filter((message) => !this.#isStaleTransient(message));
     if (!Number.isFinite(current.cursorTimeMs)) {
-      await this.#store.saveState({
-        ...this.#store.state,
-        chats: {
-          ...this.#store.state.chats,
-          [chat.chatId]: {
-            ...current,
-            cursorTimeMs: this.#now(),
-            cursorMessageId: null,
-            messages,
-            seen: current.seen ?? [],
-            lastError: null,
-          },
-        },
+      await this.#patchChat(chat.chatId, {
+        ...current,
+        cursorTimeMs: this.#now(),
+        cursorMessageId: null,
+        messages,
+        seen: current.seen ?? [],
+        lastError: null,
       });
       return;
     }
@@ -553,39 +556,25 @@ export class UserMonitorManager {
       // 统一收尾：即使本轮只记录了部分消息，也要把游标推到最新的已处理消息。
       // 批次与出站记录可能已被自动回复引擎写过，收尾时以最新值为准。
       const latest = this.#store.state.chats[chat.chatId] ?? {};
-      await this.#store.saveState({
-        ...this.#store.state,
-        chats: {
-          ...this.#store.state.chats,
-          [chat.chatId]: {
-            ...current,
-            ...latest,
-            cursorTimeMs,
-            cursorMessageId,
-            messages: nextMessages,
-            seen: [...seen].slice(-MAX_SEEN_IDS),
-            lastPollAt: this.#now(),
-            lastDeliveredAt,
-            lastError: null,
-          },
-        },
+      await this.#patchChat(chat.chatId, {
+        ...current,
+        ...latest,
+        cursorTimeMs,
+        cursorMessageId,
+        messages: nextMessages,
+        seen: [...seen].slice(-MAX_SEEN_IDS),
+        lastPollAt: this.#now(),
+        lastDeliveredAt,
+        lastError: null,
       });
     } catch (error) {
       this.#logger?.warn?.('[im-feishu] 消息监听轮询失败', chat.chatId, error?.message ?? error);
       const latest = this.#store.state.chats[chat.chatId] ?? current;
-      await this.#store.saveState({
-        ...this.#store.state,
-        chats: {
-          ...this.#store.state.chats,
-          [chat.chatId]: {
-            ...latest,
-            lastPollAt: this.#now(),
-            lastError: error?.message ?? String(error),
-          },
-        },
+      await this.#patchChat(chat.chatId, {
+        ...latest,
+        lastPollAt: this.#now(),
+        lastError: error?.message ?? String(error),
       }).catch(() => undefined);
     }
   }
 }
-
-export { normalizeMonitorConfig, normalizeMonitorState };

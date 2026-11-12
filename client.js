@@ -679,9 +679,8 @@ function MonitorPanel({ connection }) {
       return value;
     });
   };
-  const act2 = async (label, operation) => act(label, operation);
-  const markRead = () => act2("read", () => rpc(connection, API.userMonitorRead, {}));
-  const clearAll = () => act2("clear", () => rpc(connection, API.userMonitorClear, {}));
+  const markRead = () => act("read", () => rpc(connection, API.userMonitorRead, {}));
+  const clearAll = () => act("clear", () => rpc(connection, API.userMonitorClear, {}));
   const chats = Array.isArray(monitor?.chats) ? monitor.chats : [];
   const monitored = new Set(chats.map((chat) => chat.chatId));
   const candidates = (available ?? []).filter((chat) => !monitored.has(chat.chatId));
