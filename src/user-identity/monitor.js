@@ -293,33 +293,6 @@ export class UserMonitorManager {
     return this.status();
   }
 
-  /** 标记某会话（或全部）消息已读。 */
-  async markRead(chatId = '') {
-    const id = stringOf(chatId).trim();
-    const state = { ...this.#store.state, chats: { ...this.#store.state.chats } };
-    for (const [key, entry] of Object.entries(state.chats)) {
-      if (id && key !== id) continue;
-      state.chats[key] = {
-        ...entry,
-        messages: (entry.messages ?? []).map((message) => ({ ...message, read: true })),
-      };
-    }
-    await this.#store.saveState(state);
-    return this.status();
-  }
-
-  /** 清空某会话（或全部）记录，但保留游标和去重集合。 */
-  async clearMessages(chatId = '') {
-    const id = stringOf(chatId).trim();
-    const state = { ...this.#store.state, chats: { ...this.#store.state.chats } };
-    for (const [key, entry] of Object.entries(state.chats)) {
-      if (id && key !== id) continue;
-      state.chats[key] = { ...entry, messages: [] };
-    }
-    await this.#store.saveState(state);
-    return this.status();
-  }
-
   /** 单轮轮询：串行处理会话，避免同一 token 并发打多个请求。 */
   async pollOnce() {
     if (this.#disposed || this.#polling || !this.#store.config.enabled) return;
