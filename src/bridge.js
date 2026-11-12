@@ -6,6 +6,9 @@
  */
 import { TurnRunner } from './turn.js';
 import { CARD_STUCK_MS, cardStreamingOf, chatIdOfKey, scopedValue, textOfContentOrPost } from './message-text.js';
+
+/** 挂起卡片的检查间隔。 */
+const CARD_POLL_MS = 3_000;
 import { approvalCard, questionCard, resolvedApprovalText, newSessionCard, adjustCard, noticeCard } from './cards.js';
 import { isAddressed, isAllowed, senderOpenId } from './access.js';
 import { buildMenuCard, collectMenuData, currentMenuValue, menuOptionLabel, runCommand } from './commands.js';
@@ -57,6 +60,8 @@ export class FeishuBridge {
   #stats = { messagesReceived: 0, events: 0, lastEventAt: null, lastEventType: null };
   #saveWorkspace;
   #disposed = false;
+  #pendingCards = new Map();
+  #cardTimer = null;
   #turns;
   #listPresets;
   #sessionModels = new Map();
@@ -120,6 +125,9 @@ export class FeishuBridge {
 
   dispose() {
     this.#disposed = true;
+    if (this.#cardTimer) clearInterval(this.#cardTimer);
+    this.#cardTimer = null;
+    this.#pendingCards.clear();
     this.#turns?.dispose();
   }
 
@@ -133,7 +141,7 @@ export class FeishuBridge {
 
   // ── inbound ───────────────────────────────────────────────────────────────
 
-  async handleMessage(data) {
+  async handleMessage(data, { resubmitted = false } = {}) {
     if (this.#disposed) return;
     const message = data?.message;
     this.#logEvent('message', `${message?.message_id ?? '-'} chat=${message?.chat_id ?? '-'} type=${message?.message_type ?? '-'}`);
@@ -143,8 +151,10 @@ export class FeishuBridge {
     if (fromBot && this.#config.respondToBotMessages === false) return;
     const openId = senderOpenId(data);
     if (openId && this.#config.botOpenId && openId === this.#config.botOpenId) return;
-    if (this.#state.hasSeen(message.message_id)) return;
-    await this.#state.markSeen(message.message_id);
+    if (!resubmitted) {
+      if (this.#state.hasSeen(message.message_id)) return;
+      await this.#state.markSeen(message.message_id);
+    }
 
     if (!isAllowed(this.#config, message, openId)) {
       // With the all-group-messages scope enabled every message arrives; only
@@ -178,11 +188,16 @@ export class FeishuBridge {
       return;
     }
 
-    // 流式卡片会原地刷新：等它收尾再处理，否则模型只看到半截内容。
-    const settled = await this.#settleCardMessage(message);
-    // 卡片超过 15 分钟仍未收尾：直接丢弃，不进入会话。
-    if (!settled) return;
-    const text = (textOfContentOrPost(settled) ?? '').replace(/@_user_\d+/g, '').trim();
+    // 卡片：只让收尾后的进入会话；仍在流式的先挂起，收尾后再回来处理。
+    if (message.message_type === 'interactive') {
+      const latest = await this.#bot.getMessage?.(message.message_id).catch(() => null);
+      if (latest?.bodyContent) message.content = latest.bodyContent;
+      if (cardStreamingOf(message.content) === true) {
+        this.#trackPendingCard(data, message);
+        return;
+      }
+    }
+    const text = (textOfContentOrPost(message) ?? '').replace(/@_user_\d+/g, '').trim();
     this.#chatTypes.set(chatKey, message.chat_type);
 
     if (topic && text) {
@@ -720,30 +735,50 @@ export class FeishuBridge {
    * 流式卡片收尾：卡片 JSON 2.0 的 config.streaming_mode 为 true 时表示
    * 内容还在增量刷新，收尾时发送方会置为 false。等它关闭后再交给模型。
    */
-  async #settleCardMessage(message) {
-    if (message?.message_type !== 'interactive') return message;
+  /** 记下仍在流式输出的卡片，收尾后再走一遍入站流程。 */
+  #trackPendingCard(data, message) {
     const created = Number(message.create_time) || Date.now();
-    const age = () => Date.now() - created;
-    // 事件里的卡片内容可能只是实体引用；统一走 getMessage 拿渲染后的 JSON 2.0。
-    let current = message;
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      const streaming = cardStreamingOf(current.content);
-      if (streaming !== true) return current;
-      if (age() > CARD_STUCK_MS) {
-        this.#logger?.warn?.('[im-feishu] 卡片超过 15 分钟未收尾，丢弃', message.message_id);
-        return null;
+    this.#pendingCards.set(message.message_id, {
+      data,
+      chatId: message.chat_id,
+      created,
+      lastTextAt: Date.now(),
+    });
+    this.#startCardTimer();
+    this.#log('info', `卡片仍在流式输出，挂起等待收尾 ${message.message_id}`);
+  }
+
+  #startCardTimer() {
+    if (this.#cardTimer || this.#pendingCards.size === 0) return;
+    this.#cardTimer = setInterval(() => { void this.#sweepPendingCards(); }, CARD_POLL_MS);
+    this.#cardTimer?.unref?.();
+  }
+
+  /** 定时检查挂起的卡片：收尾了就重新入站，超时则丢弃。 */
+  async #sweepPendingCards() {
+    if (this.#disposed) return;
+    for (const [messageId, pending] of [...this.#pendingCards]) {
+      if (Date.now() - pending.created > CARD_STUCK_MS) {
+        this.#pendingCards.delete(messageId);
+        this.#log('warn', `卡片超过 15 分钟未收尾，丢弃 ${messageId}`);
+        continue;
       }
-      await new Promise((resolve) => {
-        const timer = setTimeout(resolve, 2_000);
-        timer?.unref?.();
-      });
-      const latest = await this.#bot.getMessage?.(message.message_id).catch(() => null);
+      const latest = await this.#bot.getMessage?.(messageId).catch(() => null);
       if (!latest?.bodyContent) continue;
-      current = { ...current, content: latest.bodyContent };
+      if (cardStreamingOf(latest.bodyContent) === true) continue;
+      this.#pendingCards.delete(messageId);
+      const data = {
+        ...pending.data,
+        message: { ...pending.data.message, content: latest.bodyContent },
+      };
+      await this.handleMessage(data, { resubmitted: true }).catch((error) => {
+        this.#log('warn', `收尾卡片重新入站失败 ${messageId}`, error);
+      });
     }
-    // 等满一分钟仍在流式输出，按异常中断处理。
-    this.#logger?.warn?.('[im-feishu] 卡片流式等待超时，丢弃', message.message_id);
-    return null;
+    if (this.#pendingCards.size === 0 && this.#cardTimer) {
+      clearInterval(this.#cardTimer);
+      this.#cardTimer = null;
+    }
   }
 
   async #quotedMessage(message) {

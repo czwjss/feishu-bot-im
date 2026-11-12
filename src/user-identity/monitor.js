@@ -9,6 +9,7 @@
 import { chatMemberNames, getMessage, listChats, listMessages } from './api.js';
 import { AutoReplyEngine } from './auto-reply.js';
 import {
+  CARD_PENDING_MS,
   MAX_MONITOR_CHATS,
   MAX_MESSAGES_PER_CHAT,
   MAX_SEEN_IDS,
@@ -367,6 +368,80 @@ export class UserMonitorManager {
     return this.status();
   }
 
+  /** 把流式卡片挂到待收尾列表（不进入消息列表）。 */
+  async #trackPendingCard(chatId, item, time) {
+    const pending = [...(this.#store.state.pendingCards ?? [])]
+      .filter((card) => card.messageId !== item.messageId);
+    pending.push({
+      messageId: item.messageId,
+      chatId,
+      createTime: item.createTime ?? new Date(time).toISOString(),
+      lastText: item.text ?? '',
+      lastChangedAt: this.#now(),
+    });
+    await this.#store.saveState({ ...this.#store.state, pendingCards: pending });
+  }
+
+  /** 检查待收尾卡片：收尾了就补进收件箱，超时就彻底丢掉。 */
+  async #settlePendingCards(chat, accessToken) {
+    const pending = this.#store.state.pendingCards ?? [];
+    if (pending.length === 0) return 0;
+    let changed = false;
+    const kept = [];
+    const revived = [];
+    for (const card of pending) {
+      if (card.chatId !== chat.chatId) {
+        kept.push(card);
+        continue;
+      }
+      const message = await this.#getMessage({ accessToken, messageId: card.messageId }).catch(() => null);
+      if (message && message.streaming !== true) {
+        revived.push({ card, message });
+        changed = true;
+        continue;
+      }
+      const age = this.#now() - (Date.parse(card.createTime) || this.#now());
+      if (age > CARD_PENDING_MS) {
+        changed = true; // 彻底丢掉，当它从没来过
+        continue;
+      }
+      const text = message?.text ?? card.lastText;
+      const next = text !== card.lastText ? { ...card, lastText: text, lastChangedAt: this.#now() } : card;
+      if (next !== card) changed = true;
+      kept.push(next);
+    }
+    if (changed) await this.#store.saveState({ ...this.#store.state, pendingCards: kept });
+    if (revived.length === 0) return 0;
+    await this.#reviveCards(chat, revived);
+    return revived.length;
+  }
+
+  /** 收尾的卡片补进收件箱，并按需交给自动回复。 */
+  async #reviveCards(chat, revived) {
+    const entry = this.#store.state.chats[chat.chatId] ?? {};
+    const messages = [...(entry.messages ?? [])];
+    const fresh = [];
+    for (const { card, message } of revived) {
+      if (messages.some((item) => item.messageId === card.messageId)) continue;
+      messages.push({
+        messageId: card.messageId,
+        senderName: message.senderName || (message.senderType === 'app' ? '机器人' : ''),
+        senderOpenId: message.senderOpenId ?? '',
+        senderType: message.senderType ?? '',
+        msgType: 'interactive',
+        streaming: false,
+        createTime: message.createTime || card.createTime,
+        text: message.text || card.lastText,
+        read: false,
+      });
+      fresh.push(card.messageId);
+    }
+    await this.#patchChat(chat.chatId, { messages: messages.slice(-MAX_MESSAGES_PER_CHAT) });
+    if (fresh.length > 0 && chat.replyMode === 'auto' && this.#autoReply) {
+      await this.#autoReply.enqueue(chat, fresh).catch(() => undefined);
+    }
+  }
+
   /** 只更新某个会话的状态字段。 */
   async #patchChat(chatId, patch) {
     await this.#store.saveState({
@@ -505,6 +580,12 @@ export class UserMonitorManager {
           skipped.push({ item, time });
           continue;
         }
+        // 流式卡片：先不进入收件箱，等收尾后再补进来。
+        if (item.msgType === 'interactive' && item.streaming === true) {
+          await this.#trackPendingCard(chat.chatId, item, time);
+          seen.add(item.messageId);
+          continue;
+        }
         eligible.push({ item, time });
         if (eligible.length >= MAX_MESSAGES_PER_POLL) break;
       }
@@ -562,6 +643,10 @@ export class UserMonitorManager {
 
       // 统一收尾：即使本轮只记录了部分消息，也要把游标推到最新的已处理消息。
       // 批次与出站记录可能已被自动回复引擎写过，收尾时以最新值为准。
+      const revived = await this.#settlePendingCards(chat, accessToken);
+      // 收尾卡片会补进消息列表，最终写入以它为准。
+      if (revived > 0) nextMessages = this.#store.state.chats[chat.chatId]?.messages ?? nextMessages;
+
       const latest = this.#store.state.chats[chat.chatId] ?? {};
       await this.#patchChat(chat.chatId, {
         ...current,

@@ -289,3 +289,55 @@ try {
 }
 
 console.log('user identity monitor: 27 assertions passed');
+
+// 12) 流式卡片先不进入收件箱，收尾后才补进来；超时则彻底丢掉。
+{
+  const dir = await mkdtemp(join(tmpdir(), 'im-feishu-card-'));
+  try {
+    const store = new MonitorStore({
+      configPath: join(dir, 'monitor.json'),
+      statePath: join(dir, 'monitor-state.json'),
+    });
+    await store.load();
+    await store.saveConfig({ enabled: true, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all' }] });
+
+    let streaming = true;
+    const monitor = new UserMonitorManager({
+      auth: { async status() { return { authorization: { authorized: true, user: { openId: 'ou_self' } } }; }, async requireAccessToken() { return 'token'; } },
+      store,
+      now: () => now,
+      setInterval: () => ({ unref() {} }),
+      clearInterval: () => {},
+      chatMemberNames: async () => new Map(),
+      listMessages: async () => ({
+        items: [{
+          messageId: 'om_card_stream', createTime: new Date(now).toISOString(),
+          senderType: 'app', senderOpenId: 'cli_app', senderName: '机器人',
+          msgType: 'interactive', streaming: true, text: '⏳ 正在处理…',
+        }],
+        hasMore: false, pageToken: null,
+      }),
+      getMessage: async () => ({
+        messageId: 'om_card_stream', msgType: 'interactive', streaming,
+        text: streaming ? '⏳ 正在处理…' : '评审改到下午三点',
+        senderOpenId: 'cli_app', senderType: 'app', senderName: '机器人',
+        createTime: new Date(now).toISOString(),
+      }),
+    });
+    await store.saveState({ chats: { [chatId]: { cursorTimeMs: now - 60_000, seen: [], messages: [] } } });
+
+    await monitor.pollOnce();
+    assert.equal(store.state.chats[chatId].messages.length, 0, 'streaming card is not in the inbox');
+    assert.equal(store.state.pendingCards.length, 1, 'streaming card waits for settlement');
+
+    streaming = false;
+    await monitor.pollOnce();
+    assert.equal(store.state.pendingCards.length, 0, 'settled card leaves the pending list');
+    assert.equal(store.state.chats[chatId].messages.length, 1, 'settled card enters the inbox');
+    assert.match(store.state.chats[chatId].messages[0].text, /评审改到下午三点/);
+    assert.equal(store.state.chats[chatId].messages[0].read, false, 'revived card counts as unread');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+console.log('user identity monitor cards: 5 assertions passed');

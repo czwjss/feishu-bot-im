@@ -28,6 +28,9 @@ export const BATCH_MAX_WAIT_MS = 3 * 60_000;
 export const BATCH_MAX_MESSAGES = 10;
 export const DEFAULT_WORKER_PRESET = 'standard';
 export const MAX_WORKER_PRESET = 40;
+/** 流式卡片在收尾前不进入收件箱；超过这个时间仍未收尾就彻底丢掉。 */
+export const CARD_PENDING_MS = 15 * 60_000;
+export const MAX_PENDING_CARDS = 20;
 /** 流式卡片等待中的批次，多久再看一次。 */
 export const CARD_RETRY_MS = 30_000;
 /** 消息处理结果：批次已派发给 Worker，后续不再由插件跟踪。 */
@@ -144,6 +147,21 @@ function stringOf(value) {
   return typeof value === 'string' ? value : '';
 }
 
+/** 还在流式输出、尚未收尾的卡片：不进入消息列表，收尾后才补进来。 */
+export function normalizePendingCard(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const messageId = cleanString(source.messageId);
+  const chatId = chatKey(cleanString(source.chatId));
+  if (!messageId || !chatId) return null;
+  return Object.freeze({
+    messageId,
+    chatId,
+    createTime: cleanString(source.createTime),
+    lastText: stringOf(source.lastText).slice(0, MAX_MESSAGE_TEXT),
+    lastChangedAt: cleanTime(source.lastChangedAt),
+  });
+}
+
 export function normalizeMonitorState(value) {
   const source = value && typeof value === 'object' ? value : {};
   const sourceChats = source.chats && typeof source.chats === 'object' ? source.chats : {};
@@ -193,9 +211,19 @@ export function normalizeMonitorState(value) {
       lastDeliveredAt: cleanTime(entry.lastDeliveredAt),
     });
   }
+  const pendingCards = [];
+  const pendingIds = new Set();
+  for (const raw of Array.isArray(source.pendingCards) ? source.pendingCards : []) {
+    const card = normalizePendingCard(raw);
+    if (!card || pendingIds.has(card.messageId)) continue;
+    pendingIds.add(card.messageId);
+    pendingCards.push(card);
+    if (pendingCards.length >= MAX_PENDING_CARDS) break;
+  }
   return Object.freeze({
     version: MONITOR_VERSION,
     chats: Object.freeze(chats),
+    pendingCards: Object.freeze(pendingCards),
   });
 }
 
