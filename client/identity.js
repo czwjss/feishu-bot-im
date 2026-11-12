@@ -13,6 +13,7 @@ const h = React.createElement;
       const [error, setError] = React.useState(null);
 
       const [drafts, setDrafts] = React.useState([]);
+      const [workerOptions, setWorkerOptions] = React.useState({ workspaces: [], presets: [] });
       const load = React.useCallback(async () => {
         try {
           const value = await rpc(connection, API.userMonitorStatus, {});
@@ -27,6 +28,17 @@ const h = React.createElement;
       }, [connection]);
 
       React.useEffect(() => { void load(); }, [load]);
+      React.useEffect(() => {
+        let alive = true;
+        void rpc(connection, API.userMonitorWorkerOptions, {}).then((value) => {
+          if (!alive) return;
+          setWorkerOptions({
+            workspaces: Array.isArray(value?.workspaces) ? value.workspaces : [],
+            presets: Array.isArray(value?.presets) ? value.presets : [],
+          });
+        }).catch(() => undefined);
+        return () => { alive = false; };
+      }, [connection]);
       React.useEffect(() => {
         const timer = setInterval(() => { void load(); }, 10_000);
         return () => clearInterval(timer);
@@ -56,6 +68,7 @@ const h = React.createElement;
       const add = (chat) => act(`add:${chat.chatId}`, () => rpc(connection, API.userMonitorAdd, chat));
       const remove = (chat) => act(`remove:${chat.chatId}`, () => rpc(connection, API.userMonitorRemove, { chatId: chat.chatId }));
       const setChat = (chat, patch) => act(`mode:${chat.chatId}`, () => rpc(connection, API.userMonitorChatSet, { chatId: chat.chatId, ...patch }));
+      const setWorker = (patch) => act('worker', () => rpc(connection, API.userMonitorWorkerSet, patch));
       const sendDraft = (draft) => act(`send:${draft.draftId}`, async () => {
         await rpc(connection, API.userMonitorDraftSend, { draftId: draft.draftId });
         return null;
@@ -212,6 +225,32 @@ const h = React.createElement;
                   style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
                 }, `${message.senderName || t('未知', 'Unknown')}：${message.text}`)))))
             : null,
+          h('div', { style: { display: 'grid', gap: '6px', paddingTop: '8px', borderTop: '1px solid var(--dsw-alias-border-l1)' } },
+            h('div', { style: { fontSize: '12px', fontWeight: 600 } }, t('Worker 会话', 'Worker session')),
+            h('div', { style: S.row },
+              h('span', { style: { ...S.hint, minWidth: '42px' } }, t('分组', 'Group')),
+              h('select', {
+                style: { ...S.input, flex: 1, minWidth: 0, height: '30px', fontSize: '12px' },
+                value: monitor.worker?.workspaceId || '',
+                disabled: busy === 'worker',
+                onChange: (event) => void setWorker({ workspaceId: event.target.value, workspacePath: '' }),
+              },
+              h('option', { value: '' }, t('默认工作区', 'Default workspace')),
+              workerOptions.workspaces.map((item) => h('option', { key: item.id, value: item.id },
+                `${item.title || item.id}${item.path ? ` · ${item.path}` : ''}`)))),
+            h('div', { style: S.row },
+              h('span', { style: { ...S.hint, minWidth: '42px' } }, t('预设', 'Preset')),
+              h('select', {
+                style: { ...S.input, flex: 1, minWidth: 0, height: '30px', fontSize: '12px' },
+                value: monitor.worker?.preset || '',
+                disabled: busy === 'worker',
+                onChange: (event) => void setWorker({ preset: event.target.value }),
+              },
+              h('option', { value: '' }, t('默认（standard）', 'Default (standard)')),
+              workerOptions.presets.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id)))),
+            h('div', { style: S.hint },
+              t('自动回复的 Worker 会话会建在这个分组下；改动后下一次派发自动换新会话。',
+                'Auto-reply workers are created in this group; changes take effect on the next dispatch.'))),
           h('div', { style: { ...S.row, marginTop: '4px' } },
             h('button', { type: 'button', className: 'bxf-mini', disabled: busy === 'chats', onClick: () => void refreshChats() },
               busy === 'chats' ? t('正在读取…', 'Loading…') : t('选择会话', 'Choose chats'))),
@@ -396,6 +435,17 @@ const h = React.createElement;
       }, [connection]);
 
       React.useEffect(() => { void load(); }, [load]);
+      React.useEffect(() => {
+        let alive = true;
+        void rpc(connection, API.userMonitorWorkerOptions, {}).then((value) => {
+          if (!alive) return;
+          setWorkerOptions({
+            workspaces: Array.isArray(value?.workspaces) ? value.workspaces : [],
+            presets: Array.isArray(value?.presets) ? value.presets : [],
+          });
+        }).catch(() => undefined);
+        return () => { alive = false; };
+      }, [connection]);
 
       React.useEffect(() => {
         if (status?.connect?.phase !== 'pending') return undefined;

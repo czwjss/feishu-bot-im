@@ -204,6 +204,33 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
       case 'user.monitor.remove':
         return ok(await requireUserMonitor().removeChat(input.chatId));
 
+      case 'user.monitor.worker.set':
+        return ok(await requireUserMonitor().setWorker({
+          workspaceId: input.workspaceId,
+          workspacePath: input.workspacePath,
+          preset: input.preset,
+        }));
+
+      case 'user.monitor.worker.options': {
+        const baseline = await harness.workspaceBaseline().catch(() => ({}));
+        const items = Array.isArray(baseline?.items) ? baseline.items : [];
+        const runtime = manager.runtimes[0] ?? null;
+        const presets = runtime ? await runtime.listPresets().catch(() => []) : [];
+        return ok({
+          workspaces: items
+            .filter((item) => typeof item?.workspaceId === 'string' && item.workspaceId)
+            .map((item) => ({
+              id: String(item.workspaceId),
+              path: String(item.path ?? ''),
+              title: item.title ? String(item.title) : '',
+            })),
+          presets: (Array.isArray(presets) ? presets : []).map((preset) => ({
+            id: String(preset?.id ?? ''),
+            name: String(preset?.name ?? preset?.id ?? ''),
+          })).filter((preset) => preset.id),
+        });
+      }
+
       case 'user.monitor.enable':
         return ok(await requireUserMonitor().setEnabled(input.enabled === true));
 

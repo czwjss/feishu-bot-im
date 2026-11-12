@@ -32,6 +32,8 @@ export const BATCH_MAX_MESSAGES = 10;
 export const DECISION_TIMEOUT_MS = 180_000;
 /** 自动回复频率上限（每会话每小时）。 */
 export const AUTO_REPLY_HOURLY_LIMIT = 20;
+export const DEFAULT_WORKER_PRESET = 'standard';
+export const MAX_WORKER_PRESET = 40;
 export const MAX_OUTBOX = 20;
 export const DEFAULT_POLL_INTERVAL_MS = 60_000;
 export const MIN_POLL_INTERVAL_MS = 5_000;
@@ -87,6 +89,16 @@ export function normalizeMonitorChat(value) {
   });
 }
 
+/** Worker 会话的归属：工作区（id 优先，其次路径）与预设。 */
+export function normalizeWorkerConfig(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  return Object.freeze({
+    workspaceId: cleanString(source.workspaceId).slice(0, 121),
+    workspacePath: cleanString(source.workspacePath),
+    preset: cleanString(source.preset).slice(0, MAX_WORKER_PRESET),
+  });
+}
+
 export function normalizeMonitorConfig(value) {
   const source = value && typeof value === 'object' ? value : {};
   const seen = new Set();
@@ -105,6 +117,7 @@ export function normalizeMonitorConfig(value) {
       ? Math.min(MAX_POLL_INTERVAL_MS, Math.max(MIN_POLL_INTERVAL_MS, Math.trunc(interval)))
       : DEFAULT_POLL_INTERVAL_MS,
     chats: Object.freeze(chats),
+    worker: normalizeWorkerConfig(source.worker),
   });
 }
 
@@ -200,6 +213,7 @@ export function normalizeMonitorState(value) {
       messages: Object.freeze(messages),
       sessionId: cleanString(entry.sessionId) || null,
       sessionEpoch: cleanString(entry.sessionEpoch) || null,
+      workerConfigKey: cleanString(entry.workerConfigKey) || null,
       batch: Object.freeze({
         messageIds: Object.freeze(pendingIds),
         firstAt: cleanTime(batch.firstAt),
@@ -269,6 +283,7 @@ export class MonitorStore {
       enabled: source.enabled === undefined ? this.#config.enabled : source.enabled,
       pollIntervalMs: source.pollIntervalMs === undefined ? this.#config.pollIntervalMs : source.pollIntervalMs,
       chats: source.chats === undefined ? this.#config.chats : source.chats,
+      worker: source.worker === undefined ? this.#config.worker : source.worker,
     });
     await writePrivateJson(this.#configPath, next);
     this.#config = next;

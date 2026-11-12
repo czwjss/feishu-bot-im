@@ -186,6 +186,7 @@ export class UserMonitorManager {
     return {
       enabled: config.enabled,
       pollIntervalMs: config.pollIntervalMs,
+      worker: config.worker,
       unreadTotal,
       authorization: auth
         ? {
@@ -381,6 +382,19 @@ export class UserMonitorManager {
     const state = { ...this.#store.state, chats: { ...this.#store.state.chats } };
     delete state.chats[id];
     await this.#store.saveState(state);
+    return this.status();
+  }
+
+  /** 设置 Worker 会话的工作区与预设；下次派发会按新配置重建会话。 */
+  async setWorker(patch = {}) {
+    const current = this.#store.config.worker ?? {};
+    await this.#store.saveConfig({
+      worker: {
+        workspaceId: patch.workspaceId === undefined ? current.workspaceId : patch.workspaceId,
+        workspacePath: patch.workspacePath === undefined ? current.workspacePath : patch.workspacePath,
+        preset: patch.preset === undefined ? current.preset : patch.preset,
+      },
+    });
     return this.status();
   }
 

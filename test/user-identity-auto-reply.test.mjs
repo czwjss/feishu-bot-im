@@ -129,6 +129,8 @@ try {
 
   assert.equal(store.state.chats[chatId].sessionEpoch, 'avatar-decision-tools-1', 'worker epoch recorded');
 
+  // 2) 工作区与预设按配置传入 createSession
+  assert.equal(sessions[0].agentPreset, 'standard');
   // 2) Worker 决定回复 → 以本人身份发出，批次消息标记已读
   const result = await engine.reply({ token, text: '去，文档我一会儿发你' });
   assert.equal(result.messageIds.length, 2);
@@ -159,6 +161,31 @@ try {
   assert.equal(sessions.length, sessionsBefore + 1, 'a fresh worker session is created');
   assert.notEqual(store.state.chats[chatId].sessionEpoch, 'legacy');
   await engine.skip({ token: epochToken, reason: '测试' });
+
+  // 2a) 配置工作区与预售后，旧会话因配置变化被替换
+  await store.saveConfig({
+    enabled: true,
+    worker: { workspaceId: 'ws_feishu', preset: 'standard' },
+    chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all', replyMode: 'auto' }],
+  });
+  await store.saveState({
+    chats: {
+      [chatId]: {
+        ...store.state.chats[chatId],
+        sessionId: 'sess-old-workspace',
+        sessionEpoch: 'avatar-decision-tools-1',
+        workerConfigKey: null,
+        messages: [{ messageId: 'om_ws', senderName: '朋友', senderOpenId: 'ou_friend', senderType: 'user', text: '换分组后', createTime: new Date(clock.now()).toISOString(), read: false }],
+        batch: { messageIds: ['om_ws'], firstAt: clock.now(), lastAt: clock.now(), token: null },
+      },
+    },
+  });
+  const workspaceToken = await engine.flush({ ...store.config.chats[0] });
+  assert.ok(workspaceToken, 'workspace change dispatches a new batch');
+  const created = sessions.at(-1);
+  assert.equal(created.workspaceId, 'ws_feishu', 'worker joins the configured workspace');
+  assert.equal(store.state.chats[chatId].workerConfigKey, JSON.stringify(['ws_feishu', 'standard']));
+  await engine.skip({ token: workspaceToken, reason: '测试' });
 
   // 3) 令牌只能用一次
   await assert.rejects(() => engine.reply({ token, text: '再来一条' }), /批次已失效/);

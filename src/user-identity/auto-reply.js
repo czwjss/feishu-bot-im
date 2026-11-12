@@ -19,6 +19,7 @@ import {
   BATCH_MAX_MESSAGES,
   BATCH_MAX_WAIT_MS,
   DECISION_TIMEOUT_MS,
+  DEFAULT_WORKER_PRESET,
   MAX_OUTBOX,
 } from './monitor-store.js';
 
@@ -220,14 +221,22 @@ export class AutoReplyEngine {
     await this.#patch(chat.chatId, { batch: { ...(entry.batch ?? {}), token } });
 
     let sessionId = entry.sessionId ?? null;
+    const workerKey = this.#workerKey(chat);
     const epochStale = sessionId && entry.sessionEpoch !== this.#workerEpoch;
+    const configStale = sessionId && entry.workerConfigKey !== workerKey;
     const unusable = sessionId ? this.#sessionUsable(sessionId) === false : false;
     try {
-      if (!sessionId || epochStale || unusable) {
+      if (!sessionId || epochStale || configStale || unusable) {
         if (unusable) this.#logger?.warn?.(`[im-feishu] ${chat.chatId} 的 Worker 会话已不可用，重建`);
-        sessionId = await this.#harness.createSession({ agentPreset: chat.preset || 'standard' });
+        if (configStale) this.#logger?.info?.(`[im-feishu] ${chat.chatId} 的 Worker 工作区/预设变了，重建会话`);
+        const target = await this.#workerTarget(chat);
+        sessionId = await this.#harness.createSession(target);
         this.#workerSessions.add(sessionId);
-        await this.#patch(chat.chatId, { sessionId, sessionEpoch: this.#workerEpoch });
+        await this.#patch(chat.chatId, {
+          sessionId,
+          sessionEpoch: this.#workerEpoch,
+          workerConfigKey: workerKey,
+        });
       }
       this.#workerSessions.add(sessionId);
       // 决策工具挂在 Worker 自己的作用域上，发任务前先确保已挂好。
@@ -241,6 +250,7 @@ export class AutoReplyEngine {
         batch: { ...(entry.batch ?? {}), token: null },
         sessionId: null,
         sessionEpoch: null,
+        workerConfigKey: null,
       });
       return null;
     }
@@ -254,6 +264,7 @@ export class AutoReplyEngine {
         batch: { ...(this.#store.state.chats[chat.chatId]?.batch ?? {}), token: null },
         sessionId: null,
         sessionEpoch: null,
+        workerConfigKey: null,
       });
     }, this.#timeoutMs);
     timer?.unref?.();
@@ -303,6 +314,31 @@ export class AutoReplyEngine {
   }
 
   /** Worker 会话是否还能跑模型步骤；null 表示无法判断。 */
+  /** Worker 的工作区/预设指纹：变了就换新会话。 */
+  #workerKey(chat) {
+    const worker = this.#store.config.worker ?? {};
+    return JSON.stringify([
+      worker.workspaceId || worker.workspacePath || '',
+      chat.preset || worker.preset || DEFAULT_WORKER_PRESET,
+    ]);
+  }
+
+  /** session.create 的目标：优先工作区 id，其次路径换 id，最后退回 cwd。 */
+  async #workerTarget(chat) {
+    const worker = this.#store.config.worker ?? {};
+    const request = { agentPreset: chat.preset || worker.preset || DEFAULT_WORKER_PRESET };
+    if (worker.workspaceId) {
+      request.workspaceId = worker.workspaceId;
+      return request;
+    }
+    if (worker.workspacePath) {
+      const workspaceId = await this.#harness.ensureWorkspace?.(worker.workspacePath).catch(() => null);
+      if (workspaceId) request.workspaceId = workspaceId;
+      else request.cwd = worker.workspacePath;
+    }
+    return request;
+  }
+
   #sessionUsable(sessionId) {
     if (this.#workerSessions.has(sessionId)) return true;
     const guard = this.#sessionGuard;

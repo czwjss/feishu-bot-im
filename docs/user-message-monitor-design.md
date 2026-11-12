@@ -638,6 +638,18 @@ offline_access
 - 触发规则（阶段 1 的 A）：私聊默认全收，群聊默认只收 @我 / 回复我，也可改成关键词模式；
 - 草稿确认（阶段 2 的 B）：`feishu_avatar_draft` 只创建草稿，用户在设置页点「发送」才以本人身份发出，30 分钟过期。
 
+### Worker 会话归属：工作区分组与预设
+
+设置页「分身 → 消息监听」里可选两项，存于 `monitor.json` 的 `worker`：
+
+```json
+{ "worker": { "workspaceId": "ws_xxx", "workspacePath": "", "preset": "standard" } }
+```
+
+- `workspaceId` 优先；没有 id 但有路径时先 `workspace.create` 换 id，失败退回 `cwd`；
+- 预设按 `chat.preset → worker.preset → standard` 顺序取；
+- 每次派发会比对 `workerConfigKey`（工作区 + 预设），变了就重建 Worker 会话。
+
 ### 决策记录：Worker 工具用 Agent 作用域挂载
 
 结论：`feishu_avatar_reply` / `feishu_avatar_skip` 注册到 Worker Agent 自己的

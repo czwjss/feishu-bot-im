@@ -266,6 +266,8 @@ var API = {
   userMonitorAdd: "user.monitor.add",
   userMonitorRemove: "user.monitor.remove",
   userMonitorEnable: "user.monitor.enable",
+  userMonitorWorkerSet: "user.monitor.worker.set",
+  userMonitorWorkerOptions: "user.monitor.worker.options",
   userMonitorPoll: "user.monitor.poll",
   userMonitorChatSet: "user.monitor.chat.set",
   userMonitorDraftSend: "user.monitor.draft.send",
@@ -609,6 +611,7 @@ function MonitorPanel({ connection }) {
   const [busy, setBusy] = import_react2.default.useState("");
   const [error, setError] = import_react2.default.useState(null);
   const [drafts, setDrafts] = import_react2.default.useState([]);
+  const [workerOptions, setWorkerOptions2] = import_react2.default.useState({ workspaces: [], presets: [] });
   const load = import_react2.default.useCallback(async () => {
     try {
       const value = await rpc(connection, API.userMonitorStatus, {});
@@ -624,6 +627,19 @@ function MonitorPanel({ connection }) {
   import_react2.default.useEffect(() => {
     void load();
   }, [load]);
+  import_react2.default.useEffect(() => {
+    let alive = true;
+    void rpc(connection, API.userMonitorWorkerOptions, {}).then((value) => {
+      if (!alive) return;
+      setWorkerOptions2({
+        workspaces: Array.isArray(value?.workspaces) ? value.workspaces : [],
+        presets: Array.isArray(value?.presets) ? value.presets : []
+      });
+    }).catch(() => void 0);
+    return () => {
+      alive = false;
+    };
+  }, [connection]);
   import_react2.default.useEffect(() => {
     const timer = setInterval(() => {
       void load();
@@ -653,6 +669,7 @@ function MonitorPanel({ connection }) {
   const add = (chat) => act(`add:${chat.chatId}`, () => rpc(connection, API.userMonitorAdd, chat));
   const remove = (chat) => act(`remove:${chat.chatId}`, () => rpc(connection, API.userMonitorRemove, { chatId: chat.chatId }));
   const setChat = (chat, patch) => act(`mode:${chat.chatId}`, () => rpc(connection, API.userMonitorChatSet, { chatId: chat.chatId, ...patch }));
+  const setWorker = (patch) => act("worker", () => rpc(connection, API.userMonitorWorkerSet, patch));
   const sendDraft = (draft) => act(`send:${draft.draftId}`, async () => {
     await rpc(connection, API.userMonitorDraftSend, { draftId: draft.draftId });
     return null;
@@ -868,6 +885,55 @@ function MonitorPanel({ connection }) {
           }, `${message.senderName || t("\u672A\u77E5", "Unknown")}\uFF1A${message.text}`))
         ))
       ) : null,
+      h2(
+        "div",
+        { style: { display: "grid", gap: "6px", paddingTop: "8px", borderTop: "1px solid var(--dsw-alias-border-l1)" } },
+        h2("div", { style: { fontSize: "12px", fontWeight: 600 } }, t("Worker \u4F1A\u8BDD", "Worker session")),
+        h2(
+          "div",
+          { style: S.row },
+          h2("span", { style: { ...S.hint, minWidth: "42px" } }, t("\u5206\u7EC4", "Group")),
+          h2(
+            "select",
+            {
+              style: { ...S.input, flex: 1, minWidth: 0, height: "30px", fontSize: "12px" },
+              value: monitor.worker?.workspaceId || "",
+              disabled: busy === "worker",
+              onChange: (event) => void setWorker({ workspaceId: event.target.value, workspacePath: "" })
+            },
+            h2("option", { value: "" }, t("\u9ED8\u8BA4\u5DE5\u4F5C\u533A", "Default workspace")),
+            workerOptions.workspaces.map((item) => h2(
+              "option",
+              { key: item.id, value: item.id },
+              `${item.title || item.id}${item.path ? ` \xB7 ${item.path}` : ""}`
+            ))
+          )
+        ),
+        h2(
+          "div",
+          { style: S.row },
+          h2("span", { style: { ...S.hint, minWidth: "42px" } }, t("\u9884\u8BBE", "Preset")),
+          h2(
+            "select",
+            {
+              style: { ...S.input, flex: 1, minWidth: 0, height: "30px", fontSize: "12px" },
+              value: monitor.worker?.preset || "",
+              disabled: busy === "worker",
+              onChange: (event) => void setWorker({ preset: event.target.value })
+            },
+            h2("option", { value: "" }, t("\u9ED8\u8BA4\uFF08standard\uFF09", "Default (standard)")),
+            workerOptions.presets.map((item) => h2("option", { key: item.id, value: item.id }, item.name || item.id))
+          )
+        ),
+        h2(
+          "div",
+          { style: S.hint },
+          t(
+            "\u81EA\u52A8\u56DE\u590D\u7684 Worker \u4F1A\u8BDD\u4F1A\u5EFA\u5728\u8FD9\u4E2A\u5206\u7EC4\u4E0B\uFF1B\u6539\u52A8\u540E\u4E0B\u4E00\u6B21\u6D3E\u53D1\u81EA\u52A8\u6362\u65B0\u4F1A\u8BDD\u3002",
+            "Auto-reply workers are created in this group; changes take effect on the next dispatch."
+          )
+        )
+      ),
       h2(
         "div",
         { style: { ...S.row, marginTop: "4px" } },
@@ -1111,6 +1177,19 @@ function UserIdentityButton({ connection, bot }) {
   import_react2.default.useEffect(() => {
     void load();
   }, [load]);
+  import_react2.default.useEffect(() => {
+    let alive = true;
+    void rpc(connection, API.userMonitorWorkerOptions, {}).then((value) => {
+      if (!alive) return;
+      setWorkerOptions({
+        workspaces: Array.isArray(value?.workspaces) ? value.workspaces : [],
+        presets: Array.isArray(value?.presets) ? value.presets : []
+      });
+    }).catch(() => void 0);
+    return () => {
+      alive = false;
+    };
+  }, [connection]);
   import_react2.default.useEffect(() => {
     if (status?.connect?.phase !== "pending") return void 0;
     const timer = setInterval(() => {

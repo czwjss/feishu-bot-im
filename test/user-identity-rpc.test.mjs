@@ -40,6 +40,7 @@ const userMonitor = {
   async addChat(input) { monitorCalls.push(['add', input]); return { enabled: false, chats: [input] }; },
   async removeChat(chatId) { monitorCalls.push(['remove', chatId]); return { enabled: false, chats: [] }; },
   async setEnabled(enabled) { monitorCalls.push(['enable', enabled]); return { enabled, chats: [] }; },
+  async setWorker(patch) { monitorCalls.push(['worker', patch]); return { enabled: false, chats: [], worker: patch }; },
   async pollOnce() { monitorCalls.push(['poll']); },
 };
 const handle = createRpcHandler({ manager, harness, version: '0.4.1', userIdentity, userMonitor });
@@ -67,6 +68,11 @@ const handle = createRpcHandler({ manager, harness, version: '0.4.1', userIdenti
   assert.deepEqual(monitorCalls.at(-1), ['add', { chatId: 'oc_test', name: '测试', chatMode: 'p2p' }]);
   await handle('user.monitor.remove', { chatId: 'oc_test' });
   assert.deepEqual(monitorCalls.at(-1), ['remove', 'oc_test']);
+  await handle('user.monitor.worker.set', { workspaceId: 'ws_1', preset: 'standard' });
+  assert.deepEqual(monitorCalls.at(-1), ['worker', { workspaceId: 'ws_1', workspacePath: undefined, preset: 'standard' }]);
+  const workerOptions = await handle('user.monitor.worker.options', {});
+  assert.ok(Array.isArray(workerOptions.value.workspaces), 'worker options list workspaces');
+  assert.ok(Array.isArray(workerOptions.value.presets), 'worker options list presets');
   await handle('user.monitor.enable', { enabled: true });
   assert.deepEqual(monitorCalls.at(-1), ['enable', true]);
   await handle('user.monitor.poll', {});
@@ -84,4 +90,4 @@ const handle = createRpcHandler({ manager, harness, version: '0.4.1', userIdenti
   await assert.rejects(() => noMonitor('user.monitor.status', {}), /消息监听没有加载/);
 }
 
-console.log('im-feishu user identity rpc: 16 assertions passed');
+console.log('im-feishu user identity rpc: 18 assertions passed');
