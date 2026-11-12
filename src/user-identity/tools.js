@@ -235,7 +235,7 @@ export function createSendTool({ auth, fetchImpl }) {
         },
         title: {
           type: 'string',
-          description: '卡片标题，可选，最多 100 字符。日常对话和短消息不写；总结、长内容或需要重点提示时写一句简短标题。',
+          description: '卡片标题，最多 100 字符，可选。',
         },
         color: {
           type: 'string',
@@ -375,7 +375,7 @@ export function createDraftTool({ monitor }) {
         },
         title: {
           type: 'string',
-          description: '卡片标题，可选，最多 100 字符。日常对话和短消息不写；总结、长内容或需要重点提示时写一句简短标题。',
+          description: '卡片标题，最多 100 字符，可选。',
         },
       },
       required: ['chatId', 'text'],

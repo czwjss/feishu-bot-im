@@ -26,6 +26,7 @@ assert.equal(sections.length, 1);
 assert.equal(sections[0].name, 'im-feishu-user:policy');
 assert.equal(sections[0].order, 141);
 assert.match(sections[0].text, /feishu_avatar_send/);
+assert.match(sections[0].text, /标题按需/, 'title style rule lives in the avatar policy');
 assert.deepEqual(tools.map((tool) => tool.name), [
   'feishu_avatar_me',
   'feishu_avatar_messages',
