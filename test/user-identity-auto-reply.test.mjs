@@ -243,6 +243,65 @@ try {
   assert.equal(prompts.length, promptsBeforeCard, 'no prompt while the card streams');
   assert.equal(store.state.chats[chatId].batch.messageIds.length, 1, 'batch kept for the next round');
 
+  // 6b-2) 卡死的卡片只丢自己，同批的正常消息照常派发。
+  cardStreaming = true;
+  await store.saveState({
+    chats: {
+      [chatId]: {
+        ...store.state.chats[chatId],
+        lastDispatchAt: 0,
+        messages: [
+          {
+            messageId: 'om_stuck2', senderName: '朋友', senderOpenId: 'ou_friend', senderType: 'user',
+            msgType: 'interactive', text: '⏳ 正在处理…', streaming: true,
+            createTime: new Date(clock.now() - 16 * 60_000).toISOString(), read: false,
+          },
+          {
+            messageId: 'om_normal', senderName: '朋友', senderOpenId: 'ou_friend', senderType: 'user',
+            text: '另外周报几点发？', createTime: new Date(clock.now()).toISOString(), read: false,
+          },
+        ],
+        batch: { messageIds: ['om_stuck2', 'om_normal'], firstAt: clock.now(), lastAt: clock.now() },
+      },
+    },
+  });
+  const promptsBeforeMixed = prompts.length;
+  assert.ok(await cardEngine.flush({ ...cardChat }), 'normal message dispatches despite the stuck card');
+  assert.equal(prompts.length, promptsBeforeMixed + 1);
+  assert.match(prompts.at(-1).text, /周报几点发/);
+  assert.equal(prompts.at(-1).text.includes('正在处理'), false, 'stuck card is not sent to the worker');
+  const mixed = store.state.chats[chatId].messages;
+  assert.equal(mixed.find((m) => m.messageId === 'om_stuck2').outcome, 'dropped');
+  assert.equal(mixed.find((m) => m.messageId === 'om_normal').outcome, 'dispatched');
+
+  // 6b-3) 还在流式的卡片不阻塞同批已收尾的文字消息。
+  cardStreaming = true;
+  await store.saveState({
+    chats: {
+      [chatId]: {
+        ...store.state.chats[chatId],
+        lastDispatchAt: 0,
+        messages: [
+          {
+            messageId: 'om_card_wait', senderName: '朋友', senderOpenId: 'ou_friend', senderType: 'user',
+            msgType: 'interactive', text: '⏳ 正在处理…', streaming: true,
+            createTime: new Date(clock.now()).toISOString(), read: false,
+          },
+          {
+            messageId: 'om_text_now', senderName: '朋友', senderOpenId: 'ou_friend', senderType: 'user',
+            text: '先看这条', createTime: new Date(clock.now()).toISOString(), read: false,
+          },
+        ],
+        batch: { messageIds: ['om_card_wait', 'om_text_now'], firstAt: clock.now(), lastAt: clock.now() },
+      },
+    },
+  });
+  const promptsBeforeWait = prompts.length;
+  assert.ok(await cardEngine.flush({ ...cardChat }), 'settled text dispatches while a card still streams');
+  assert.equal(prompts.length, promptsBeforeWait + 1);
+  assert.match(prompts.at(-1).text, /先看这条/);
+  assert.deepEqual(store.state.chats[chatId].batch.messageIds, ['om_card_wait'], 'only the waiting card stays in the batch');
+
   // 6c) 超过 15 分钟都没收尾：直接丢弃，不派发。
   cardStreaming = true;
   await store.saveState({
@@ -344,4 +403,4 @@ try {
   await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-console.log('user identity auto reply: 41 assertions passed');
+console.log('user identity auto reply: 49 assertions passed');

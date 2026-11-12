@@ -677,7 +677,10 @@ offline_access
 | 分身监听（`auto-reply.js`） | 派发前对卡片调用 `getMessage` 刷新；`streaming_mode` 仍为 true 就保留批次等下一轮 |
 
 超时兜底：卡片创建超过 **15 分钟**仍为 `streaming_mode: true`，视为发送方异常中断，
-直接丢弃，不派发、不进入会话（分身侧把消息标记为 `dropped`；机器人侧直接 return）。
+只丢弃这一条（分身侧标记 `dropped`，机器人侧直接 return），**不影响同批其他消息**。
+
+分身侧按消息粒度处理：一批里同时有「仍在流式的卡片」和「已收尾的文字」时，
+文字立刻派发，卡片留在批次里，30 秒后自动再看一次，收尾后再派发。
 
 依据：飞书[流式更新说明](https://open.feishu.cn/document/cardkit-v1/streaming-updates-openapi-overview)里
 `config.streaming_mode` 表示卡片是否处于流式更新模式，收尾时发送方会置为 false。

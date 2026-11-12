@@ -11,6 +11,7 @@
  * 派发失败时保留批次，下一轮或手动「处理待办」会重试。
  */
 import { CARD_STUCK_MS } from '../message-text.js';
+import { CARD_RETRY_MS } from './monitor-store.js';
 import {
   BATCH_DEBOUNCE_MS,
   BATCH_MAX_MESSAGES,
@@ -137,9 +138,25 @@ export class AutoReplyEngine {
     const ids = entry.batch?.messageIds ?? [];
     if (ids.length === 0) return null;
 
-    const batchMessages = (entry.messages ?? []).filter((message) => ids.includes(message.messageId));
-    const humanMessages = batchMessages.filter((message) => message.senderType !== 'app');
-    const botOnly = batchMessages.length > 0 && humanMessages.length === 0;
+    // 卡片逐条判定：能派发的、继续等的、已卡死的，互不影响。
+    const { waiting, stuck } = await this.#classifyCards(chat.chatId, ids);
+    const stuckIds = new Set(stuck.map((message) => message.messageId));
+    const waitingIds = new Set(waiting.map((message) => message.messageId));
+    if (stuck.length > 0) {
+      this.#logger?.warn?.(`[im-feishu] ${chat.chatId} ${stuck.length} 条卡片超过 15 分钟未收尾，已丢弃`);
+      await this.#markDropped(chat.chatId, stuck);
+    }
+
+    const ready = this.#storedMessages(chat.chatId, ids)
+      .filter((message) => !waitingIds.has(message.messageId) && !stuckIds.has(message.messageId));
+    const humanReady = ready.filter((message) => message.senderType !== 'app');
+    const botOnly = ready.length > 0 && humanReady.length === 0;
+
+    if (ready.length === 0) {
+      await this.#finishBatch(chat.chatId, { waitingIds: [...waitingIds] });
+      if (waitingIds.size > 0) this.#scheduleRetry(chat);
+      return null;
+    }
 
     // 只有机器人消息时默认不回复，避免和机器人互相刷屏。
     if (botOnly) {
@@ -148,37 +165,19 @@ export class AutoReplyEngine {
         : (this.#dispatchedWithin(chat.chatId, 10 * 60_000) ? '十分钟内已派发过机器人批次，跳过' : '');
       if (reason) {
         this.#logger?.info?.(`[im-feishu] ${chat.chatId} ${reason}`);
-        await this.#clearBatch(chat.chatId, batchMessages, { markHandled: true });
+        await this.#finishBatch(chat.chatId, {
+          handledIds: ready.map((message) => message.messageId),
+          waitingIds: [...waitingIds],
+        });
         return null;
       }
-    }
-    if (batchMessages.length === 0) {
-      await this.#patch(chat.chatId, { batch: { messageIds: [], firstAt: null, lastAt: null } });
-      return null;
-    }
-
-    let promptMessages = botOnly ? batchMessages : humanMessages;
-    const pendingCards = promptMessages.filter((message) => message.msgType === 'interactive');
-    if (pendingCards.length > 0) {
-      const settled = await this.#refreshCards(chat.chatId, pendingCards);
-      if (settled === 'stuck') {
-        this.#logger?.warn?.(`[im-feishu] ${chat.chatId} 卡片超过 15 分钟未收尾，丢弃`);
-        await this.#clearBatch(chat.chatId, batchMessages, { markHandled: true, outcome: 'dropped' });
-        return null;
-      }
-      if (settled === false) {
-        this.#logger?.info?.(`[im-feishu] ${chat.chatId} 卡片还在流式输出，等下一轮再派发`);
-        return null;
-      }
-      promptMessages = this.#storedMessages(chat.chatId, ids)
-        .filter((message) => (botOnly ? true : message.senderType !== 'app'));
     }
 
     try {
       const sessionId = await this.#ensureSession(chat, entry);
       await this.#harness.prompt(sessionId, renderBatchPrompt({
         chat,
-        messages: previewMessages(promptMessages),
+        messages: previewMessages(botOnly ? ready : humanReady),
         batchId: batchIdOf(),
       }));
     } catch (error) {
@@ -188,7 +187,11 @@ export class AutoReplyEngine {
     }
 
     await this.#patch(chat.chatId, { lastDispatchAt: this.#now() });
-    await this.#clearBatch(chat.chatId, batchMessages, { markHandled: true });
+    await this.#finishBatch(chat.chatId, {
+      handledIds: ready.map((message) => message.messageId),
+      waitingIds: [...waitingIds],
+    });
+    if (waitingIds.size > 0) this.#scheduleRetry(chat);
     return chat.chatId;
   }
 
@@ -242,19 +245,27 @@ export class AutoReplyEngine {
   }
 
   /**
-   * 流式卡片会原地刷新：派发前重新拉一次最新内容。
-   * `config.streaming_mode` 仍为 true 时返回 false，让批次留在队列里等下一轮。
+   * 卡片分类：派发前重新拉一次内容。
+   * - 已收尾：可派发
+   * - streaming_mode 仍为 true 且未超时：继续等
+   * - streaming_mode 仍为 true 且超过 15 分钟：卡死
    */
-  async #refreshCards(chatId, messages) {
-    if (!this.#refreshMessage) return true;
+  async #classifyCards(chatId, ids) {
+    const cards = this.#storedMessages(chatId, ids)
+      .filter((message) => message.msgType === 'interactive');
+    const waiting = [];
+    const stuck = [];
+    if (cards.length === 0 || !this.#refreshMessage) return { waiting, stuck };
     const entry = this.#store.state.chats[chatId] ?? {};
     let next = entry.messages ?? [];
     let changed = false;
-    for (const message of messages) {
+    for (const message of cards) {
       const latest = await this.#refreshMessage(message.messageId).catch(() => null);
       if (!latest) continue;
-      // config.streaming_mode 为 true 表示还在增量刷新：正常就等下一轮，超时则丢弃。
-      if (latest.streaming === true) return this.#isStuckCard(message) ? 'stuck' : false;
+      if (latest.streaming === true) {
+        (this.#isStuckCard(message) ? stuck : waiting).push(message);
+        continue;
+      }
       const text = typeof latest.text === 'string' ? latest.text : '';
       if (!text || text === message.text) continue;
       next = next.map((item) => (item.messageId === message.messageId
@@ -263,7 +274,7 @@ export class AutoReplyEngine {
       changed = true;
     }
     if (changed) await this.#patch(chatId, { messages: next });
-    return true;
+    return { waiting, stuck };
   }
 
   /** 卡片推送超过阈值仍在流式输出，视为异常中断。 */
@@ -272,31 +283,59 @@ export class AutoReplyEngine {
     return Number.isFinite(created) && this.#now() - created > CARD_STUCK_MS;
   }
 
+  /** 把卡死的消息标记为已丢弃，不再计入未读。 */
+  async #markDropped(chatId, messages) {
+    const ids = new Set(messages.map((message) => message.messageId));
+    const entry = this.#store.state.chats[chatId] ?? {};
+    await this.#patch(chatId, {
+      messages: (entry.messages ?? []).map((message) => (ids.has(message.messageId)
+        ? { ...message, read: true, outcome: 'dropped', handledAt: this.#now() }
+        : message)),
+    });
+  }
+
+  /** 收尾批次：派发过的标已处理，剩下的（等待中的）留在批次里。 */
+  async #finishBatch(chatId, { handledIds = [], waitingIds = [] } = {}) {
+    const entry = this.#store.state.chats[chatId] ?? {};
+    const handled = new Set(handledIds);
+    const messages = handled.size === 0
+      ? entry.messages ?? []
+      : (entry.messages ?? []).map((message) => (handled.has(message.messageId)
+        ? { ...message, read: true, outcome: 'dispatched', handledAt: this.#now() }
+        : message));
+    await this.#patch(chatId, {
+      messages,
+      batch: {
+        messageIds: waitingIds,
+        firstAt: waitingIds.length > 0 ? entry.batch?.firstAt ?? this.#now() : null,
+        lastAt: waitingIds.length > 0 ? this.#now() : null,
+      },
+    });
+  }
+
+  /** 等待中的卡片过一会儿再看一次，避免没有新消息时一直不动。 */
+  #scheduleRetry(chat) {
+    const key = `retry:${chat.chatId}`;
+    if (this.#timers.has(key)) return;
+    const timer = this.#setTimeout(() => {
+      this.#timers.delete(key);
+      void this.flush(chat);
+    }, CARD_RETRY_MS);
+    timer?.unref?.();
+    this.#timers.set(key, timer);
+  }
+
   /** 从状态里取出这批消息的最新副本。 */
   #storedMessages(chatId, ids) {
     const set = new Set(ids);
-    return (this.#store.state.chats[chatId]?.messages ?? []).filter((message) => set.has(message.messageId));
+    return (this.#store.state.chats[chatId]?.messages ?? [])
+      .filter((message) => set.has(message.messageId));
   }
 
   /** 该会话在窗口内是否已经派发过（用于机器人批次限速）。 */
   #dispatchedWithin(chatId, windowMs) {
     const last = this.#store.state.chats[chatId]?.lastDispatchAt ?? 0;
     return this.#now() - last < windowMs;
-  }
-
-  /** 清空批次；markHandled 时把消息标记为已处理。 */
-  async #clearBatch(chatId, messages, { markHandled = false, outcome = 'dispatched' } = {}) {
-    const entry = this.#store.state.chats[chatId] ?? {};
-    const idSet = new Set((messages ?? []).map((message) => message.messageId));
-    const nextMessages = markHandled
-      ? (entry.messages ?? []).map((message) => (idSet.has(message.messageId)
-        ? { ...message, read: true, outcome, handledAt: this.#now() }
-        : message))
-      : entry.messages ?? [];
-    await this.#patch(chatId, {
-      messages: nextMessages,
-      batch: { messageIds: [], firstAt: null, lastAt: null },
-    });
   }
 
   async #patch(chatId, patch) {
