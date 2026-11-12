@@ -31,6 +31,30 @@ const BARE_MENTION_HINT = '在的，请直接说需求；发送 /menu 可以查�
 
 /** Reaction emoji used as a coarse message status. */
 const REACTION = Object.freeze({ processing: 'OnIt', done: 'DONE', stopped: 'DIZZY' });
+/** 排队批次的可读正文：编号、发送者、时间、原文各占一行。 */
+function renderBatchBody(items) {
+  const lines = [`[排队合并] 上一条回复期间收到 ${items.length} 条消息，按时间顺序如下：`];
+  items.forEach((item, index) => {
+    const stamp = formatBatchTime(item.createTime);
+    const who = item.senderName || '某人';
+    const text = (item.parts ?? [])
+      .filter((part) => part?.type === 'text')
+      .map((part) => String(part.text ?? '').trim())
+      .filter(Boolean)
+      .join('\n');
+    lines.push('', `${index + 1}. ${who}${stamp ? ` · ${stamp}` : ''}：`, text || '（附件见下）');
+  });
+  lines.push('', '请合并处理，必要时在回复里点名对应的人。');
+  return lines.join('\n');
+}
+
+function formatBatchTime(value) {
+  const ms = Number(value);
+  if (!Number.isFinite(ms) || ms <= 0) return '';
+  const date = new Date(ms);
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
 const PARENT_CACHE_TTL_MS = 5 * 60_000;
 const PARENT_MISS_TTL_MS = 30_000;
 
@@ -506,14 +530,14 @@ export class FeishuBridge {
     this.#batchDraining.add(chatKey);
     try {
       const first = items[0];
-      const parts = [{
-        type: 'text',
-        text: `[排队合并] 上一条回复期间又收到 ${items.length} 条消息，请一起处理：`,
-      }];
-      for (const item of items) {
-        parts.push({ type: 'text', text: `— ${item.senderName || '某人'}：` });
-        for (const part of item.parts ?? []) parts.push(part);
-      }
+      const parts = [{ type: 'text', text: renderBatchBody(items) }];
+      // 图片/文件等附件按序号附在正文之后，避免打断文字排版。
+      items.forEach((item, index) => {
+        const extras = (item.parts ?? []).filter((part) => part?.type && part.type !== 'text');
+        if (extras.length === 0) return;
+        parts.push({ type: 'text', text: `第 ${index + 1} 条的附件：` });
+        parts.push(...extras);
+      });
       await this.#submitPrompt({
         chatKey,
         chatId: first.chatId,

@@ -788,8 +788,9 @@ function message(overrides = {}) {
   assert.equal(harness.prompts.length, before + 1, 'queued messages dispatch as one batch');
   const batchText = harness.prompts.at(-1).content.map((part) => part.text ?? '').join('');
   assert.match(batchText, /排队合并/);
-  assert.match(batchText, /第二条/);
-  assert.match(batchText, /第三条/);
+  assert.match(batchText, /\n\n1\. .+：\n第二条/);
+  assert.match(batchText, /\n\n2\. .+：\n第三条/);
+  assert.match(batchText, /请合并处理/);
   bridge.dispose();
 }
 
