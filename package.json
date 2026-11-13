@@ -1,6 +1,6 @@
 {
   "name": "@czwjss/feishu-bot-im",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "type": "module",
   "description": "飞书机器人：DeepSeek Harness 的飞书接入插件（多机器人、扫码接入、卡片回复、上下文注入、用户分身）",
   "exports": {
@@ -21,6 +21,7 @@
     "docs/user-identity-architecture.html",
     "docs/feishu-scopes.md",
     "docs/user-message-monitor-design.md",
+    "docs/feishu-avatar-message-flow.svg",
     "docs/tool-mounting-comparison.html",
     "docs/bot-inbound-flow.html"
   ],
@@ -45,7 +46,7 @@
     "dsh": ">=0.2.0"
   },
   "scripts": {
-    "test": "node test/handoff.test.mjs && node test/message-text.test.mjs && node test/eavesdrop.test.mjs && node test/mentions.test.mjs && node test/feishu-errors.test.mjs && node test/feishu-text.test.mjs && node test/feishu-get-message.test.mjs && node test/policy.test.mjs && node test/client-theme.test.mjs && node test/client-bundle.test.mjs && node test/bridge.test.mjs && node test/rpc.test.mjs && node test/user-identity-config.test.mjs && node test/user-identity-oauth.test.mjs && node test/user-identity-auth.test.mjs && node test/user-identity-tools.test.mjs && node test/user-identity-media.test.mjs && node test/user-identity-connect.test.mjs && node test/user-identity-rpc.test.mjs && node test/user-identity-manager.test.mjs && node test/user-identity-contributions.test.mjs && node test/user-identity-monitor.test.mjs && node test/user-identity-auto-reply.test.mjs && node test/tool.test.mjs && node test/runtime.test.mjs && node test/context-enhancement.test.mjs && node test/injected-context.test.mjs && node test/feishu-e2e.test.mjs && node test/registration.test.mjs && node test/slash-commands.test.mjs && node test/progress.test.mjs && node test/feishu-upload.test.mjs",
+    "test": "node --test test/*.test.mjs",
     "build:client": "node scripts/build-client.mjs",
     "pretest": "npm run build:client",
     "prepublishOnly": "npm run build:client"

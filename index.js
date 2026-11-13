@@ -22,6 +22,7 @@ import { UserTokenStore } from './src/user-identity/token-store.js';
 import { installUserIdentityContributions } from './src/user-identity/contributions.js';
 import { UserMonitorManager } from './src/user-identity/monitor.js';
 import { MonitorStore, MONITOR_FILE, MONITOR_STATE_FILE } from './src/user-identity/monitor-store.js';
+import { installWorkerContexts } from './src/user-identity/worker-context.js';
 
 export const name = 'feishu-bot-im';
 export const inject = ['agents', 'connection', 'credentials', 'typertGateway'];
@@ -91,6 +92,8 @@ export async function apply(ctx, config = {}) {
   });
 
   ctx.effect(() => ctx.on('agent/pre-step', async (request, next) => {
+    // Only legacy messages in sessions bound to this integration need rewriting.
+    if (!manager.handlesSession(request?.agent?.session?.id)) return next();
     const decision = await next();
     if (!decision || typeof decision !== 'object' || decision.kind !== 'enter'
       || !Array.isArray(decision.messages)) return decision;
@@ -166,6 +169,7 @@ export async function apply(ctx, config = {}) {
   });
   handoffKeywordsProvider = () => userMonitor.store.config.handoffKeywords;
   installUserIdentityContributions(ctx, userIdentityAuth);
+  installWorkerContexts(ctx, monitorStore);
   userMonitor.start();
 
   const handler = createRpcHandler({ manager, harness, version: pluginVersion, userIdentity, userMonitor });

@@ -25,15 +25,12 @@ export const INJECTED_CONTEXT_TAGS = Object.freeze({
   quoteClose: '</feishu_bot_quote>',
 });
 
-export const CONTEXT_ENHANCEMENT_FIELDS = Object.freeze([
-  'senderId', 'senderName', 'botId', 'sentAt', 'conversationTitle',
-]);
+import { CONTEXT_ENHANCEMENT_FIELDS } from './contracts.js';
+export { CONTEXT_ENHANCEMENT_FIELDS };
 
 export const CONTEXT_GUIDANCE_MAX_LENGTH = 8_000;
 
-const SOURCE_FIELD_ORDER = Object.freeze([
-  'senderId', 'senderName', 'botId', 'sentAt', 'conversationTitle',
-]);
+const SOURCE_FIELD_ORDER = CONTEXT_ENHANCEMENT_FIELDS;
 
 const SOURCE_LIMITS = Object.freeze({
   senderId: 256, senderName: 256, botId: 128, sentAt: 32, conversationTitle: 128,

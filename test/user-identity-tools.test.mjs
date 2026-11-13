@@ -192,6 +192,11 @@ const cardText = extractMessageText({
 assert.match(cardText, /报告/);
 assert.match(cardText, /发布完成/);
 assert.ok(!cardText.includes('[卡片]'), 'card text must not fall back to the placeholder');
+const longCardText = '卡片正文'.repeat(1500) + '末尾约定';
+assert.equal(extractMessageText({
+  msg_type: 'interactive',
+  body: { content: JSON.stringify({ elements: [{ tag: 'markdown', content: longCardText }] }) },
+}), longCardText, 'avatar card extraction preserves text beyond the old 2000-character limit');
 console.log('im-feishu user identity card text: 3 assertions passed');
 
 // 分身工具必须在描述里写明“本人身份”，并说明不是机器人。

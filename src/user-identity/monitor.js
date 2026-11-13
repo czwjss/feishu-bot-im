@@ -9,18 +9,17 @@
 import { CARD_STUCK_MS } from '../message-text.js';
 import { chatMemberNames, getMessage, listChats, listMessages } from './api.js';
 import { AutoReplyEngine } from './auto-reply.js';
+import { DEFAULT_REPLY_RULES, normalizeReplyRules } from './worker-context.js';
 import {
   MAX_MONITOR_CHATS,
-  MAX_MESSAGES_PER_CHAT,
+  MAX_PENDING_CARDS,
   MAX_SEEN_IDS,
   normalizeMonitorChat,
 } from './monitor-store.js';
 
-const MAX_MESSAGES_PER_POLL = 100;
+const MAX_PAGES_PER_POLL = 2;
 /** 往回多看一段，才能抓到卡片原地刷新的新文本。 */
 const REFRESH_LOOKBACK_MS = 120_000;
-/** 临时状态超过这个时间还留着就是噪音。 */
-const STALE_TRANSIENT_MS = 120_000;
 const MAX_DISCOVER_PAGES = 5;
 
 function stringOf(value) {
@@ -107,10 +106,14 @@ export class UserMonitorManager {
     const interval = this.#store.config.pollIntervalMs;
     this.#timer = this.#setInterval(() => { void this.pollOnce(); }, interval);
     this.#timer?.unref?.();
-    if (this.#store.config.enabled) void this.pollOnce();
+    if (this.#store.config.enabled) {
+      this.#autoReply?.resume?.();
+      void this.pollOnce();
+    }
   }
 
   stop() {
+    this.#autoReply?.pause?.();
     if (this.#timer) {
       this.#clearInterval(this.#timer);
       this.#timer = null;
@@ -135,7 +138,6 @@ export class UserMonitorManager {
     const state = this.#store.state;
     const chats = config.chats.map((chat) => {
       const entry = state.chats[chat.chatId] ?? {};
-      const messages = entry.messages ?? [];
       return {
         ...chat,
         pendingBatch: entry.batch?.messageIds?.length ?? 0,
@@ -147,6 +149,8 @@ export class UserMonitorManager {
       enabled: config.enabled,
       pollIntervalMs: config.pollIntervalMs,
       worker: config.worker,
+      replyRules: config.replyRules,
+      defaultReplyRules: DEFAULT_REPLY_RULES,
       handoffKeywords: config.handoffKeywords,
       authorization: auth
         ? {
@@ -188,69 +192,74 @@ export class UserMonitorManager {
   async addChat(input = {}) {
     const chatId = stringOf(input.chatId).trim();
     if (!/^oc_[A-Za-z0-9_-]{4,}$/.test(chatId)) throw new Error('chatId 需要是 oc_ 开头的会话 ID');
-    if (this.#store.config.chats.some((chat) => chat.chatId === chatId)) {
-      throw new Error('这个会话已经在监听列表里');
-    }
-    if (this.#store.config.chats.length >= MAX_MONITOR_CHATS) {
-      throw new Error(`最多监听 ${MAX_MONITOR_CHATS} 个会话`);
-    }
     const chat = {
       chatId,
       name: stringOf(input.name).trim() || chatId,
       chatMode: input.chatMode === 'p2p' ? 'p2p' : 'group',
       external: input.external === true,
     };
-    await this.#store.saveConfig({ chats: [...this.#store.config.chats, chat] });
+    await this.#store.saveConfig((config) => {
+      if (config.chats.some((item) => item.chatId === chatId)) throw new Error('这个会话已经在监听列表里');
+      if (config.chats.length >= MAX_MONITOR_CHATS) throw new Error(`最多监听 ${MAX_MONITOR_CHATS} 个会话`);
+      return { chats: [...config.chats, chat] };
+    });
     // 新增监听从当前时间开始，不回补历史。
-    const state = { ...this.#store.state, chats: { ...this.#store.state.chats } };
-    state.chats[chatId] = {
-      ...(state.chats[chatId] ?? {}),
+    await this.#store.updateChat(chatId, {
       cursorTimeMs: this.#now(),
       cursorMessageId: null,
+      scan: null,
       messages: [],
       seen: [],
       lastError: null,
       lastPollAt: null,
-    };
-    await this.#store.saveState(state);
+    });
     return this.status();
   }
 
   async removeChat(chatId) {
     const id = stringOf(chatId).trim();
-    const chats = this.#store.config.chats.filter((chat) => chat.chatId !== id);
-    await this.#store.saveConfig({ chats });
-    const state = {
-      ...this.#store.state,
-      chats: { ...this.#store.state.chats },
-      pendingCards: (this.#store.state.pendingCards ?? []).filter((card) => card.chatId !== id),
-    };
-    delete state.chats[id];
-    await this.#store.saveState(state);
+    this.#autoReply?.cancel?.(id);
+    await this.#store.saveConfig((config) => ({ chats: config.chats.filter((chat) => chat.chatId !== id) }));
+    await this.#store.saveState((state) => {
+      const chats = { ...state.chats };
+      delete chats[id];
+      return { ...state, chats, pendingCards: state.pendingCards.filter((card) => card.chatId !== id) };
+    });
     return this.status();
   }
 
   /** 设置 Worker 会话的工作区与预设；下次派发会按新配置重建会话。 */
   async setWorker(patch = {}) {
-    const current = this.#store.config.worker ?? {};
-    await this.#store.saveConfig({
+    await this.#store.saveConfig((config) => ({
       worker: {
-        workspaceId: patch.workspaceId === undefined ? current.workspaceId : patch.workspaceId,
-        workspacePath: patch.workspacePath === undefined ? current.workspacePath : patch.workspacePath,
+        workspaceId: patch.workspaceId === undefined ? config.worker.workspaceId : patch.workspaceId,
+        workspacePath: patch.workspacePath === undefined ? config.worker.workspacePath : patch.workspacePath,
+        preset: patch.preset === undefined ? config.worker.preset : patch.preset,
       },
-    });
+    }));
     return this.status();
   }
 
-  /** 设置转人工关键词；空数组退回默认关键词。 */
+  /** 设置转人工关键词；空数组关闭关键词匹配。 */
   async setHandoffKeywords(keywords) {
     await this.#store.saveConfig({ handoffKeywords: keywords });
     return this.status();
   }
 
+  async setReplyRules(rules) {
+    if (typeof rules !== 'string') throw new TypeError('回复规则必须是文本');
+    await this.#store.saveConfig({ replyRules: normalizeReplyRules(rules) });
+    return this.status();
+  }
+
   /** DSH 当前默认工作区 id；解析不到时返回 null。 */
   async resolveDefaultWorkspaceId() {
-    return Promise.resolve(this.#defaultWorkspaceId ?? null).catch(() => null);
+    try {
+      return await (typeof this.#defaultWorkspaceId === 'function'
+        ? this.#defaultWorkspaceId() : this.#defaultWorkspaceId) ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /** 手动触发：把各会话积压的待处理批次立刻交给 Worker。 */
@@ -267,8 +276,13 @@ export class UserMonitorManager {
   }
 
   async setEnabled(enabled) {
-    await this.#store.saveConfig({ enabled: enabled === true });
-    if (enabled === true) void this.pollOnce();
+    if (enabled !== true) this.#autoReply?.pause?.();
+    try {
+      await this.#store.saveConfig({ enabled: enabled === true });
+    } finally {
+      if (this.#store.config.enabled) this.#autoReply?.resume?.();
+    }
+    if (this.#store.config.enabled) void this.pollOnce();
     return this.status();
   }
 
@@ -288,7 +302,8 @@ export class UserMonitorManager {
       const auth = await this.#auth.status().catch(() => null);
       const selfOpenId = auth?.authorization?.user?.openId ?? '';
       for (const chat of this.#store.config.chats) {
-        if (this.#disposed) break;
+        if (this.#disposed || !this.#store.config.enabled) break;
+        if (!this.#store.config.chats.some((item) => item.chatId === chat.chatId)) continue;
         await this.#pollChat(chat, accessToken, selfOpenId);
       }
     } finally {
@@ -299,37 +314,37 @@ export class UserMonitorManager {
   /** 更新单个会话的触发规则。 */
   async setChat(chatId, patch = {}) {
     const id = stringOf(chatId).trim();
-    if (!this.#store.config.chats.some((chat) => chat.chatId === id)) {
-      throw new Error('这个会话不在监听列表里');
-    }
-    const chats = this.#store.config.chats.map((chat) => {
-      if (chat.chatId !== id) return chat;
-      return normalizeMonitorChat({
-        ...chat,
-        mode: patch.mode === undefined ? chat.mode : patch.mode,
-        keywords: patch.keywords === undefined ? chat.keywords : patch.keywords,
-        replyToBots: patch.replyToBots === undefined ? chat.replyToBots : patch.replyToBots,
+    await this.#store.saveConfig((config) => {
+      if (!config.chats.some((chat) => chat.chatId === id)) throw new Error('这个会话不在监听列表里');
+      const chats = config.chats.map((chat) => {
+        if (chat.chatId !== id) return chat;
+        return normalizeMonitorChat({
+          ...chat,
+          mode: patch.mode === undefined ? chat.mode : patch.mode,
+          keywords: patch.keywords === undefined ? chat.keywords : patch.keywords,
+          replyToBots: patch.replyToBots === undefined ? chat.replyToBots : patch.replyToBots,
+        });
       });
+      return { chats };
     });
-    await this.#store.saveConfig({ chats });
     return this.status();
   }
 
   /** 把流式卡片挂到待收尾列表（不进入消息列表）。 */
-  async #trackPendingCard(chatId, item, time) {
-    const pending = [...(this.#store.state.pendingCards ?? [])]
-      .filter((card) => card.messageId !== item.messageId);
-    pending.push({
-      messageId: item.messageId,
-      chatId,
-      createTime: item.createTime ?? new Date(time).toISOString(),
-      lastText: item.text ?? '',
+  async #trackPendingCard(chatId, item, time, context) {
+    await this.#store.saveState((state) => {
+      if (!this.#store.config.chats.some((chat) => chat.chatId === chatId)) return state;
+      const pending = state.pendingCards.filter((card) => card.messageId !== item.messageId);
+      if (pending.length >= MAX_PENDING_CARDS) throw new Error('等待收尾的卡片已满，将在下轮继续读取');
+      return { ...state, pendingCards: [
+        ...pending,
+        { messageId: item.messageId, chatId, createTime: item.createTime ?? new Date(time).toISOString(), lastText: item.text ?? '', ...context },
+      ] };
     });
-    await this.#store.saveState({ ...this.#store.state, pendingCards: pending });
   }
 
   /** 检查待收尾卡片：收尾了就补进消息列表，超时就彻底丢掉。 */
-  async #settlePendingCards(chat, accessToken) {
+  async #settlePendingCards(chat, accessToken, selfOpenId) {
     const pending = this.#store.state.pendingCards ?? [];
     if (pending.length === 0) return 0;
     let changed = false;
@@ -358,44 +373,51 @@ export class UserMonitorManager {
       if (next !== card) changed = true;
       kept.push(next);
     }
-    if (changed) await this.#store.saveState({ ...this.#store.state, pendingCards: kept });
-    if (revived.length === 0) return 0;
-    await this.#reviveCards(chat, revived);
+    // Keep pending cards retryable if persisting their settled bodies fails.
+    if (revived.length > 0 && await this.#reviveCards(chat, revived, accessToken, selfOpenId) === false) return 0;
+    if (changed) await this.#store.saveState((state) => ({
+      ...state,
+      pendingCards: kept.filter((card) => this.#store.config.chats.some((item) => item.chatId === card.chatId)),
+    }));
     return revived.length;
   }
 
   /** 收尾的卡片补进消息列表，并按需交给自动回复。 */
-  async #reviveCards(chat, revived) {
+  async #reviveCards(chat, revived, accessToken, selfOpenId) {
+    chat = this.#store.config.chats.find((item) => item.chatId === chat.chatId);
+    if (!chat) return false;
     const entry = this.#store.state.chats[chat.chatId] ?? {};
     const messages = [...(entry.messages ?? [])];
     const fresh = [];
+    const names = await this.#namesFor(chat.chatId, accessToken);
     for (const { card, message } of revived) {
+      if (message.deleted || message.msgType === 'system') continue;
       if (messages.some((item) => item.messageId === card.messageId)) continue;
+      const isSelf = card.isSelf || Boolean(selfOpenId && message.senderOpenId === selfOpenId);
+      const contextOnly = isSelf || !(await this.#accepts(chat, message, accessToken, selfOpenId));
       messages.push({
         messageId: card.messageId,
-        senderName: message.senderName || (message.senderType === 'app' ? '机器人' : ''),
+        senderName: message.senderName || names.get(message.senderOpenId) || (message.senderType === 'app' ? '机器人' : ''),
         senderOpenId: message.senderOpenId ?? '',
         senderType: message.senderType ?? '',
+        isSelf,
+        contextOnly,
         createTime: message.createTime || card.createTime,
-        text: message.text || card.lastText,
+        text: this.#renderAt(message.text ?? card.lastText, names),
       });
-      fresh.push(card.messageId);
+      if (!contextOnly) fresh.push(card.messageId);
     }
-    await this.#patchChat(chat.chatId, { messages: messages.slice(-MAX_MESSAGES_PER_CHAT) });
     if (fresh.length > 0 && this.#autoReply) {
-      await this.#autoReply.enqueue(chat, fresh).catch(() => undefined);
+      return this.#autoReply.enqueue(chat, fresh, { messages });
+    } else {
+      await this.#patchChat(chat.chatId, { messages });
+      return true;
     }
   }
 
   /** 只更新某个会话的状态字段。 */
   async #patchChat(chatId, patch) {
-    await this.#store.saveState({
-      ...this.#store.state,
-      chats: {
-        ...this.#store.state.chats,
-        [chatId]: { ...(this.#store.state.chats[chatId] ?? {}), ...patch },
-      },
-    });
+    await this.#store.updateChat(chatId, patch);
   }
 
   /** 父消息发送者（用于判断“回复我”），带缓存。 */
@@ -403,7 +425,10 @@ export class UserMonitorManager {
     if (!messageId) return null;
     const cached = this.#parentSender.get(messageId);
     if (cached !== undefined) return cached;
-    const parent = await this.#getMessage({ accessToken, messageId }).catch(() => null);
+    const parent = await this.#getMessage({ accessToken, messageId }).catch((error) => {
+      if (error?.status === 404) return null;
+      throw error; // 查询失败不能当成“不是回复我”，保留游标供下轮重试。
+    });
     const sender = parent?.senderOpenId ?? null;
     if (this.#parentSender.size > 500) this.#parentSender.clear();
     this.#parentSender.set(messageId, sender);
@@ -420,34 +445,15 @@ export class UserMonitorManager {
     const mentioned = Boolean(selfOpenId)
       && (item.mentions ?? []).some((mention) => mention.openId === selfOpenId);
     if (mentioned) return true;
+    if (mode === 'keyword') {
+      const text = stringOf(item.text).toLowerCase();
+      if ((chat.keywords ?? []).some((keyword) => text.includes(keyword.toLowerCase()))) return true;
+    }
     if (item.parentId && selfOpenId) {
       const parentSender = await this.#parentSenderOf(item.parentId, accessToken);
       if (parentSender && parentSender === selfOpenId) return true;
     }
-    if (mode === 'keyword') {
-      const keywords = chat.keywords ?? [];
-      const text = stringOf(item.text).toLowerCase();
-      return keywords.some((keyword) => text.includes(keyword.toLowerCase()));
-    }
     return false;
-  }
-
-  /**
-   * 机器人临时状态文案（“已收到 / 正在处理”）：同一轮回答里会被最终消息取代，
-   * 记录后一旦出现同一发送者的新消息就丢掉，避免一次回答占两三条记录。
-   */
-  #isTransientStatus(text) {
-    const value = stringOf(text);
-    if (!value || value.length > 40) return false;
-    return /^(⏳|🕐|⏱)?\s*(已收到|正在处理|处理中|正在思考|思考中)/.test(value)
-      || /正在处理[.…]*$/.test(value);
-  }
-
-  /** 超过两分钟还留着的“已收到/正在处理”已经没有意义。 */
-  #isStaleTransient(message) {
-    if (!this.#isTransientStatus(message?.text)) return false;
-    const created = Date.parse(stringOf(message.createTime));
-    return Number.isFinite(created) && this.#now() - created > STALE_TRANSIENT_MS;
   }
 
   /** 把 <at id=ou_x></at> 换成可读的 @姓名，读不到名字时保留 open_id。 */
@@ -468,32 +474,42 @@ export class UserMonitorManager {
   }
 
   async #pollChat(chat, accessToken, selfOpenId) {
-    const current = this.#store.state.chats[chat.chatId] ?? {};
-    // 每轮顺手丢掉过期的临时状态，避免历史残留一直占记录。
-    const messages = (current.messages ?? []).filter((message) => !this.#isStaleTransient(message));
-    if (!Number.isFinite(current.cursorTimeMs)) {
-      await this.#patchChat(chat.chatId, {
-        ...current,
-        cursorTimeMs: this.#now(),
-        cursorMessageId: null,
-        messages,
-        seen: current.seen ?? [],
-        lastError: null,
-      });
-      return;
-    }
-
     try {
-      const result = await this.#listMessages({
-        accessToken,
-        chatId: chat.chatId,
-        startTime: Math.min(current.cursorTimeMs - 1_000, this.#now() - REFRESH_LOOKBACK_MS),
-        pageSize: 50,
-        sort: 'asc',
-      });
+      await this.#settlePendingCards(chat, accessToken, selfOpenId);
+      const current = this.#store.state.chats[chat.chatId] ?? {};
+      const messages = current.messages ?? [];
+      if (!Number.isFinite(current.cursorTimeMs)) {
+        await this.#patchChat(chat.chatId, {
+          cursorTimeMs: this.#now(),
+          cursorMessageId: null,
+          messages,
+          seen: current.seen ?? [],
+          lastError: null,
+        });
+        return;
+      }
+
+      const scan = current.scan ?? {
+        startTimeMs: Math.min(current.cursorTimeMs - 1_000, this.#now() - REFRESH_LOOKBACK_MS),
+        endTimeMs: this.#now(),
+        pageToken: null,
+      };
+      let pageToken = scan.pageToken;
+      const items = [];
+      for (let page = 0; page < MAX_PAGES_PER_POLL; page++) {
+        const result = await this.#listMessages({
+          accessToken, chatId: chat.chatId, startTime: scan.startTimeMs, endTime: scan.endTimeMs,
+          pageSize: 50, sort: 'asc', pageToken,
+        });
+        items.push(...result.items);
+        if (!result.hasMore) { pageToken = null; break; }
+        if (!result.pageToken || result.pageToken === pageToken) throw new Error('飞书消息分页游标未推进');
+        pageToken = result.pageToken;
+      }
       const seen = new Set(current.seen ?? []);
       const eligible = [];
-      const skipped = [];
+      let cursorTimeMs = current.cursorTimeMs;
+      let cursorMessageId = current.cursorMessageId ?? null;
       const storedById = new Map(messages.map((message) => [message.messageId, message]));
       // 成员姓名表每轮只取一次，供刷新比对和渲染共用。
       let names = null;
@@ -501,13 +517,18 @@ export class UserMonitorManager {
         names ??= await this.#namesFor(chat.chatId, accessToken);
         return names;
       };
-      for (const item of result.items) {
+      for (const item of items) {
         if (!item.messageId) continue;
         const time = messageTime(item);
         if (time === null) continue;
+        if (time >= cursorTimeMs) {
+          cursorTimeMs = time;
+          cursorMessageId = item.messageId;
+        }
         // 卡片在原地刷新：同一个 message_id 出现新文本时更新旧记录，不新增记录。
         const existing = storedById.get(item.messageId);
         if (existing) {
+          if (item.streaming === true) continue; // A stale list projection must not overwrite a settled card.
           const nextText = this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, await namesOf());
           if (nextText && nextText !== existing.text) {
             eligible.push({ item, time, updateOf: item.messageId, nextText });
@@ -517,33 +538,23 @@ export class UserMonitorManager {
         if (seen.has(item.messageId)) continue;
         // 机器人/应用消息同样记录：群里常是通知，私聊里是对方机器人回复。
         if (item.deleted || item.msgType === 'system') continue;
-        if (selfOpenId && item.senderOpenId === selfOpenId) continue;
         if (time < current.cursorTimeMs) continue;
-        if (!(await this.#accepts(chat, item, accessToken, selfOpenId))) {
-          // 不记录，但游标照常推进，避免重复判断同一条消息。
-          seen.add(item.messageId);
-          skipped.push({ item, time });
-          continue;
-        }
+        const isSelf = Boolean(selfOpenId) && item.senderOpenId === selfOpenId;
+        const contextOnly = isSelf || !(await this.#accepts(chat, item, accessToken, selfOpenId));
         // 流式卡片：先不进入消息列表，等收尾后再补进来。
         if (item.msgType === 'interactive' && item.streaming === true) {
-          await this.#trackPendingCard(chat.chatId, item, time);
+          await this.#trackPendingCard(chat.chatId, item, time, { isSelf, contextOnly });
           seen.add(item.messageId);
           continue;
         }
-        eligible.push({ item, time });
-        if (eligible.length >= MAX_MESSAGES_PER_POLL) break;
+        eligible.push({ item, time, isSelf, contextOnly });
       }
 
       const roster = names ?? (eligible.some(({ item }) => !item.senderName) ? await namesOf() : new Map());
 
-      let cursorTimeMs = current.cursorTimeMs;
-      let cursorMessageId = current.cursorMessageId ?? null;
       let nextMessages = messages;
-      for (const { item, time, updateOf, nextText } of eligible) {
+      for (const { item, time, updateOf, nextText, isSelf, contextOnly } of eligible) {
         seen.add(item.messageId);
-        cursorTimeMs = time;
-        cursorMessageId = item.messageId;
         if (updateOf) {
           nextMessages = nextMessages.map((message) => (
             message.messageId === updateOf ? { ...message, text: nextText } : message
@@ -555,54 +566,34 @@ export class UserMonitorManager {
               || (item.senderType === 'app' ? '机器人' : ''),
             senderOpenId: item.senderOpenId ?? '',
             senderType: item.senderType ?? '',
+            isSelf,
+            contextOnly,
             createTime: item.createTime ?? new Date(time).toISOString(),
             text: this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, roster),
           };
-          // 同一发送者的上一条临时状态被这条取代，直接丢掉，避免重复记录。
-          if (item.senderType && item.senderType !== 'user') {
-            const last = nextMessages[nextMessages.length - 1];
-            if (last && last.senderOpenId === entry.senderOpenId && this.#isTransientStatus(last.text)) {
-              nextMessages = nextMessages.slice(0, -1);
-            }
-          }
-          nextMessages = [...nextMessages, entry].slice(-MAX_MESSAGES_PER_CHAT);
+          nextMessages = [...nextMessages, entry];
         }
       }
 
-      // 被过滤的消息也要推进游标，否则每轮都会重新判断同一条。
-      const lastSkipped = skipped.length > 0 ? skipped[skipped.length - 1] : null;
-      if (lastSkipped && lastSkipped.time > cursorTimeMs) {
-        cursorTimeMs = lastSkipped.time;
-        cursorMessageId = lastSkipped.item.messageId;
-      }
-
-      if (eligible.length > 0 && this.#autoReply) {
-        const freshIds = eligible.filter(({ updateOf }) => !updateOf).map(({ item }) => item.messageId);
-        if (freshIds.length > 0) await this.#autoReply.enqueue(chat, freshIds).catch(() => undefined);
-      }
-
-      // 统一收尾：即使本轮只记录了部分消息，也要把游标推到最新的已处理消息。
-      // 批次与出站记录可能已被自动回复引擎写过，收尾时以最新值为准。
-      const revived = await this.#settlePendingCards(chat, accessToken);
-      // 收尾卡片会补进消息列表，最终写入以它为准。
-      if (revived > 0) nextMessages = this.#store.state.chats[chat.chatId]?.messages ?? nextMessages;
-
-      const latest = this.#store.state.chats[chat.chatId] ?? {};
-      await this.#patchChat(chat.chatId, {
-        ...current,
-        ...latest,
+      const patch = {
         cursorTimeMs,
         cursorMessageId,
+        scan: pageToken ? { ...scan, pageToken } : null,
         messages: nextMessages,
         seen: [...seen].slice(-MAX_SEEN_IDS),
         lastPollAt: this.#now(),
         lastError: null,
-      });
+      };
+      if (this.#autoReply) {
+        const freshIds = eligible.filter(({ updateOf, contextOnly }) => !updateOf && !contextOnly)
+          .map(({ item }) => item.messageId);
+        await this.#autoReply.enqueue(chat, freshIds, patch);
+      } else {
+        await this.#patchChat(chat.chatId, patch);
+      }
     } catch (error) {
       this.#logger?.warn?.('[im-feishu] 消息监听轮询失败', chat.chatId, error?.message ?? error);
-      const latest = this.#store.state.chats[chat.chatId] ?? current;
       await this.#patchChat(chat.chatId, {
-        ...latest,
         lastPollAt: this.#now(),
         lastError: error?.message ?? String(error),
       }).catch(() => undefined);

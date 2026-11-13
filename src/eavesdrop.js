@@ -1,3 +1,4 @@
+import { messageContentOf, messageTypeOf, decodePost, renderPostText } from './message-content.js';
 /**
  * Group eavesdropping.
  *
@@ -35,15 +36,6 @@ export function normalizeEavesdropConfig(value) {
   });
 }
 
-function parseContent(message) {
-  try {
-    const parsed = JSON.parse(message?.content ?? message?.body?.content ?? '{}');
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
 /** Replace `@_user_1` placeholders with the names carried by the event. */
 function applyMentions(text, message) {
   let value = typeof text === 'string' ? text : '';
@@ -53,22 +45,6 @@ function applyMentions(text, message) {
     if (key && name) value = value.split(key).join(`@${name}`);
   }
   return value;
-}
-
-function postContent(content) {
-  const rows = Array.isArray(content?.content) ? content.content : [];
-  const text = [];
-  let images = 0;
-  for (const row of rows) {
-    for (const node of Array.isArray(row) ? row : []) {
-      if (!node || typeof node !== 'object') continue;
-      if (node.tag === 'text' || node.tag === 'a') text.push(typeof node.text === 'string' ? node.text : '');
-      else if (node.tag === 'img') images += 1;
-      else if (node.tag === 'media') text.push('[视频]');
-      else if (node.tag === 'emotion') text.push('[表情]');
-    }
-  }
-  return { text: text.join(''), images };
 }
 
 function joinPlaceholders(text, { images = 0, file = null } = {}) {
@@ -85,17 +61,17 @@ function joinPlaceholders(text, { images = 0, file = null } = {}) {
  * become placeholders only; the bytes are intentionally not fetched.
  */
 export function describeMessageForEavesdrop(message) {
-  const content = parseContent(message);
-  const type = String(message?.message_type ?? message?.msg_type ?? '');
+  const content = messageContentOf(message);
+  const type = messageTypeOf(message);
   let text = '';
 
   if (type === 'text') {
     text = applyMentions(content.text, message);
   } else if (type === 'post') {
-    const post = postContent(content);
+    const post = decodePost(content);
     text = joinPlaceholders(
-      applyMentions([content.title, post.text].filter(Boolean).join(' '), message),
-      { images: post.images },
+      applyMentions(renderPostText(post, { separator: ' ', mediaPlaceholders: true }), message),
+      { images: post.imageCount },
     );
   } else if (type === 'image') {
     text = '[图片]';

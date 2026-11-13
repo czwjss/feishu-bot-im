@@ -1,10 +1,9 @@
 /**
  * Move the injected source block out of the user's message.
  *
- * The channel writes `<feishu_bot_source>…</feishu_bot_source>` as a leading text
- * part; on the way into a step, this module splits that part off and re-emits it
- * as its own producer-owned message, so the conversation keeps one source row per
- * inbound message while the user's bubble stays exactly what they typed.
+ * Older versions prepended tagged context to user messages. New prompts use
+ * systemPrompt.context; this adapter only preserves the display of old history
+ * in sessions bound to this integration.
  *
  * A split that cannot be trusted leaves the original message untouched — losing
  * the user's words is far worse than showing the block inline.

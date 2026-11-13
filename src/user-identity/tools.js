@@ -1,7 +1,7 @@
 /**
  * 飞书分身的模型工具定义。
  *
- * 工具只由 `./tools` 子路径插件注册；这里不碰 Host 生命周期。
+ * 由 contributions.js 在 Host 全局注册；这里只定义工具契约与执行逻辑。
  */
 import { isExpiredTokenError } from './errors.js';
 import {
@@ -22,7 +22,7 @@ export const SEND_TOOL_NAME = 'feishu_avatar_send';
 /**
  * 执行一次用户身份 API 调用；token 过期时刷新后重试一次。
  * @template T
- * @param {import('./auth.js').AvatarAuth} auth
+ * @param {import('./auth.js').UserIdentityAuth} auth
  * @param {(accessToken: string) => Promise<T>} operation
  * @returns {Promise<T>}
  */

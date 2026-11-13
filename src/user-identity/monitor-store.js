@@ -7,32 +7,32 @@
  * 监听按会话保存游标、去重集合、最近消息和批次状态（有上限、0600）。
  * 消息按批次派给 Worker 会话，派发成功即视为已处理。
  */
-import { readFile } from 'node:fs/promises';
-
-import { writePrivateJson } from './config.js';
+import { JsonStore, definedFields } from '../json-store.js';
 import { DEFAULT_HANDOFF_KEYWORDS } from '../handoff.js';
+import { normalizeReplyRules } from './worker-context.js';
 
-export const MONITOR_VERSION = 1;
+export const MONITOR_VERSION = 2;
 export const MONITOR_FILE = 'monitor.json';
 export const MONITOR_STATE_FILE = 'monitor-state.json';
 export const MAX_MONITOR_CHATS = 20;
 export const MAX_SEEN_IDS = 500;
 export const MAX_MESSAGES_PER_CHAT = 50;
-export const MAX_MESSAGE_TEXT = 2_000;
 export const MAX_KEYWORDS = 10;
 export const TRIGGER_MODES = Object.freeze(['all', 'mention', 'keyword']);
 /** 一批消息的防抖窗口：首条到达后再等这么久就把批次交给 Worker。 */
-export const BATCH_DEBOUNCE_MS = 45_000;
+export const BATCH_DEBOUNCE_MS = 30_000;
 /** 批次最多等这么久，避免持续刷屏时一直不处理。 */
 export const BATCH_MAX_WAIT_MS = 3 * 60_000;
 export const BATCH_MAX_MESSAGES = 10;
+/** Backpressure stops polling before unprocessed messages would be discarded. */
+export const MAX_PENDING_MESSAGES = 500;
 export const DEFAULT_WORKER_PRESET = 'standard';
 export const MAX_WORKER_PRESET = 40;
 export const MAX_PENDING_CARDS = 20;
 export const MAX_HANDOFF_KEYWORDS = 20;
 export const MAX_HANDOFF_KEYWORD_LENGTH = 40;
 /** 消息处理结果：批次已派发给 Worker，后续不再由插件跟踪。 */
-export const DEFAULT_POLL_INTERVAL_MS = 60_000;
+export const DEFAULT_POLL_INTERVAL_MS = 30_000;
 export const MIN_POLL_INTERVAL_MS = 5_000;
 export const MAX_POLL_INTERVAL_MS = 60_000;
 
@@ -79,7 +79,7 @@ export function normalizeMonitorChat(value) {
     external: source.external === true,
     mode,
     keywords: normalizeKeywords(source.keywords),
-    /** 是否允许“只有机器人消息”的批次触发自动回复（默认关，仅用于测试）。 */
+    /** 开启时机器人与真人统一处理；关闭时从批次中排除机器人。 */
     replyToBots: source.replyToBots === true,
   });
 }
@@ -112,7 +112,9 @@ export function normalizeMonitorConfig(value) {
     handoffKeywords.push(keyword);
     if (handoffKeywords.length >= MAX_HANDOFF_KEYWORDS) break;
   }
-  const interval = Number(source.pollIntervalMs);
+  // 旧版本持久化的默认 60 秒随本次调整迁移；保留其它自定义间隔。
+  const oldDefault = Number(source.version ?? 1) < 2 && Number(source.pollIntervalMs) === 60_000;
+  const interval = oldDefault ? DEFAULT_POLL_INTERVAL_MS : Number(source.pollIntervalMs);
   return Object.freeze({
     version: MONITOR_VERSION,
     enabled: source.enabled === true,
@@ -121,6 +123,7 @@ export function normalizeMonitorConfig(value) {
       : DEFAULT_POLL_INTERVAL_MS,
     chats: Object.freeze(chats),
     worker: normalizeWorkerConfig(source.worker),
+    replyRules: normalizeReplyRules(source.replyRules),
     handoffKeywords: Object.freeze(handoffProvided ? handoffKeywords : [...DEFAULT_HANDOFF_KEYWORDS]),
   });
 }
@@ -129,12 +132,14 @@ export function normalizeMonitorMessage(value) {
   const source = value && typeof value === 'object' ? value : {};
   const messageId = cleanString(source.messageId);
   if (!messageId) return null;
-  const text = stringOf(source.text).slice(0, MAX_MESSAGE_TEXT);
+  const text = stringOf(source.text);
   return Object.freeze({
     messageId,
     senderName: cleanString(source.senderName),
     senderOpenId: cleanString(source.senderOpenId),
     senderType: cleanString(source.senderType),
+    isSelf: source.isSelf === true,
+    contextOnly: source.contextOnly === true || source.isSelf === true,
     createTime: cleanString(source.createTime),
     text,
   });
@@ -154,11 +159,13 @@ export function normalizePendingCard(value) {
     messageId,
     chatId,
     createTime: cleanString(source.createTime),
-    lastText: stringOf(source.lastText).slice(0, MAX_MESSAGE_TEXT),
+    lastText: stringOf(source.lastText),
+    isSelf: source.isSelf === true,
+    contextOnly: source.contextOnly === true || source.isSelf === true,
   });
 }
 
-export function normalizeMonitorState(value) {
+export function normalizeMonitorState(value, configuredChats = []) {
   const source = value && typeof value === 'object' ? value : {};
   const sourceChats = source.chats && typeof source.chats === 'object' ? source.chats : {};
   const chats = {};
@@ -175,6 +182,11 @@ export function normalizeMonitorState(value) {
       seen.push(valueId);
       if (seen.length >= MAX_SEEN_IDS) break;
     }
+    const batch = entry.batch && typeof entry.batch === 'object' ? entry.batch : {};
+    const pendingIds = [...new Set((Array.isArray(batch.messageIds) ? batch.messageIds : [])
+      .map(cleanString).filter(Boolean))];
+    if (pendingIds.length > MAX_PENDING_MESSAGES) throw new Error('待处理消息已满，请先处理积压消息');
+    const pendingSet = new Set(pendingIds);
     const messages = [];
     const messageIds = new Set();
     for (const raw of Array.isArray(entry.messages) ? entry.messages : []) {
@@ -182,16 +194,16 @@ export function normalizeMonitorState(value) {
       if (!message || messageIds.has(message.messageId)) continue;
       messageIds.add(message.messageId);
       messages.push(message);
-      if (messages.length >= MAX_MESSAGES_PER_CHAT) break;
     }
-    const batch = entry.batch && typeof entry.batch === 'object' ? entry.batch : {};
-    const pendingIds = Array.isArray(batch.messageIds)
-      ? batch.messageIds.map(cleanString).filter(Boolean).slice(0, BATCH_MAX_MESSAGES)
-      : [];
+    const recentIds = new Set(messages.slice(-MAX_MESSAGES_PER_CHAT).map((message) => message.messageId));
+    const scan = entry.scan;
     chats[chatId] = Object.freeze({
       cursorTimeMs: cleanTime(entry.cursorTimeMs),
       cursorMessageId: cleanString(entry.cursorMessageId) || null,
-      messages: Object.freeze(messages),
+      scan: cleanTime(scan?.startTimeMs) && cleanTime(scan?.endTimeMs) && cleanString(scan?.pageToken)
+        ? Object.freeze({ startTimeMs: cleanTime(scan.startTimeMs), endTimeMs: cleanTime(scan.endTimeMs), pageToken: cleanString(scan.pageToken) })
+        : null,
+      messages: Object.freeze(messages.filter((message) => pendingSet.has(message.messageId) || recentIds.has(message.messageId))),
       sessionId: cleanString(entry.sessionId) || null,
       workerConfigKey: cleanString(entry.workerConfigKey) || null,
       titleName: cleanString(entry.titleName) || null,
@@ -215,65 +227,72 @@ export function normalizeMonitorState(value) {
     pendingCards.push(card);
     if (pendingCards.length >= MAX_PENDING_CARDS) break;
   }
+  // Worker 绑定独立于监听列表和批次，已被 Host 接收的任务在取消监听后仍可读取上下文。
+  const workerSessions = Object.create(null);
+  for (const [sessionId, binding] of Object.entries(source.workerSessions ?? {})) {
+    const chatId = chatKey(binding?.chatId);
+    if (!sessionId || !chatId) continue;
+    workerSessions[sessionId] = Object.freeze({
+      chatId,
+      name: cleanString(binding.name) || chatId,
+      chatMode: binding.chatMode === 'p2p' ? 'p2p' : 'group',
+    });
+  }
+  // 兼容升级前已经创建的 Worker，当前聊天配置会补充最新名称和会话类型。
+  for (const [chatId, entry] of Object.entries(chats)) {
+    if (!entry.sessionId || workerSessions[entry.sessionId]) continue;
+    const chat = configuredChats.find((item) => item.chatId === chatId);
+    workerSessions[entry.sessionId] = Object.freeze({
+      chatId, name: chat?.name || entry.titleName || chatId, chatMode: chat?.chatMode ?? 'group',
+    });
+  }
   return Object.freeze({
     version: MONITOR_VERSION,
     chats: Object.freeze(chats),
     pendingCards: Object.freeze(pendingCards),
+    workerSessions: Object.freeze(workerSessions),
   });
 }
 
 export class MonitorStore {
-  #configPath;
-  #statePath;
-  #config = normalizeMonitorConfig({});
-  #state = normalizeMonitorState({});
-
+  #configStore;
+  #stateStore;
   constructor({ configPath, statePath }) {
-    if (!configPath || !statePath) throw new TypeError('MonitorStore 需要 configPath 和 statePath');
-    this.#configPath = configPath;
-    this.#statePath = statePath;
+    this.#configStore = new JsonStore(configPath, normalizeMonitorConfig);
+    this.#stateStore = new JsonStore(statePath, (value) => normalizeMonitorState(value, this.config.chats));
   }
-
-  get config() {
-    return this.#config;
-  }
-
-  get state() {
-    return this.#state;
-  }
-
+  get config() { return this.#configStore.value; }
+  get state() { return this.#stateStore.value; }
   async load() {
-    try {
-      this.#config = normalizeMonitorConfig(JSON.parse(await readFile(this.#configPath, 'utf8')));
-    } catch {
-      this.#config = normalizeMonitorConfig({});
-    }
-    try {
-      this.#state = normalizeMonitorState(JSON.parse(await readFile(this.#statePath, 'utf8')));
-    } catch {
-      this.#state = normalizeMonitorState({});
-    }
+    await this.#configStore.load();
+    await this.#stateStore.load();
     return this;
   }
-
-  async saveConfig(patch = {}) {
-    const source = patch && typeof patch === 'object' ? patch : {};
-    const next = normalizeMonitorConfig({
-      enabled: source.enabled === undefined ? this.#config.enabled : source.enabled,
-      pollIntervalMs: source.pollIntervalMs === undefined ? this.#config.pollIntervalMs : source.pollIntervalMs,
-      chats: source.chats === undefined ? this.#config.chats : source.chats,
-      worker: source.worker === undefined ? this.#config.worker : source.worker,
-      handoffKeywords: source.handoffKeywords === undefined ? this.#config.handoffKeywords : source.handoffKeywords,
-    });
-    await writePrivateJson(this.#configPath, next);
-    this.#config = next;
-    return next;
+  saveConfig(patch = {}) {
+    return this.#configStore.update((previous) => ({
+      ...previous, ...definedFields(typeof patch === 'function' ? patch(previous) : patch),
+    }));
+  }
+  saveState(nextState) {
+    return this.#stateStore.update((previous) => typeof nextState === 'function' ? nextState(previous) : nextState);
   }
 
-  async saveState(nextState) {
-    const next = normalizeMonitorState(nextState);
-    await writePrivateJson(this.#statePath, next);
-    this.#state = next;
-    return next;
+  bindWorkerSession(chat, sessionId) {
+    return this.saveState((state) => {
+      const binding = { chatId: chat.chatId, name: chat.name || chat.chatId, chatMode: chat.chatMode };
+      const previous = state.workerSessions?.[sessionId];
+      if (previous && Object.keys(binding).every((key) => previous[key] === binding[key])) return state;
+      return { ...state, workerSessions: { ...state.workerSessions, [sessionId]: binding } };
+    });
+  }
+
+  /** Merge against the latest state inside the write queue; removed chats stay removed. */
+  updateChat(chatId, update) {
+    return this.saveState((state) => {
+      if (!this.config.chats.some((chat) => chat.chatId === chatId)) return state;
+      const entry = state.chats[chatId] ?? {};
+      const patch = typeof update === 'function' ? update(entry) : update;
+      return { ...state, chats: { ...state.chats, [chatId]: { ...entry, ...patch } } };
+    });
   }
 }

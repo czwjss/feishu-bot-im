@@ -1,3 +1,5 @@
+import { messageContentOf, messageTypeOf, decodePost, renderPostText } from './message-content.js';
+
 /** Text helpers shared by the bridge and the turn runner. */
 
 /** `chat:<id>` → the Feishu chat id (`oc_…`). */
@@ -31,7 +33,7 @@ export function cardStreamingOf(content) {
 }
 
 /** Flatten readable text from a Feishu interactive card body. */
-export function interactiveTextOfContent(content) {
+export function interactiveTextOfContent(content, { maxLength = 2_000 } = {}) {
   let parsed;
   try {
     parsed = typeof content === 'string' ? JSON.parse(content) : content;
@@ -66,30 +68,18 @@ export function interactiveTextOfContent(content) {
     }
   };
   visit(parsed);
-  return values.join('\n').slice(0, 2_000);
+  return values.join('\n').slice(0, maxLength);
 }
 
 export function textOfContentOrPost(message) {
-  let parsed;
-  try {
-    parsed = JSON.parse(message?.content ?? '{}');
-  } catch {
-    return null;
+  const content = messageContentOf(message);
+  switch (messageTypeOf(message)) {
+    case 'text': return typeof content.text === 'string' ? content.text : null;
+    case 'interactive': return interactiveTextOfContent(content) || null;
+    case 'post': {
+      const post = decodePost(content);
+      return renderPostText(post, { includeTitle: false }) || post.title || null;
+    }
+    default: return null;
   }
-  if (message.message_type === 'text') return typeof parsed.text === 'string' ? parsed.text : null;
-  // 卡片消息：把标题和正文按顺序拼成可读文本，机器人才能当普通消息处理。
-  if (message.message_type === 'interactive') {
-    const flat = interactiveTextOfContent(parsed);
-    return flat || null;
-  }
-  if (message.message_type === 'post') {
-    const rows = Array.isArray(parsed?.content) ? parsed.content : [];
-    const text = rows
-      .flat()
-      .map((node) => (node && node.tag === 'text' ? node.text ?? '' : node?.tag === 'a' ? node.text ?? '' : ''))
-      .join('')
-      .trim();
-    return text || parsed?.title || null;
-  }
-  return null;
 }

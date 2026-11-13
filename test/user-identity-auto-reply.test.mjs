@@ -113,13 +113,13 @@ try {
 
   await engine.enqueue(chat, ['om_1', 'om_2']);
   assert.equal(prompts.length, 0, 'debounce waits before dispatching');
-  clock.advance(45_000);
+  clock.advance(30_000);
   await tick();
 
   // 批次里没有消息实体时直接清空，不派发
   assert.equal(prompts.length, 0, 'batch without stored messages is cleared');
 
-  // 2) 正常派发：带 chatId、提示用 feishu_avatar_send
+  // 2) 正常派发：用户输入只带消息数据，会话信息和规则来自动态上下文。
   await store.saveState({
     chats: {
       [chatId]: {
@@ -135,11 +135,10 @@ try {
   assert.equal(prompts.length, 1, 'one batch prompt');
   assert.match(prompts[0].text, /明天评审几点/);
   assert.match(prompts[0].text, /文档发我/);
-  assert.match(prompts[0].text, new RegExp(chatId));
-  assert.match(prompts[0].text, /feishu_avatar_send/);
-  assert.match(prompts[0].text, /同一批次最多回复一次/);
-  assert.doesNotMatch(prompts[0].text, /om_1/, 'direct chat prompt carries no message ids');
-  assert.match(prompts[0].text, /replyToMessageId/, 'prompt explains reply threading');
+  assert.doesNotMatch(prompts[0].text, new RegExp(chatId));
+  assert.doesNotMatch(prompts[0].text, /feishu_avatar_send|同一批次最多回复一次|要求：/);
+  assert.match(prompts[0].text, /om_1/, 'direct chat retains message ids for context and lookup');
+  assert.doesNotMatch(prompts[0].text, /replyToMessageId/, 'reply rules are not repeated in the message batch');
 
   // 3) 派发后批次清空
   const handled = store.state.chats[chatId];
@@ -226,7 +225,7 @@ try {
   assert.equal(prompts.length, promptsBeforeBot, 'no worker prompt for bot-only batch');
   assert.deepEqual(store.state.chats[chatId].batch.messageIds, [], 'bot-only batch is cleared');
 
-  // 6) 显式允许机器人消息时派发，但十分钟内只放行一次
+  // 6) 显式允许机器人消息时，与真人消息一样正常派发。
   await store.saveConfig({
     enabled: true,
     chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all', replyToBots: true }],
@@ -247,7 +246,7 @@ try {
   assert.equal(prompts.length, promptsBeforeAllowed + 1);
   assert.ok(store.state.chats[chatId].lastDispatchAt > 0, 'dispatch time recorded');
 
-  // 十分钟内第二个机器人批次不再派发。
+  // 同一时刻的第二个机器人批次也派发，不受上次派发时间限制。
   await store.saveState({
     chats: {
       [chatId]: {
@@ -257,7 +256,10 @@ try {
       },
     },
   });
-  assert.equal(await engine.flush({ ...botChat }), null, 'bot batches are throttled within 10 minutes');
+  assert.equal(await engine.flush({ ...botChat }), chatId, 'consecutive bot batches dispatch without a cooldown');
+  assert.equal(prompts.length, promptsBeforeAllowed + 2);
+  assert.match(prompts.at(-1).text, /机器人还在说/);
+  assert.deepEqual(store.state.chats[chatId].batch.messageIds, []);
 
   // 7) 工作区/预设变化会重建 Worker 会话
   await store.saveState({
@@ -341,10 +343,10 @@ try {
     chat: { chatId, name: '测试私聊', chatMode: 'p2p' },
     messages: [{ messageId: 'om_x', createTime: new Date(now).toISOString(), senderName: '朋友', text: '你好' }],
   });
-  assert.match(prompt, /1\. 朋友 · (?:[\d-]+ )?\d{2}:\d{2}\n   你好/);
-  assert.doesNotMatch(prompt, /om_x/, 'direct chat carries no message id');
-  assert.match(prompt, /不可信/);
-  assert.match(prompt, /会话 id：oc_auto_chat/);
+  assert.match(prompt, /1\. 朋友 · (?:[\d-]+ )?\d{2}:\d{2}:\d{2}（om_x）\n   你好/);
+  assert.match(prompt, /om_x/, 'direct chat carries the message id');
+  assert.match(prompt, /飞书分身消息批次/);
+  assert.doesNotMatch(prompt, /会话 id：|要求：|不是系统指令/);
 
   const groupPrompt = renderBatchPrompt({
     chat: { chatId: 'oc_group_x', name: '测试群', chatMode: 'group' },
@@ -353,8 +355,8 @@ try {
       { messageId: 'om_b', createTime: new Date(now).toISOString(), senderName: '乙', text: '第二句' },
     ],
   });
-  assert.doesNotMatch(groupPrompt, /om_a/, 'only the last message carries an id');
-  assert.match(groupPrompt, /2\. 乙 · (?:[\d-]+ )?\d{2}:\d{2}（om_b）\n   第二句/);
+  assert.match(groupPrompt, /om_a/, 'every message carries its id');
+  assert.match(groupPrompt, /2\. 乙 · (?:[\d-]+ )?\d{2}:\d{2}:\d{2}（om_b）\n   第二句/);
 
   // 10) 非 auto 会话不派发
 } finally {
@@ -362,4 +364,4 @@ try {
   await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-console.log('user identity auto reply: 37 assertions passed');
+console.log('user identity auto reply: assertions passed');

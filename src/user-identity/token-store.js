@@ -3,9 +3,7 @@
  *
  * 只存飞书 OAuth 返回的凭证和授权用户信息；App Secret 继续放在 DSH credentials。
  */
-import { readFile, rm } from 'node:fs/promises';
-
-import { writePrivateJson } from './config.js';
+import { JsonStore, definedFields } from '../json-store.js';
 
 export const USER_TOKEN_VERSION = 1;
 /** 提前 60 秒视为过期。 */
@@ -50,57 +48,32 @@ export function normalizeUserTokenDocument(value) {
 
 export class UserTokenStore {
   #path;
-  #doc = null;
-
+  #store;
   constructor({ path }) {
-    if (typeof path !== 'string' || !path) throw new TypeError('UserTokenStore 需要 path');
     this.#path = path;
+    this.#store = new JsonStore(path, (value) => value == null ? null : normalizeUserTokenDocument(value));
   }
-
-  get path() {
-    return this.#path;
-  }
-
-  get document() {
-    return this.#doc;
-  }
-
-  async load() {
-    try {
-      this.#doc = normalizeUserTokenDocument(JSON.parse(await readFile(this.#path, 'utf8')));
-    } catch {
-      this.#doc = null;
-    }
-    return this;
-  }
+  get path() { return this.#path; }
+  get document() { return this.#store.value; }
+  async load() { await this.#store.load(); return this; }
 
   /** `undefined` 保留原值，`''`/`null` 清空。 */
-  async save(patch = {}) {
-    const source = patch && typeof patch === 'object' ? patch : {};
-    const merged = { ...(this.#doc ?? {}) };
-    for (const [key, value] of Object.entries(source)) {
-      if (value === undefined) continue;
-      merged[key] = value;
-    }
-    const next = normalizeUserTokenDocument(merged);
-    await writePrivateJson(this.#path, next);
-    this.#doc = next;
-    return next;
+  save(patch = {}, { signal } = {}) {
+    return this.#store.update((previous) => {
+      signal?.throwIfAborted();
+      return { ...previous, ...definedFields(patch) };
+    });
   }
-
-  async clear() {
-    this.#doc = null;
-    await rm(this.#path, { force: true }).catch(() => undefined);
-  }
+  clear() { return this.#store.clear(); }
 
   accessTokenUsable(now = Date.now()) {
-    const doc = this.#doc;
+    const doc = this.document;
     if (!doc?.accessToken || !doc.accessTokenExpiresAt) return false;
     return now + EXPIRY_MARGIN_MS < doc.accessTokenExpiresAt;
   }
 
   refreshTokenUsable(now = Date.now()) {
-    const doc = this.#doc;
+    const doc = this.document;
     if (!doc?.refreshToken) return false;
     if (!doc.refreshTokenExpiresAt) return true;
     return now < doc.refreshTokenExpiresAt;
@@ -108,7 +81,7 @@ export class UserTokenStore {
 
   /** 设置页状态：不含 token 明文。 */
   status(now = Date.now()) {
-    const doc = this.#doc;
+    const doc = this.document;
     return {
       present: Boolean(doc),
       appId: doc?.appId ?? '',

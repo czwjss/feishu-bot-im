@@ -221,18 +221,16 @@ export class BotRuntime {
         config: this.config,
         state: this.#stateStore,
         logger: this.#logger,
-        version: this.#version,
         inboxDir: join(this.#dataDir, 'inbox', this.#botId),
         eventsPath: join(this.#dataDir, `events-${this.#botId}.log`),
-        saveWorkspace: (value) => this.saveWorkspace(value),
         onContext: (sessionId, text) => this.setInjectedContext(sessionId, text),
         listPresets: () => this.listPresets(),
-        savePreset: (value) => this.save({ agentPreset: value }).then((next) => next),
-        saveModel: (value) => this.save({ model: value }).then((next) => next),
         handoffKeywords: this.#handoffKeywords,
       });
       const wsState = await bot.startLongConnection({
-        onMessage: (data) => { void bridge.handleMessage(data); },
+        onMessage: (data) => {
+          void bridge.handleMessage(data).catch((error) => this.#log('error', 'inbound message failed', error));
+        },
         onCardAction: (data) => bridge.onCardAction(data),
         onState: (state, error) => {
           if (state === 'connected') this.#setState(STATES.CONNECTED);
@@ -326,7 +324,7 @@ export class BotRuntime {
 
   async listPresets() {
     if (!this.#presetSource) return [];
-    const items = await this.#presetSource().catch(() => []);
+    const items = await Promise.resolve().then(() => this.#presetSource()).catch(() => []);
     return (Array.isArray(items) ? items : [])
       .filter((item) => item && typeof item.id === 'string' && !item.broken)
       .map((item) => ({ id: item.id, name: item.name ?? item.id, description: item.description ?? null }))
@@ -511,17 +509,26 @@ export class BotRuntime {
     return syncSlashCommands(this.#bot, { logger: this.#logger });
   }
 
-  async sendTest() {
-    if (!this.#bot) throw new Error('机器人尚未连接');
-    const chatKey = Object.keys(this.#stateStore.value.sessions)[0];
-    const chatId = chatIdOfKey(chatKey);
-    if (!chatId) throw new Error('还没有可测试的会话：先在飞书里给这个机器人发一条消息');
-    await this.#bot.sendText(chatId, 'DeepSeek Harness 连接测试成功 ✅');
-    return true;
+  /** Check credentials and the current socket without choosing a chat or sending a message. */
+  async checkConnection() {
+    const config = this.config;
+    const secret = await this.#secret();
+    if (!config?.appId || !secret) throw new Error('请先配置 App ID 和 App Secret');
+    const identity = await this.#verify({ appId: config.appId, appSecret: secret });
+    const connectionState = this.#bot?.connectionStatus?.()?.state ?? this.#state;
+    return {
+      credentialsValid: true,
+      connected: connectionState === STATES.CONNECTED,
+      connectionState,
+      botName: identity.name,
+      botOpenId: identity.openId,
+      checkedAt: new Date().toISOString(),
+    };
   }
 
   onSessionEvent(session, event) {
-    void this.#bridge?.onSessionEvent(session, event);
+    void this.#bridge?.onSessionEvent(session, event)
+      .catch((error) => this.#log('error', 'session event failed', error));
   }
 
   /** Events of Sessions this bot does not own (e.g. subagents) still carry usage. */
@@ -583,7 +590,7 @@ export class RuntimeManager {
     this.#version = version;
     this.#dataDir = dataDir;
     this.#openState = openState;
-    this.#verify = verify;
+    this.#verify = verify ?? verifyCredentials;
     this.#createBot = createBot;
     this.#handoffKeywords = handoffKeywords;
   }
@@ -775,6 +782,10 @@ export class RuntimeManager {
     }
     // 未绑定任何聊天的会话（子智能体）只转发用量，不渲染卡片。
     for (const runtime of this.#runtimes.values()) runtime.onForeignSessionEvent(session, event);
+  }
+
+  handlesSession(sessionId) {
+    return Boolean(sessionId && this.#runtimeForSession(sessionId));
   }
 
   #runtimeForSession(sessionId) {

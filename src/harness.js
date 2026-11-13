@@ -185,7 +185,4 @@ export class HarnessAdapter {
     const value = frame?.type === 'baseline' ? frame.value : null;
     return value && typeof value === 'object' ? value : {};
   }
-
-
-  /** Last `maxMessages`-worth page of one Session, already chronological. */
 }

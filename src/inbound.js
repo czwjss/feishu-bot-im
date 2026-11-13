@@ -7,6 +7,7 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { messageContentOf, messageTypeOf, decodePost } from './message-content.js';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_FILE_BYTES = 30 * 1024 * 1024;
@@ -27,22 +28,11 @@ function safeName(value, fallback) {
   return (cleaned || fallback).slice(0, 120);
 }
 
-function parseContent(message) {
-  try {
-    const parsed = JSON.parse(message?.content ?? '{}');
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
 function imageKeysOf(message) {
-  const content = parseContent(message);
-  if (message?.message_type === 'image' && content.image_key) return [content.image_key];
-  if (message?.message_type === 'post') {
-    const rows = Array.isArray(content?.content) ? content.content : [];
-    return rows.flat().filter((node) => node?.tag === 'img' && node.image_key).map((node) => node.image_key);
-  }
+  const content = messageContentOf(message);
+  if (messageTypeOf(message) === 'image' && content.image_key) return [content.image_key];
+  if (messageTypeOf(message) === 'post') return decodePost(content).imageKeys;
+
   return [];
 }
 
@@ -168,8 +158,8 @@ export class InboundContent {
       }
     }
 
-    if (message?.message_type === 'file') {
-      const content = parseContent(message);
+    if (messageTypeOf(message) === 'file') {
+      const content = messageContentOf(message);
       if (content.file_key) {
         try {
           const bytes = await this.#bot.downloadResource(message.message_id, content.file_key, 'file');

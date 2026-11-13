@@ -9,52 +9,49 @@ import { sendNotice } from './notify.js';
  * own and added without touching inbound plumbing.
  */
 export async function runCommand(services, name, argument, context) {
-  const { bot, state, harness, version, saveWorkspace, listPresets, savePreset, modelFor, log } = services;
-  let config = services.config();
-    const { chatId, chatKey, messageId } = context;
-    const notice = (text, title = null, tone = null) => sendNotice(bot, chatId, text, title, tone);
-    switch (name) {
-      case 'menu': {
-        try {
-          await bot.sendCard(chatId, await buildMenuCard(services, { chatKey }));
-        } catch (error) {
-          log('warn', 'menu card failed; sending text', error);
-          const sessionId = state.sessionFor(chatKey);
-          await bot.sendText(chatId, [
-            '功能菜单：',
-            '/menu 卡片菜单 · /new 新会话 · /stop 停止',
-            `当前会话：${sessionId ?? '尚未创建'}`,
-          ].join('\n'));
-        }
-        return true;
-      }
-
-      case 'new': {
-        const previous = state.sessionFor(chatKey);
-        await state.unbindSession(chatKey);
-        services.forgetSession?.(previous);
-        await notice('已解除当前会话绑定，下一条消息会开启全新会话。', '新会话');
-        return true;
-      }
-      case 'stop': {
+  const { bot, state, harness, log } = services;
+  const { chatId, chatKey } = context;
+  const notice = (text, title = null, tone = null) => sendNotice(bot, chatId, text, title, tone);
+  switch (name) {
+    case 'menu': {
+      try {
+        await bot.sendCard(chatId, await buildMenuCard(services, { chatKey }));
+      } catch (error) {
+        log('warn', 'menu card failed; sending text', error);
         const sessionId = state.sessionFor(chatKey);
-        if (!sessionId) {
-          await notice('当前没有可停止的会话。', '无法停止');
-          return true;
-        }
-        const ask = services.externalAsk?.(sessionId) ?? null;
-        await harness.cancel(sessionId).catch((error) => log('warn', 'cancel failed', error));
-        const note = ask ? `\n（刚才在等你${ask.kind}：${ask.text}）` : '';
-        await notice(`已请求停止当前任务。${note}`, '已停止');
+        await bot.sendText(chatId, [
+          '功能菜单：',
+          '/menu 卡片菜单 · /new 新会话 · /stop 停止',
+          `当前会话：${sessionId ?? '尚未创建'}`,
+        ].join('\n'));
+      }
+      return true;
+    }
+
+    case 'new': {
+      const previous = state.sessionFor(chatKey);
+      await state.unbindSession(chatKey);
+      services.forgetSession?.(previous);
+      await notice('已解除当前会话绑定，下一条消息会开启全新会话。', '新会话');
+      return true;
+    }
+    case 'stop': {
+      const sessionId = state.sessionFor(chatKey);
+      if (!sessionId) {
+        await notice('当前没有可停止的会话。', '无法停止');
         return true;
       }
-
-      default:
-        return false;
+      const ask = services.externalAsk?.(sessionId) ?? null;
+      await harness.cancel(sessionId).catch((error) => log('warn', 'cancel failed', error));
+      const note = ask ? `\n（刚才在等你${ask.kind}：${ask.text}）` : '';
+      await notice(`已请求停止当前任务。${note}`, '已停止');
+      return true;
     }
+
+    default:
+      return false;
   }
-
-
+}
 
 /** Everything the menu card shows; shared by the command and the repaint path. */
 export async function collectMenuData(services, chatKey) {

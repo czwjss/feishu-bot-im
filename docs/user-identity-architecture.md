@@ -1,337 +1,125 @@
-# 飞书分身：本地变更分析与集成架构
+# 飞书分身：开发架构
 
-> 可视化架构图：[user-identity-architecture.html](user-identity-architecture.html)
+本文描述当前源码的职责与接口。使用入口见[使用与排障](user-identity.md)，消息规则集中在[监听与派发规则](user-message-monitor-design.md)。
 
-> 历史分析快照（基线：`v0.4.1` / `dfddda4`）。当前实现已经提交；`feishu_avatar_*` 工具现由 Host 默认注册，插件不再提供预设。scope/RPC/token 策略以 [user-identity.md](user-identity.md) 和 [feishu-scopes.md](feishu-scopes.md) 为准。
+## 运行结构
 
-## 1. 本地变更快照
+`index.js` 在 Host 中创建一套授权服务、管理服务和监听器，注册三个全局工具与提示词贡献。插件不提供单独的分身子路径插件或预设。
 
-已修改的跟踪文件：
-
-```text
-README.md
-client.js
-index.js
-package.json
-src/rpc.js
+```mermaid
+flowchart TB
+  UI["分身设置页"] --> RPC["管理 RPC"]
+  RPC --> Identity["授权与配置管理"]
+  RPC --> Monitor["消息监听器"]
+  Identity --> Auth["用户 token 生命周期"]
+  Monitor --> Auth
+  Monitor --> Store["游标、正文与待处理批次"]
+  Store --> Dispatch["合批与派发"]
+  Dispatch --> Worker["DSH Worker"]
+  Worker --> Tools["全局分身工具"]
+  Tools --> Auth
+  Auth --> Feishu["飞书接口"]
 ```
 
-新增文件：
+普通 DSH 会话也可以直接调用全局分身工具。自动 Worker 的区别是绑定了一个飞书会话，并获得专属动态上下文；工具本身不限制只能发送到绑定目标。
 
-```text
-docs/user-identity.md
-src/user-identity/            15 个文件
-test/user-identity-*.mjs      6 个测试
-```
+## 源码职责
 
-测试结果：
+路径均相对于 `src/user-identity/`，除非另有说明。
 
-```text
-user identity config   20
-user identity oauth    36
-user identity auth     30
-user identity tools    26
-user identity connect  12
-user identity rpc       9
-原有测试全部通过
-```
-
-结论：**功能主链路已经落地，尚未提交、未发版。**
-
-## 2. 当前实现是什么
-
-飞书分身已经并入 `@czwjss/feishu-bot-im`，不再拆成独立 npm 包。
-
-它分成 Host 侧和 Preset 侧：
-
-```text
-Host 侧（全局加载）
-  设置页 UI
-  用户身份配置
-  设备授权 / token 刷新
-  RPC
-  不注册 feishu_avatar_* 模型工具
-
-Preset 侧（按需加载）
-  @czwjss/feishu-bot-im/user-identity
-  注册 feishu_avatar_* 工具
-  读取同一个 token 文件
-```
-
-因此普通群聊 Agent 看不到用户身份工具。
-
-## 3. 已实现能力
-
-### OAuth
-
-使用飞书设备授权（Device Flow）：
-
-```text
-POST accounts.feishu.cn/oauth/v1/device_authorization
-  → verification_uri_complete + user_code
-用户在飞书确认
-POST accounts.feishu.cn/oauth/v3/token
-  → user_access_token + refresh_token
-```
-
-特点：
-
-- 不需要重定向 URL；
-- 不需要本机回调端口；
-- 复用机器人的 App ID / App Secret；
-- 设置页显示授权二维码；
-- Host 后台轮询，设置页只轮询状态。
-
-### 设置页入口
-
-`client.js` **不新增设置页签**，而是在每个机器人卡片的操作区加一个入口：
-
-```text
-[分身] / [分身：陈志文]
-```
-
-点开是一个小弹层：
-
-- 显示该机器人对应的应用；
-- 发起设备授权；
-- 显示飞书授权二维码；扫码即可完成确认；
-- 查看授权用户；
-- 重新授权 / 刷新 token / 断开授权。
-
-入口绑定到具体机器人；当前仍只保存一份用户身份授权，切换应用会覆盖旧授权。
-授权 scope 固定为：
-
-```text
-offline_access im:message im:message.send_as_user im:message:readonly
-```
-
-### RPC
-
-```text
-user.status
-user.connect.begin
-user.connect.cancel
-user.disconnect
-user.refresh
-```
-
-### 工具
-
-只在预设挂载 `./user-identity` 时出现：
-
-| 工具 | 能力 |
+| 文件 | 职责 |
 |---|---|
-| `feishu_avatar_me` | 授权用户身份信息 |
-| `feishu_avatar_messages` | 以本人身份读群历史 |
-| `feishu_avatar_send` | 以本人身份发送文本 |
+| `app.js` | 从机器人配置及 DSH credentials 解析应用 |
+| `config.js` | 用户身份配置、固定 scope 集合及版本迁移 |
+| `oauth.js` | Device Flow、设备码轮询、刷新 token 的协议调用 |
+| `connect.js` | 设备授权状态机、轮询定时器与取消控制 |
+| `auth.js` / `token-store.js` | 凭证校验、刷新合并、用户信息及持久化 |
+| `manager.js` | 设置页授权操作、二维码及后台续期 |
+| `api.js` / `errors.js` | 用户身份 OpenAPI、消息解析、卡片与媒体发送、错误类型 |
+| `tools.js` / `contributions.js` | 三个模型工具的契约、执行与 Host 全局注册 |
+| `monitor.js` | 会话发现、游标轮询、流式卡片收尾、触发判断与背景记录 |
+| `monitor-store.js` | 监听配置、消息状态归一化、队列容量与 Worker 绑定 |
+| `auto-reply.js` | 合批调度、Worker 复用 / 重建、消息快照投递与清队 |
+| `worker-context.js` | 默认回复模板、Worker 的两块带标签动态上下文 |
+| `../policy.js` | 全局飞书工具与身份约定 |
+| `../rpc.js` / `../contracts.js` | 设置页接口与前后端共用的方法名 |
+| `../../client/identity.js` | 分身弹层、授权状态、监听设置与回复规则编辑 |
+| `../../client/hooks.js` | 查询、串行保存、轮询及编辑草稿管理 |
 
-## 4. 数据流
+## 授权生命周期
 
-```mermaid
-flowchart LR
-  subgraph Feishu[飞书开放平台]
-    OAuth[accounts.feishu.cn\nDevice Flow]
-    OpenAPI[open.feishu.cn\nOpenAPI]
-    Chat[群聊 / 单聊]
-  end
+设备授权依次取得设备码、等待用户确认、换取 token、查询用户信息，再保存凭证。`manager.js` 隔离设置保存及二维码生成的旧请求；`connect.js` 用请求代次和取消信号隔离设备流程。取消或发起新连接后，旧请求不能覆盖新状态；取消信号传递到设备请求、轮询、用户信息查询和待提交的 token 保存。
 
-  subgraph Host[Host 插件：feishu-bot-im]
-    Bot[BotRuntime\n机器人长连接 / 卡片]
-    UIM[UserIdentityManager\n配置 / 授权 / 刷新]
-    RPC[RPC /api/im-feishu]
-  end
+`auth.js` 在使用凭证前重新读取配置与 token，核对 appId 和授权用户。access_token 剩余不足 60 秒时按需刷新；工具遇到已知 token 失效错误码时，强制刷新并重试一次。
 
-  subgraph UI[DSH 设置页]
-    Settings[飞书机器人 + 飞书分身]
-  end
+`manager.js` 每 15 分钟检查一次凭证：access_token 剩余不超过 10 分钟，或 refresh_token 剩余不超过 2 天时尝试续期。过期时间取 OAuth 响应，不写死 token 寿命。
 
-  subgraph Preset[Agent 预设：我的飞书分身]
-    Tools[Host 默认注册\nfeishu_avatar_* 工具]
-  end
+刷新请求在同一进程内按 token 文件路径合并。刷新返回后会重新读取凭证，避免用旧结果覆盖已经变更的授权。新设备授权只有在应用和 open_id 都相同时，才允许沿用响应中省略的旧凭证字段。
 
-  subgraph Files[本地数据]
-    Cfg[user-identity.json]
-    Token[user-token.json 0600]
-    BotCfg[config.json]
-  end
+当前没有跨进程刷新锁；不要让多个 DSH 进程共用同一份 token 文件。
 
-  Settings --> RPC
-  RPC --> UIM
-  UIM --> Cfg
-  UIM --> Token
-  UIM --> BotCfg
-  UIM <--> OAuth
+## 工具与提示词的范围
 
-  Bot <-->|WebSocket| Feishu
-  Bot -->|tenant token| OpenAPI
-  Bot --> Chat
+| 内容 | 注册入口 | 范围 |
+|---|---|---|
+| `feishu_avatar_me` / `messages` / `send` | `tools.register()` | Host 全局 |
+| 飞书通用约定与本人身份能力 | `systemPrompt.section()` | 全局 |
+| 会话信息 | `systemPrompt.context()` | 按持久化 Worker sessionId 匹配 |
+| 自定义回复规则 | `systemPrompt.context()` | 同上；每次模型请求读取最新配置 |
+| 本批正文、ID、时间与背景 | `session.prompt()` | 每次派发的用户消息快照 |
 
-  Tools -->|读 user token| Token
-  Tools -->|user token| OpenAPI
-  Tools -->|以本人身份发送| Chat
-  Tools -->|只读配置| Cfg
+完整标签与规则来源见[Worker 输入](user-message-monitor-design.md#worker-输入)。无需等待 Agent 就绪后补挂工具，也没有 `reply` / `skip` 决策工具或批次令牌校验。
+
+## 持久化与并发
+
+默认数据目录为 `~/.dsh/integrations/im-feishu`，实际路径由 Host 初始化时确定。
+
+| 文件 / 服务 | 保存内容 |
+|---|---|
+| `user-identity.json` | 机器人应用选择、scope 及 scope 版本 |
+| `user-token.json` | appId、用户 token、有效期、scope、授权用户与授权时间 |
+| `monitor.json` | 监听开关、会话及触发配置、Worker 工作区 / 预设、转人工关键词、回复规则 |
+| `monitor-state.json` | 游标、分页进度、去重 ID、正文、待处理批次、待收尾卡片、Worker 会话绑定 |
+| DSH credentials | 机器人应用 App Secret |
+
+JSON 文件以 0600 权限写入，目录按 0700 创建。`src/json-store.js` 串行执行每个 store 的更新，并通过临时文件替换实现原子写入；写成功才发布内存状态。这不是文件加密或跨文件事务。
+
+配置更新与单聊天状态更新在写队列内基于最新状态合并；正文、游标和新批次 ID 一起提交。派发确认只移除本次快照中的 ID，保留并发到达的新消息。Worker 绑定独立于批次保存，清队、重建 Worker 或移除监听后，已接收任务仍能读取目标会话。
+
+设置页及管理 RPC 不返回 token 明文。停止监听和断开授权分别控制调度与凭证；两者都不撤销 Host 已接收的 Worker 任务。
+
+## 管理 RPC
+
+方法名以 `src/contracts.js` 为准，处理入口为 `src/rpc.js`。
+
+| 方法 | 输入 / 用途 |
+|---|---|
+| `user.status` | 授权、应用、缺失 scope 与设备连接状态 |
+| `user.connect.begin` | `{ botId }`，发起设备授权 |
+| `user.connect.cancel` | 取消设备授权流程 |
+| `user.disconnect` | 清除本地用户 token |
+| `user.refresh` | 强制尝试刷新 token |
+| `user.monitor.status` | 监听与待处理状态、回复规则及默认模板 |
+| `user.monitor.chats` | 发现本人可见的候选会话 |
+| `user.monitor.add` / `remove` | 添加会话描述 / 按 chatId 移除 |
+| `user.monitor.enable` | `{ enabled }`，启停监听调度 |
+| `user.monitor.chat.set` | `{ chatId, mode?, keywords?, replyToBots? }` |
+| `user.monitor.worker.options` | 工作区、预设及默认工作区选项 |
+| `user.monitor.worker.set` | `{ workspaceId?, workspacePath?, preset? }` |
+| `user.monitor.handoff.set` | `{ keywords }`，空列表关闭转人工匹配 |
+| `user.monitor.reply-rules.set` | `{ rules }`，空白恢复默认模板 |
+| `user.monitor.poll` / `flush` | 立即拉取 / 尝试派发积压 |
+
+## 验证与维护
+
+```sh
+npm test
 ```
 
-## 5. 设备授权时序
+该命令先构建设置页，再运行测试。`test/user-identity-*.test.mjs` 覆盖授权、工具、API、监听和上下文；`test/reliability.test.mjs` 覆盖队列、并发、分页、重启与卡片收尾；`test/client-state.test.mjs` 覆盖查询和编辑状态。
 
-```mermaid
-sequenceDiagram
-  participant U as 用户
-  participant S as 设置页
-  participant H as Host / UserIdentityManager
-  participant A as 飞书 accounts
-  participant T as user-identity 工具
+授权生命周期与取消竞争见 `test/user-identity-lifecycle.test.mjs`。这些测试使用本地模拟接口，不会向真实联系人发送消息，也不替代真实飞书环境的验证。
 
-  U->>S: 点击「连接飞书」
-  S->>H: user.connect.begin
-  H->>A: device_authorization
-  A-->>H: device_code / user_code / URL
-  H-->>S: 授权链接 + 验证码
-  S-->>U: 打开飞书授权页
-  U->>A: 确认授权
-  loop Host 按 interval 轮询
-    H->>A: v3/token（device_code）
-    A-->>H: pending / access_token
-  end
-  H->>H: 拉取 user_info
-  H->>H: 写 user-token.json
-  S->>H: 轮询 user.status
-  H-->>S: authorized
+修改功能时同步更新对应专题文档；默认参数以 `monitor-store.js`、权限以 `config.js`、提示词以 `policy.js` 和 `worker-context.js` 为准。文档不另存测试计数、旧工作区变更清单或已经废弃的架构建议。
 
-  U->>T: 使用 feishu_avatar_send / messages
-  T->>T: requireAccessToken()
-  T->>A: 以 user token 调用 OpenAPI
-```
-
-## 6. 隔离边界
-
-```text
-Host 插件
-  没有 feishu_avatar_* 工具
-  只做设置、OAuth、token
-
-普通群聊 Agent
-  只有 feishu_bot_* 工具
-
-我的飞书分身
-  额外挂载 ./user-identity
-  只有 feishu_avatar_* 工具
-```
-
-但要注意：**预设隔离工具，不隔离会话绑定**。如果「我的飞书分身」会话被绑定到飞书群，群成员仍可能诱导工具。
-
-## 7. 本地实现中发现的问题
-
-### P0（本次已缓解）：Preset 侧的 token/config 过期
-
-Host 和 Preset 各自创建了 `UserIdentityConfigStore` / `UserTokenStore`。
-Preset 的 store 如果只在 Agent 创建时加载一次，用户后连接时工具会读到旧状态。
-
-本次已在 `requireAccessToken()` 和 `refresh()` 前重新加载磁盘配置和 token，
-所以“先建会话、后授权”可以工作。
-
-仍未解决的是 Host 和 Preset 两边同时刷新 token 的竞争；见下一项。
-
-### P0：刷新 token 的并发竞争
-
-Host 设置页和 Preset 工具都有独立的 `UserIdentityAuth` 和 `UserTokenStore`。
-
-飞书 refresh_token 是一次性轮换的：
-
-```text
-Host 刷新 → refresh-2
-Preset 同时刷新 → 仍在用 refresh-1
-→ 一边失败，甚至 refresh_token 失效
-```
-
-建议共享同一个 token 刷新服务或加文件锁/单飞锁。
-
-### P0：当前是“复用机器人应用”，不是“独立分身应用”
-
-代码实际行为：
-
-```text
-resolveIdentityApp()
-  → 取某个 bot 的 appId / secretRef
-```
-
-文档也写明复用，不需要新建应用。
-
-但之前确认的决策是「单独飞书分身」。这两个方向不一致，需要二选一：
-
-1. 复用机器人应用：保持现状，改决策/文档；
-2. 独立分身应用：在设置页增加 App ID/Secret，独立 credentials 和 token appId，不能再从 BotConfig 里取。
-
-### P1：scope 变化后没有提示重新授权
-
-现在设置页不提供 scope 编辑，默认使用固定 scope。
-如果用户手动修改 `user-identity.json`，或应用后台权限变化，旧 token
-仍可能缺 scope，工具报 99991679。
-
-建议后续在状态里比较 token scope 和期望 scope，给出“重新授权”提示。
-
-### P1：会话绑定没有 guard
-
-工具只在预设里，但预设会话仍可能被绑定到飞书群。
-
-建议：
-
-- `./user-identity` 检查当前 session 是否绑定飞书 chat；
-- 绑定到群时禁用用户身份工具，或只允许 Web 会话。
-
-### P1：当前只保存一份用户身份授权
-
-入口已经按机器人卡片放，但底层 token/config 仍是单份。
-在机器人 A 授权后切到机器人 B，会覆盖当前授权并需要重新扫码。
-
-如果要让多个机器人分别持有不同用户身份授权，需要把 token 和配置按 botId 分片。
-
-### P2：设备授权缺少真实端到端验证
-
-当前 OAuth 测试全部是 mock：
-
-- 设备授权端点；
-- v3 token；
-- user_info。
-
-需要一次真实授权验证，确认：
-
-- `authorization: Basic` 是否正确；
-- refresh 请求体格式；
-- scope 返回和错误码。
-
-### P2：Client 未测试
-
-`client.js` 新增入口按钮和授权弹层，当前测试没有覆盖：
-
-- 渲染；
-- window.open 被弹窗拦截；
-- 轮询状态；
-- 断开二次确认。
-
-### P2：token 文件加密
-
-当前 `user-token.json` 是 0600 明文 JSON。0600 能限制本机权限，但不是加密。
-
-如果要求更严格，可以放进 DSH credentials 或加密存储；第一版可接受 0600，但要明确。
-
-## 8. 建议的下一步
-
-1. 先确认「复用机器人应用」还是「独立分身应用」；
-2. 修 P0 的刷新竞争，最好收敛为 Host 单一 `UserIdentityAuth` 服务；
-3. 增加 scope 不一致提示；
-4. 增加预设会话绑定 guard；
-5. 做一次真实设备授权 E2E；
-6. 最后再补 Client 视觉/交互测试。
-
-## 9. 结论
-
-```text
-方向：已并入飞书机器人产品
-Host：设置、OAuth、token、RPC
-Host：默认注册 feishu_avatar_* 工具，无需预设
-OAuth：Device Flow，无需 redirect URI
-问题：不是功能没做，而是 Host 与 Preset 状态没有收敛成单一来源
-```
-
-当前实现是一个可用的第一版，但 **token/config 单一来源**是上线前最需要解决的架构问题。
+流程 SVG 由 `python3 scripts/build-avatar-flow.py` 生成，HTML 入口直接引用它。修改图示时调整生成脚本后重新生成，避免两份图不一致。

@@ -18,11 +18,14 @@ const credentials = {
 };
 
 const calls = [];
+const verificationCalls = [];
+const connectionStates = new Map();
+let verificationError = null;
 class FakeBot {
   constructor(options) { this.options = options; }
   async startLongConnection(handlers) { handlers.onState('connected'); return 'connected'; }
   async stop() {}
-  connectionStatus() { return { state: 'connected' }; }
+  connectionStatus() { return { state: connectionStates.get(this.options.appId) ?? 'connected' }; }
   async sendText(chatId, text) { calls.push({ kind: 'text', chatId, text }); }
   async sendCard(chatId, card) { calls.push({ kind: 'card', chatId, card }); return 'mid'; }
   async uploadFile(bytes, name) { calls.push({ kind: 'file', name }); return 'fk'; }
@@ -75,7 +78,11 @@ const manager = new RuntimeManager({
     }
     return states.get(botId);
   },
-  verify: async ({ appId }) => ({ name: `bot-${appId.slice(-4)}`, openId: `ou_${appId.slice(-4)}` }),
+  verify: async ({ appId, appSecret }) => {
+    verificationCalls.push({ appId, appSecret });
+    if (verificationError) throw verificationError;
+    return { name: `bot-${appId.slice(-4)}`, openId: `ou_${appId.slice(-4)}` };
+  },
   createBot: (options) => Object.assign(new FakeBot(options), { notInChat: notInChat }),
 });
 
@@ -102,20 +109,46 @@ await r1.save({ workspace: '/tmp/one' });
 await r2.save({ workspace: '/tmp/two' });
 assert.equal(configStore.bot(first.id).workspace, '/tmp/one');
 assert.equal(configStore.bot(second.id).workspace, '/tmp/two', 'settings stay per bot');
+assert.equal((await r1.checkConnection()).connected, true, 'checking does not require a bound chat');
 
 // 5) 会话绑定按机器人隔离 + 事件按 session 路由
 const s1 = states.get(first.id);
 const s2 = states.get(second.id);
 await s1.bindSession('chat:oc_1', 'sess-1');
 await s2.bindSession('chat:oc_2', 'sess-2');
+assert.equal(manager.handlesSession('sess-1'), true);
+assert.equal(manager.handlesSession('unrelated-session'), false);
+assert.equal(manager.handlesSession(undefined), false);
 assert.equal(r1.handlesSession('sess-1'), true);
 assert.equal(r1.handlesSession('sess-2'), false);
 assert.equal(r2.handlesSession('sess-2'), true);
 
-// 6) 测试消息发往各自会话
-await r1.sendTest();
-await r2.sendTest();
-assert.deepEqual(calls.filter((c) => c.kind === 'text').map((c) => c.chatId), ['oc_1', 'oc_2']);
+// 6) 检查只校验各自凭证与长连接；即使已有绑定群聊也不发送任何消息。
+const configBeforeCheck = JSON.stringify(configStore.bots);
+const sessionsBeforeCheck = JSON.stringify([s1.value.sessions, s2.value.sessions]);
+const checked1 = await r1.checkConnection();
+const checked2 = await r2.checkConnection();
+assert.equal(checked1.credentialsValid, true);
+assert.equal(checked1.connected, true);
+assert.equal(checked2.botOpenId, 'ou_bbbb');
+assert.deepEqual(verificationCalls.slice(-2), [
+  { appId: first.appId, appSecret: 's1' }, { appId: second.appId, appSecret: 's2' },
+]);
+connectionStates.set(first.appId, 'reconnecting');
+assert.equal((await r1.checkConnection()).connected, false, 'valid credentials do not imply an active socket');
+assert.equal((await r1.checkConnection()).connectionState, 'reconnecting');
+connectionStates.delete(first.appId);
+verificationError = new Error('invalid credentials');
+await assert.rejects(() => r1.checkConnection(), /invalid credentials/);
+verificationError = null;
+const secretRef = configStore.bot(first.id).secretRef;
+const savedSecret = secrets.get(secretRef);
+secrets.delete(secretRef);
+await assert.rejects(() => r1.checkConnection(), /App Secret/);
+secrets.set(secretRef, savedSecret);
+assert.equal(JSON.stringify(configStore.bots), configBeforeCheck, 'checking does not write configuration');
+assert.equal(JSON.stringify([s1.value.sessions, s2.value.sessions]), sessionsBeforeCheck, 'checking does not change chat bindings');
+assert.deepEqual(calls.filter((call) => call.kind === 'text' || call.kind === 'card'), []);
 
 // 7) 文件回传
 const file = join(dir, 'a.txt');

@@ -10,9 +10,10 @@ import { handoffRequestedIn } from './handoff.js';
 
 /** 挂起卡片的检查间隔：流式卡片通常很快收尾，30 秒查一次足够。 */
 const CARD_POLL_MS = 30_000;
-import { approvalCard, questionCard, resolvedApprovalText, newSessionCard, adjustCard, noticeCard } from './cards.js';
+import { InteractionManager } from './interactions.js';
+import { MenuController } from './menu.js';
 import { isAddressed, isAllowed, senderOpenId } from './access.js';
-import { buildMenuCard, collectMenuData, currentMenuValue, menuOptionLabel, runCommand } from './commands.js';
+import { runCommand } from './commands.js';
 import { DEFAULT_EAVESDROP_LIMIT, EavesdropStore, describeMessageForEavesdrop, renderEavesdropBlock } from './eavesdrop.js';
 import { renderMentions } from './mentions.js';
 import { InboundContent } from './inbound.js';
@@ -21,6 +22,7 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import { sendNotice } from './notify.js';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { KeyedQueue } from './queue.js';
 
 
 const COMMAND = /^\/([a-z][a-z0-9-]*)(?:\s+([\s\S]*))?$/i;
@@ -64,12 +66,12 @@ export class FeishuBridge {
   #config;
   #state;
   #logger;
-  #version;
-  #pending = new Map();
-  #pendingByChat = new Map();
+  #interactions;
+  #menu;
   #inbound;
   #eventsPath;
   #chatTypes = new Map();
+  #inboundQueue = new KeyedQueue();
   #chatNames = new Map();
   #handoffKeywords = null;
   #reactions = new Map();
@@ -86,33 +88,40 @@ export class FeishuBridge {
   #eavesdrop = new EavesdropStore();
   #onContext;
   #stats = { messagesReceived: 0, events: 0, lastEventAt: null, lastEventType: null };
-  #saveWorkspace;
   #disposed = false;
   #pendingCards = new Map();
   #cardTimer = null;
   #turns;
   #listPresets;
-  #sessionModels = new Map();
-  #menuPending = new Map();
-  #newSessionDraft = new Map();
-  #savePreset;
-  #saveModel;
 
-  constructor({ bot, harness, config, state, logger, version, inboxDir, saveWorkspace, eventsPath, onContext, listPresets, savePreset, saveModel, handoffKeywords = null }) {
+  constructor({ bot, harness, config, state, logger, inboxDir, eventsPath, onContext, listPresets, handoffKeywords = null }) {
     this.#bot = bot;
     this.#harness = harness;
     this.#config = config;
     this.#state = state;
     this.#logger = logger ?? console;
-    this.#version = version ?? '0.0.0';
     this.#inbound = new InboundContent({ bot, inboxDir, logger: this.#logger });
     this.#handoffKeywords = handoffKeywords;
-    this.#saveWorkspace = saveWorkspace ?? (async () => this.#config);
     this.#onContext = typeof onContext === 'function' ? onContext : () => undefined;
     this.#eventsPath = eventsPath ?? null;
     this.#listPresets = typeof listPresets === 'function' ? listPresets : async () => [];
-    this.#savePreset = typeof savePreset === 'function' ? savePreset : async () => this.#config;
-    this.#saveModel = typeof saveModel === 'function' ? saveModel : async () => this.#config;
+    this.#interactions = new InteractionManager({
+      bot,
+      canManage: (key, operator) => this.#canManage(key, operator),
+      canAnswer: (key, operator) => Boolean(operator) && isAllowed(this.#config, {
+        chat_type: this.#chatTypes.get(key) ?? this.#state.chatTypeFor?.(key),
+      }, operator),
+      log: (level, message, error) => this.#log(level, message, error),
+    });
+    this.#menu = new MenuController({
+      bot, harness, state,
+      services: () => this.#services(),
+      canManage: (key, operator) => this.#canManage(key, operator),
+      forgetSession: (sessionId, key) => {
+        this.#eavesdrop.reset(key);
+        this.#forgetSessionOrigin(sessionId);
+      },
+    });
     this.#turns = new TurnRunner({
       bot,
       state,
@@ -159,6 +168,8 @@ export class FeishuBridge {
     this.#cardTimer = null;
     this.#pendingCards.clear();
     this.#turns?.dispose();
+    this.#interactions.dispose();
+    this.#menu.dispose();
   }
 
   #log(level, message, error) {
@@ -171,7 +182,11 @@ export class FeishuBridge {
 
   // ── inbound ───────────────────────────────────────────────────────────────
 
-  async handleMessage(data, { resubmitted = false } = {}) {
+  handleMessage(data, options = {}) {
+    return this.#inboundQueue.run(data?.message?.chat_id, () => this.#handleMessage(data, options));
+  }
+
+  async #handleMessage(data, { resubmitted = false } = {}) {
     if (this.#disposed) return;
     const message = data?.message;
     this.#logEvent('message', `${message?.message_id ?? '-'} chat=${message?.chat_id ?? '-'} type=${message?.message_type ?? '-'}`);
@@ -195,6 +210,8 @@ export class FeishuBridge {
       return;
     }
     const chatKey = `chat:${message.chat_id}`;
+    this.#chatTypes.set(chatKey, message.chat_type);
+    await this.#state.setChatType?.(chatKey, message.chat_type);
     // Remember who spoke / who was mentioned so the model can @ them later.
     const wantsMentions = this.#config.mentions?.enabled !== false;
     const wantsName = wantsMentions || this.#config.eavesdrop?.enabled === true;
@@ -216,9 +233,8 @@ export class FeishuBridge {
       }
     }
     const text = (textOfContentOrPost(message) ?? '').replace(/@_user_\d+/g, '').trim();
-    this.#chatTypes.set(chatKey, message.chat_type);
 
-    if (text && this.#resolveTextDecision(chatKey, message.chat_id, openId, text)) return;
+    if (text && this.#interactions.resolveText(chatKey, message.chat_id, openId, text)) return;
 
     if (text) {
       const match = COMMAND.exec(text);
@@ -441,7 +457,14 @@ export class FeishuBridge {
   }
 
   /** 把排队期间攒下的消息合并成一条 prompt 派发。 */
-  async #drainBatch(sessionId) {
+  #drainBatch(sessionId) {
+    const chatKey = this.#state.keyForSession(sessionId);
+    if (!chatKey || !this.#batchQueue.get(chatKey)?.length) return;
+    return this.#inboundQueue.run(chatIdOfKey(chatKey), () => this.#drainBatchOnce(sessionId));
+  }
+
+  async #drainBatchOnce(sessionId) {
+    if (this.#disposed) return;
     const chatKey = this.#state.keyForSession(sessionId);
     if (!chatKey) return;
     const items = this.#batchQueue.get(chatKey);
@@ -674,8 +697,10 @@ export class FeishuBridge {
   async #isReplyToBot(message) {
     const parent = await this.#parentMessage(message);
     if (!parent) return false;
-    if (parent.senderType === 'app') return true;
-    return Boolean(this.#config.botOpenId && parent.senderId === this.#config.botOpenId);
+    return Boolean(parent.senderId && (
+      parent.senderId === this.#config.botOpenId
+      || (parent.senderType === 'app' && parent.senderId === this.#config.appId)
+    ));
   }
 
   /** The message the user replied to; Feishu events carry only its id. */
@@ -768,8 +793,9 @@ export class FeishuBridge {
 
   /** Group management (including approvals) is restricted to the manager list. */
   #canManage(chatKey, operatorId) {
-    const chatType = this.#chatTypes.get(chatKey);
-    if (chatType !== 'group') return true;
+    const chatType = this.#chatTypes.get(chatKey) ?? this.#state.chatTypeFor?.(chatKey);
+    if (chatType === 'p2p') return Boolean(operatorId);
+    if (chatType !== 'group') return false;
     const managers = this.#config.access?.managers ?? [];
     if (managers.length === 0) return false; // 默认无人可执行群内管理操作
     return Boolean(operatorId) && managers.includes(operatorId);
@@ -790,13 +816,7 @@ export class FeishuBridge {
       bot: this.#bot,
       state: this.#state,
       harness: this.#harness,
-      version: this.#version,
       config: () => this.#config,
-      setConfig: (next) => {
-        this.#config = next;
-        return next;
-      },
-      saveWorkspace: (value) => this.#saveWorkspace(value),
       forgetSession: (sessionId) => {
         const key = typeof sessionId === 'string' ? this.#state.keyForSession?.(sessionId) : null;
         if (key) this.#eavesdrop.reset(key);
@@ -804,15 +824,7 @@ export class FeishuBridge {
       },
       externalAsk: (sessionId) => this.#externalAsk.get(sessionId) ?? null,
       listPresets: () => this.#listPresets(),
-      modelFor: (sessionId) => this.#sessionModels.get(sessionId) ?? null,
-      rememberModel: (sessionId, selection) => {
-        if (typeof sessionId !== 'string') return selection;
-        this.#sessionModels.set(sessionId, selection);
-        if (this.#sessionModels.size > 500) this.#sessionModels.delete(this.#sessionModels.keys().next().value);
-        return selection;
-      },
-      savePreset: (value) => this.#savePreset(value),
-      saveModel: (value) => this.#saveModel(value),
+      modelFor: (sessionId) => this.#menu.modelFor(sessionId),
       log: (level, message, error) => this.#log(level, message, error),
     };
   }
@@ -914,51 +926,6 @@ export class FeishuBridge {
     return chatId ? { key, chatId } : null;
   }
 
-  #findApprovalId(request) {
-    const events = typeof request?.agent?.session?.snapshotEvents === 'function'
-      ? request.agent.session.snapshotEvents()
-      : (request?.agent?.session?.events ?? []);
-    if (!Array.isArray(events)) return null;
-    const decided = new Set();
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-      const event = events[index];
-      if (event?.type === 'approval/decided') decided.add(event.data?.id);
-      if (event?.type !== 'approval/asked') continue;
-      const id = event.data?.id;
-      if (!id || decided.has(id)) continue;
-      if ((request.callId ?? null) !== (event.data?.callId ?? null)) continue;
-      return id;
-    }
-    return null;
-  }
-
-  #track(entry) {
-    this.#pending.set(entry.id, entry);
-    const set = this.#pendingByChat.get(entry.chatId) ?? new Set();
-    set.add(entry.id);
-    this.#pendingByChat.set(entry.chatId, set);
-    return entry;
-  }
-
-  #untrack(id) {
-    const entry = this.#pending.get(id);
-    if (!entry) return null;
-    this.#pending.delete(id);
-    const set = this.#pendingByChat.get(entry.chatId);
-    if (set) {
-      set.delete(id);
-      if (set.size === 0) this.#pendingByChat.delete(entry.chatId);
-    }
-    return entry;
-  }
-
-  #settle(id, value) {
-    const entry = this.#untrack(id);
-    if (!entry) return null;
-    entry.resolve(value);
-    return entry;
-  }
-
   /** Ask the chat to approve a tool call; races the Host's own answerer. */
   async handleApproval(request, next) {
     const sessionId = request?.agent?.session?.id;
@@ -970,68 +937,14 @@ export class FeishuBridge {
       this.#rememberExternalAsk(sessionId, '审批', request.toolName ?? '工具');
       return next();
     }
-    if (request.signal?.aborted) return 'cancelled';
-    const approvalId = this.#findApprovalId(request);
-    if (!approvalId) return next();
-    if (this.#pending.has(approvalId)) return next();
-
-    const im = new Promise((resolve) => {
-      this.#track({
-        id: approvalId,
-        kind: 'approval',
-        chatId,
-        chatKey,
-        messageId: null,
-        resolve,
-      });
-    });
-
-    void this.#bot.sendCard(chatId, approvalCard({
-      toolName: request.toolName,
-      reason: request.reason,
-      approvalId,
-    })).then((messageId) => {
-      const entry = this.#pending.get(approvalId);
-      if (entry) entry.messageId = messageId;
-    }).catch((error) => {
-      this.#log('warn', 'approval card failed', error);
-    });
-
-    const onAbort = () => {
-      const entry = this.#untrack(approvalId);
-      entry?.resolve('cancelled');
-    };
-    request.signal?.addEventListener('abort', onAbort, { once: true });
-
-    const native = Promise.resolve().then(() => next()).then(
-      (outcome) => outcome,
-      () => new Promise(() => {}),
-    );
-
-    try {
-      // A pure-IM turn has no Web answerer: never wait forever on a lost card.
-      const timeout = new Promise((resolve) => {
-        const timer = setTimeout(() => resolve('cancelled'), 10 * 60_000);
-        timer.unref?.();
-      });
-      const outcome = await Promise.race([native, im, timeout]);
-      const entry = this.#pending.get(approvalId);
-      if (entry?.messageId) {
-        void this.#bot.patchCard(entry.messageId, approvalCard({ approvalId, resolvedText: resolvedApprovalText(outcome) }))
-          .catch(() => undefined);
-      }
-      this.#untrack(approvalId);
-      return outcome;
-    } finally {
-      request.signal?.removeEventListener('abort', onAbort);
-      this.#untrack(approvalId);
-    }
+    return this.#interactions.approve(request, next, { chatId, chatKey });
   }
 
   /** Ask the chat one question; a single-select answer comes back as a choice. */
   async handleQuestion(request, next) {
     const sessionId = request?.agent?.session?.id;
-    const chatId = sessionId ? this.#chatContextFor(sessionId)?.chatId ?? null : null;
+    const binding = sessionId ? this.#chatContextFor(sessionId) : null;
+    const chatId = binding?.chatId;
     const question = Array.isArray(request?.questions) ? request.questions[0] : null;
     if (!chatId || !question) return next();
     // 绑定会话里 Web 发起的轮次：提问留在 Web，不打扰飞书；只记下摘要供 /stop 说明。
@@ -1039,52 +952,12 @@ export class FeishuBridge {
       this.#rememberExternalAsk(sessionId, '回答', question?.question ?? question?.header ?? '一个问题');
       return next();
     }
-    if (question.multiSelect === true) return next();
-
-    const questionId = question.id ?? 'q';
-    const im = new Promise((resolve) => {
-      this.#track({ id: questionId, kind: 'question', chatId, messageId: null, question, resolve });
-    });
-
-    void this.#bot.sendCard(chatId, questionCard({
-      question: question.question ?? question.header,
-      options: question.options ?? [],
-      questionId,
-    })).then((messageId) => {
-      const entry = this.#pending.get(questionId);
-      if (entry) entry.messageId = messageId;
-    }).catch((error) => {
-      this.#log('warn', 'question card failed', error);
-    });
-
-    const native = Promise.resolve().then(() => next()).then(
-      (answer) => answer,
-      () => new Promise(() => {}),
-    );
-
-    const timeout = new Promise((_, reject) => {
-      const timer = setTimeout(() => {
-        const error = new Error('the question timed out waiting for a Feishu answer');
-        error.code = 'ASK_ABORTED';
-        reject(error);
-      }, 10 * 60_000);
-      timer.unref?.();
-    });
-    const answer = await Promise.race([native, im, timeout]);
-    const entry = this.#pending.get(questionId);
-    if (entry?.messageId && answer) {
-      const selected = answer?.answers?.[0]?.selected?.join(', ') ?? '';
-      void this.#bot.patchCard(entry.messageId, questionCard({
-        questionId,
-        resolvedText: selected ? `✅ 已选择：${selected}` : '✅ 已回答',
-      })).catch(() => undefined);
-    }
-    this.#untrack(questionId);
-    return answer;
+    return this.#interactions.ask(request, next, { chatId, chatKey: binding.key });
   }
 
   /** Card button press: `approve:<id>` / `reject:<id>` / `answer:<id>:<index>`. */
   async onCardAction(event) {
+    if (this.#disposed) return undefined;
     this.#logEvent('card-action', String(event?.action?.value?.action ?? '-'));
     const value = event?.action?.value;
     const action = typeof value?.action === 'string' ? value.action : null;
@@ -1092,315 +965,11 @@ export class FeishuBridge {
     const operator = event?.operator?.open_id ?? event?.operator?.operator_id?.open_id ?? null;
     if (operator && this.#config.botOpenId && operator === this.#config.botOpenId) return undefined;
 
-    if (action === 'session_pick' || action === 'workspace_pick' || action === 'new_session'
-      || action === 'model_pick' || action === 'reasoning_pick'
-      || action === 'menu_apply' || action === 'menu_cancel' || action === 'stats_toggle' || action === 'tools_toggle'
-      || action === 'ns_workspace' || action === 'ns_model' || action === 'ns_reasoning' || action === 'ns_preset'
-      || action === 'new_session_create' || action === 'new_session_cancel' || action === 'compact' || action === 'menu_close') {
-      return this.#handleMenuAction(action, event);
-    }
-    const [kind, id, indexRaw] = action.split(':');
-    if (kind === 'approve' || kind === 'reject') {
-      const entry = this.#pending.get(id);
-      if (!entry || entry.kind !== 'approval') return { toast: { type: 'info', content: '这条审批已失效' } };
-      if (operator && entry.chatId !== event?.context?.open_chat_id) {
-        return { toast: { type: 'info', content: '只能在发起审批的会话里操作' } };
-      }
-      if (!this.#canManage(entry.chatKey ?? `chat:${entry.chatId}`, operator)) {
-        return { toast: { type: 'warning', content: '只有管理员可以在群里审批' } };
-      }
-      this.#settle(id, kind === 'approve' ? 'allowed-once' : 'rejected');
-      if (entry.messageId) {
-        await this.#bot.patchCard(entry.messageId, approvalCard({
-          approvalId: id,
-          resolvedText: resolvedApprovalText(kind === 'approve' ? 'allowed-once' : 'rejected'),
-        })).catch(() => undefined);
-      }
-      return { toast: { type: 'success', content: kind === 'approve' ? '已批准' : '已拒绝' } };
-    }
-    if (kind === 'answer') {
-      const entry = this.#pending.get(id);
-      if (!entry || entry.kind !== 'question') return { toast: { type: 'info', content: '这个问题已回答或失效' } };
-      const index = Number.parseInt(indexRaw ?? '', 10);
-      const option = entry.question?.options?.[index];
-      if (!option) return { toast: { type: 'info', content: '这个选项已失效' } };
-      this.#settle(id, {
-        answers: [{ id: entry.question.id ?? id, selected: [option.label] }],
+    if (this.#menu.handles(action)) {
+      return this.#inboundQueue.run(event?.context?.open_chat_id, () => {
+        if (!this.#disposed) return this.#menu.handle(action, event);
       });
-      return { toast: { type: 'success', content: '已提交选择' } };
     }
-    return undefined;
+    return this.#interactions.onCardAction(action, event, operator);
   }
-
-  /** Text fallback: 批准 / 拒绝（或 yes / no）answers a pending approval. */
-  #resolveTextDecision(chatKey, chatId, openId, text) {
-    const normalized = text.trim().toLowerCase();
-    const approve = /^(批准|同意|允许|yes|y|ok)$/i.test(normalized);
-    const reject = /^(拒绝|不同意|deny|no|n)$/i.test(normalized);
-    if (!approve && !reject) return false;
-    const ids = this.#pendingByChat.get(chatId);
-    if (!ids || ids.size === 0) return false;
-    for (const id of ids) {
-      const entry = this.#pending.get(id);
-      if (!entry || entry.kind !== 'approval') continue;
-      if (!this.#canManage(chatKey, openId)) {
-        void sendNotice(this.#bot, chatId, '只有管理员可以审批。', '需要管理员', 'orange');
-        return true;
-      }
-      this.#settle(id, approve ? 'allowed-once' : 'rejected');
-      if (entry.messageId) {
-        void this.#bot.patchCard(entry.messageId, approvalCard({
-          approvalId: id,
-          resolvedText: resolvedApprovalText(approve ? 'allowed-once' : 'rejected'),
-        })).catch(() => undefined);
-      }
-      void sendNotice(this.#bot, chatId, approve ? '✅ 已批准一次。' : '🚫 已拒绝。', '审批结果', approve ? 'green' : 'red');
-      return true;
-    }
-    return false;
-  }
-
-
-  #optionOf(event) {
-    const option = event?.action?.option ?? event?.action?.value?.option;
-    if (typeof option === 'string') return option;
-    if (Array.isArray(option) && typeof option[0] === 'string') return option[0];
-    if (option && typeof option === 'object' && typeof option.value === 'string') return option.value;
-    return null;
-  }
-
-  #chatKeyOf(chatId) {
-    return `chat:${chatId}`;
-  }
-
-  /** Current model selection from the durable projection, with menu-map fallback. */
-  async #modelSelectionFor(sessionId) {
-    if (!sessionId) return null;
-    if (typeof this.#harness.sessionProjections !== 'function') return this.#sessionModels.get(sessionId) ?? null;
-    const projections = await this.#harness.sessionProjections(sessionId).catch(() => null);
-    const projected = projections?.modelSelection?.next ?? projections?.modelSelection?.lastUsed ?? null;
-    if (projected) {
-      this.#sessionModels.set(sessionId, projected);
-      if (this.#sessionModels.size > 500) this.#sessionModels.delete(this.#sessionModels.keys().next().value);
-      return projected;
-    }
-    return this.#sessionModels.get(sessionId) ?? null;
-  }
-
-  async #handleMenuAction(action, event) {
-    const chatId = event?.context?.open_chat_id ?? null;
-    const messageId = event?.context?.open_message_id ?? null;
-    if (!chatId) return { toast: { type: 'info', content: '会话信息缺失' } };
-    const chatKey = this.#chatKeyOf(chatId);
-    const option = this.#optionOf(event);
-    const operator = event?.operator?.open_id ?? event?.operator?.operator_id?.open_id ?? null;
-    const services = this.#services();
-    const pickers = new Set(['session_pick', 'workspace_pick', 'model_pick', 'reasoning_pick']);
-    const managedActions = new Set(['menu_apply', 'new_session', 'new_session_create', 'compact', 'stats_toggle', 'tools_toggle']);
-    if (managedActions.has(action) && !this.#canManage(chatKey, operator)) {
-      return { toast: { type: 'warning', content: '只有管理员可以在群里执行这个操作' } };
-    }
-    const draftPickers = new Set(['ns_workspace', 'ns_model', 'ns_reasoning', 'ns_preset']);
-
-    if (pickers.has(action)) {
-      if (!option) return { toast: { type: 'info', content: '没有选择任何值' } };
-      const data = await collectMenuData(services, chatKey);
-      if (option === currentMenuValue(data, action)) {
-        this.#menuPending.get(chatKey)?.delete(action);
-        return undefined;
-      }
-      const label = menuOptionLabel(data, action, option);
-      const pending = this.#menuPending.get(chatKey) ?? new Map();
-      pending.set(action, { action, value: option, label });
-      this.#menuPending.set(chatKey, pending);
-      // 静默记录：下拉每次选择都会回调，提示音会变成噪音，点「调整」时才反馈
-      return undefined;
-    }
-
-    if (action === 'menu_apply') {
-      const pending = this.#menuPending.get(chatKey);
-      if (!pending || pending.size === 0) {
-        return { toast: { type: 'info', content: '没有待应用的变更' } };
-      }
-      this.#menuPending.delete(chatKey);
-      // 顺序：工作区会解绑会话，先做；随后再绑定会话、切换模型与强度。
-      const order = ['workspace_pick', 'session_pick', 'model_pick', 'reasoning_pick'];
-      const items = [];
-      for (const kind of order) {
-        const item = pending.get(kind);
-        if (!item) continue;
-        const result = await this.#applyMenuChoice(item, { chatId, chatKey, silent: true });
-        if (!result?.ok) return result?.toast ?? { toast: { type: 'warning', content: '切换失败' } };
-        items.push({ title: item.label, detail: result.detail ?? '' });
-      }
-      if (items.length > 0) {
-        await this.#bot.sendCard(chatId, adjustCard({ items }))
-          .catch(() => this.#bot.sendText(chatId, `已调整：${items.map((item) => item.title).join('、')}`));
-      }
-      return { toast: { type: 'success', content: `已应用 ${items.length} 项变更` } };
-    }
-
-    if (action === 'new_session') {
-      const data = await collectMenuData(services, chatKey);
-      const draft = this.#newSessionDraft.get(chatKey) ?? {};
-      const model = draft.model ?? data.model ?? null;
-      await this.#bot.sendCard(chatId, newSessionCard({
-        workspaces: data.workspaces,
-        models: data.models.map((item) => ({
-          ...item,
-          current: model ? item.value === `${model.provider}/${model.model}` : item.current,
-        })),
-        efforts: (data.efforts ?? []).map((item) => ({
-          ...item,
-          current: model?.reasoningEffort ? item.value === model.reasoningEffort : item.current,
-        })),
-        presets: data.presets,
-        draft: { workspace: draft.workspace ?? data.currentWorkspace },
-      }));
-      return { toast: { type: 'info', content: '请在新卡片里设置后点「创建」' } };
-    }
-    if (draftPickers.has(action)) {
-      if (!option) return undefined;
-      const draft = { ...(this.#newSessionDraft.get(chatKey) ?? {}) };
-      if (action === 'ns_workspace') draft.workspace = option;
-      if (action === 'ns_preset') draft.preset = option;
-      if (action === 'ns_model') {
-        const [provider, ...rest] = option.split('/');
-        draft.model = { provider, model: rest.join('/') };
-      }
-      if (action === 'ns_reasoning') {
-        draft.model = { ...(draft.model ?? {}), reasoningEffort: option };
-      }
-      this.#newSessionDraft.set(chatKey, draft);
-      return undefined;
-    }
-    if (action === 'new_session_create') {
-      const draft = this.#newSessionDraft.get(chatKey) ?? {};
-      this.#newSessionDraft.delete(chatKey);
-      const previous = this.#state.sessionFor(chatKey);
-      await this.#state.unbindSession(chatKey);
-      this.#eavesdrop.reset(chatKey);
-      this.#forgetSessionOrigin(previous);
-      await this.#state.setOverride?.(chatKey, {
-        workspace: draft.workspace ?? null,
-        model: draft.model ?? null,
-        preset: draft.preset ?? null,
-      });
-      const readyText = '已按所选配置准备新会话，发送任意消息即可开始。';
-      return {
-        toast: { type: 'success', content: '新会话已就绪' },
-        card: { type: 'raw', data: noticeCard(readyText, '新会话已就绪') },
-      };
-    }
-    if (action === 'compact') {
-      const sessionId = this.#state.sessionFor(chatKey);
-      if (!sessionId) return { toast: { type: 'info', content: '当前还没有可压缩的会话' } };
-      try {
-        const value = await this.#harness.compact?.(sessionId);
-        const result = value?.result ?? value ?? {};
-        if (result.kind === 'error') {
-          return { toast: { type: 'warning', content: result.text ?? '压缩失败' } };
-        }
-        const text = result.text === 'No compactable history yet.' ? '没有可压缩的历史。' : (result.text ?? '已触发压缩');
-        await sendNotice(this.#bot, chatId, `上下文压缩：${text}`, '上下文压缩');
-        return { toast: { type: 'success', content: '压缩完成' } };
-      } catch (error) {
-        return { toast: { type: 'warning', content: `压缩失败：${error.message}` } };
-      }
-    }
-    if (action === 'new_session_cancel') {
-      this.#newSessionDraft.delete(chatKey);
-      if (messageId) await this.#bot.deleteMessage?.(messageId).catch(() => undefined);
-      return undefined;
-    }
-    if (action === 'stats_toggle' || action === 'tools_toggle') {
-      const isStats = action === 'stats_toggle';
-      const enabled = isStats
-        ? this.#state.statsFor?.(chatKey) === true
-        : this.#state.toolsFor?.(chatKey) === true;
-      if (isStats) await this.#state.setStats?.(chatKey, !enabled);
-      else await this.#state.setTools?.(chatKey, !enabled);
-      // The rebuilt menu shows current values; drop hidden pending picks.
-      this.#menuPending.delete(chatKey);
-      const card = await buildMenuCard(services, { chatKey });
-      return {
-        toast: { type: 'success', content: `${isStats ? 'Token 统计' : '工具调用'}已${enabled ? '关闭' : '开启'}` },
-        card: { type: 'raw', data: card },
-      };
-    }
-    if (action === 'menu_close') {
-      // Closing discards unapplied dropdown picks and any new-session draft.
-      this.#menuPending.delete(chatKey);
-      this.#newSessionDraft.delete(chatKey);
-      if (messageId) await this.#bot.deleteMessage?.(messageId).catch(() => undefined);
-      return undefined;
-    }
-    return undefined;
-  }
-
-  /** Apply one pending menu choice; returns { ok, detail, toast }. */
-  async #applyMenuChoice(pending, { chatId, chatKey, silent = false }) {
-    const sessionId = this.#state.sessionFor(chatKey);
-    if (pending.action === 'session_pick') {
-      const sessions = await this.#harness.listSessions().catch(() => []);
-      if (!sessions.some((item) => item.sessionId === pending.value)) {
-        return { ok: false, toast: { type: 'warning', content: '这个会话已不存在' } };
-      }
-      const previous = this.#state.sessionFor(chatKey);
-      await this.#state.bindSession(chatKey, pending.value);
-      if (previous && previous !== pending.value) {
-        this.#eavesdrop.reset(chatKey);
-        this.#forgetSessionOrigin(previous);
-      }
-      if (!silent) await sendNotice(this.#bot, chatId, `已绑定会话：${pending.label}`, '会话已绑定');
-      return { ok: true, detail: '后续消息进入该会话' };
-    }
-    if (pending.action === 'workspace_pick') {
-      await this.#state.setOverride?.(chatKey, { workspace: pending.value });
-      await this.#state.unbindSession(chatKey);
-      this.#eavesdrop.reset(chatKey);
-      this.#forgetSessionOrigin(sessionId);
-      if (!silent) await sendNotice(this.#bot, chatId, `工作区已切换为 ${pending.value}`, '工作区已切换');
-      return { ok: true, detail: '下一条消息会在该目录新建会话' };
-    }
-    if (pending.action === 'model_pick') {
-      const [provider, ...rest] = pending.value.split('/');
-      const selection = { provider, model: rest.join('/') };
-      if (sessionId) {
-        await this.#harness.selectModel(sessionId, selection).catch((error) => this.#log('warn', 'selectModel failed', error));
-        this.#sessionModels.set(sessionId, selection);
-        if (this.#sessionModels.size > 500) this.#sessionModels.delete(this.#sessionModels.keys().next().value);
-        if (!silent) await sendNotice(this.#bot, chatId, `模型已切换为 ${pending.value}`, '模型已切换');
-        return { ok: true, detail: '当前会话立即生效' };
-      }
-      await this.#state.setOverride?.(chatKey, { model: selection });
-      if (!silent) await sendNotice(this.#bot, chatId, `模型已切换为 ${pending.value}`, '模型已切换');
-      return { ok: true, detail: '下一条消息的新会话生效' };
-    }
-    if (pending.action === 'reasoning_pick') {
-      const current = sessionId
-        ? (await this.#modelSelectionFor(sessionId))
-          ?? this.#state.overrideFor?.(chatKey).model
-          ?? this.#config.model
-          ?? null
-        : (this.#state.overrideFor?.(chatKey).model ?? this.#config.model ?? null);
-      if (!current?.provider || !current?.model) {
-        return { ok: false, toast: { type: 'warning', content: '先选择模型，再调整思考强度' } };
-      }
-      const selection = { ...current, reasoningEffort: pending.value };
-      if (sessionId) {
-        await this.#harness.selectModel(sessionId, selection).catch((error) => this.#log('warn', 'selectReasoning failed', error));
-        this.#sessionModels.set(sessionId, selection);
-        if (this.#sessionModels.size > 500) this.#sessionModels.delete(this.#sessionModels.keys().next().value);
-      } else {
-        await this.#state.setOverride?.(chatKey, { model: selection });
-      }
-      if (!silent) await sendNotice(this.#bot, chatId, `思考强度已切换为 ${pending.value}`, '思考强度已切换');
-      return { ok: true, detail: sessionId ? '当前会话立即生效' : '下一条消息的新会话生效' };
-    }
-    return { ok: false, toast: { type: 'info', content: '没有待切换项' } };
-  }
-
-  /** Live assistant tokens: refresh the same card while the model streams. */
-
 }

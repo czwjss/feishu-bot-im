@@ -6,6 +6,13 @@ import { join } from 'node:path';
 import { ConfigStore, StateStore } from '../src/config.js';
 import { FeishuBridge } from '../src/bridge.js';
 
+function actionOf(card, prefix, index = 0) {
+  const actions = [...JSON.stringify(card).matchAll(/"action":"([^"]+)"/g)].map((match) => match[1]);
+  const action = actions.filter((value) => value.startsWith(prefix))[index];
+  assert.ok(action, `card contains ${prefix}`);
+  return action;
+}
+
 let seq = 0;
 class FakeBot {
   text = [];
@@ -332,6 +339,7 @@ function message(overrides = {}) {
 {
   const { bot, harness, bridge } = makeBridge();
   await state.bindSession('chat:oc_compact', 'sess-compact');
+  await state.setChatType('chat:oc_compact', 'group');
   const result = await bridge.onCardAction({
     operator: { open_id: 'ou_user' },
     action: { value: { action: 'compact' } },
@@ -357,6 +365,7 @@ function message(overrides = {}) {
 {
   const { bot, bridge } = makeBridge();
   await state.bindSession('chat:oc_approve', 'sess-approve');
+  await state.setChatType('chat:oc_approve', 'group');
   const request = {
     callId: 'call-1',
     toolName: 'bash',
@@ -369,7 +378,7 @@ function message(overrides = {}) {
   assert.equal(bot.cards.length, 1, 'approval card should be sent');
   const action = {
     operator: { open_id: 'ou_user' },
-    action: { value: { action: 'approve:ap-1' } },
+    action: { value: { action: actionOf(bot.cards[0].card, 'approve:') } },
     context: { open_message_id: bot.cards[0].id, open_chat_id: 'oc_approve' },
   };
   const toast = await bridge.onCardAction(action);
@@ -409,8 +418,8 @@ function message(overrides = {}) {
   assert.equal(bot.cards.length, 1, 'question card should be sent');
   await bridge.onCardAction({
     operator: { open_id: 'ou_user' },
-    action: { value: { action: 'answer:q1:1' } },
-    context: { open_message_id: bot.cards[0].id },
+    action: { value: { action: actionOf(bot.cards[0].card, 'answer:', 1) } },
+    context: { open_message_id: bot.cards[0].id, open_chat_id: 'oc_q' },
   });
   const answer = await pending;
   assert.deepEqual(answer, { answers: [{ id: 'q1', selected: ['方案 B'] }] });
@@ -1385,13 +1394,13 @@ function message(overrides = {}) {
   await new Promise((resolve) => setTimeout(resolve, 10));
   const denied = await bridge.onCardAction({
     operator: { open_id: 'ou_other' },
-    action: { value: { action: 'approve:ap-g' } },
+    action: { value: { action: actionOf(bot.cards.at(-1).card, 'approve:') } },
     context: { open_message_id: bot.cards.at(-1).id, open_chat_id: 'oc_group_approve' },
   });
   assert.equal(denied.toast.type, 'warning', 'non-manager cannot approve in a group');
   const allowed = await bridge.onCardAction({
     operator: { open_id: 'ou_user' },
-    action: { value: { action: 'approve:ap-g' } },
+    action: { value: { action: actionOf(bot.cards.at(-1).card, 'approve:') } },
     context: { open_message_id: bot.cards.at(-1).id, open_chat_id: 'oc_group_approve' },
   });
   assert.equal(allowed.toast.type, 'success');

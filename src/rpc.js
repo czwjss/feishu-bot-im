@@ -4,7 +4,8 @@
  * Carried over DSH's authenticated `/api` connection channel, so the browser
  * keeps its existing login and Host/Origin trust checks.
  */
-export const RPC_ENDPOINT = 'im-feishu';
+import { API, RPC_ENDPOINT } from './contracts.js';
+export { RPC_ENDPOINT };
 export const RPC_PATH = `/api/${RPC_ENDPOINT}`;
 
 function ok(value) {
@@ -34,59 +35,59 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
   return async function handle(method, payload) {
     const input = payload && typeof payload === 'object' ? payload : {};
     switch (method) {
-      case 'bots.list':
+      case API.botsList:
         return ok({ ...(await manager.status()), version });
 
-      case 'provision.begin':
+      case API.provisionBegin:
         return ok(await manager.provisionBegin(input ?? {}));
 
-      case 'provision.poll':
+      case API.provisionPoll:
         return ok(await manager.provisionPoll());
 
-      case 'provision.cancel':
+      case API.provisionCancel:
         return ok(manager.provisionCancel());
 
-      case 'bot.add':
+      case API.botAdd:
         return ok(await manager.addBot({
           appId: input.appId,
           appSecret: input.appSecret,
           alias: input.alias,
         }));
 
-      case 'bot.remove':
+      case API.botRemove:
         await manager.removeBot(input.botId);
         return ok(await manager.status());
 
-      case 'bot.reconnect':
+      case API.botReconnect:
         await manager.reconnectBot(input.botId);
         return ok(await manager.status());
 
       case 'bot.slash-sync':
         return ok(await runtimeOf(input).syncSlashCommands());
 
-      case 'bot.test':
-        await runtimeOf(input).sendTest();
-        return ok({ sent: true });
+      case API.botCheck:
+      case API.botTest:
+        return ok(await runtimeOf(input).checkConnection());
 
-      case 'bot.alias.set':
+      case API.botAliasSet:
         await runtimeOf(input).save({ alias: typeof input.alias === 'string' && input.alias.trim() ? input.alias.trim() : null });
         return ok(await runtimeOf(input).status());
 
-      case 'bot.color.set':
+      case API.botColorSet:
         await runtimeOf(input).save({ color: input.color });
         return ok(await runtimeOf(input).status());
 
-      case 'bot.workspace.set':
+      case API.botWorkspaceSet:
         await runtimeOf(input).saveWorkspace(input.workspace);
         return ok(await runtimeOf(input).status());
 
-      case 'bot.model.set':
+      case API.botModelSet:
         await runtimeOf(input).save({
           model: input.model && input.model.provider && input.model.model ? input.model : null,
         });
         return ok(await runtimeOf(input).status());
 
-      case 'bot.permission.set': {
+      case API.botPermissionSet: {
         const permissionPreset = typeof input.permissionPreset === 'string' && input.permissionPreset.trim()
           ? input.permissionPreset.trim()
           : null;
@@ -100,39 +101,39 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
         return ok(await runtimeOf(input).status());
       }
 
-      case 'bot.preset.set':
+      case API.botPresetSet:
         await runtimeOf(input).save({ agentPreset: typeof input.preset === 'string' && input.preset.trim() ? input.preset.trim() : null });
         return ok(await runtimeOf(input).status());
 
-      case 'bot.access.set':
+      case API.botAccessSet:
         await runtimeOf(input).save({ access: input.access });
         return ok(await runtimeOf(input).status());
 
-      case 'bot.busy-mode.set':
+      case API.botBusyModeSet:
         await runtimeOf(input).save({ busyMode: { ...(runtimeOf(input).config?.busyMode ?? {}), [input.scope === 'group' ? 'group' : 'direct']: input.mode === 'steer' ? 'steer' : 'queue' } });
         return ok(await runtimeOf(input).status());
 
-      case 'bot.process-detail.set':
+      case API.botProcessDetailSet:
         await runtimeOf(input).save({ processDetail: input.mode === 'brief' ? 'brief' : 'detailed' });
         return ok(await runtimeOf(input).status());
 
-      case 'bot.bot-reply.set':
+      case API.botBotReplySet:
         await runtimeOf(input).save({ respondToBotMessages: input.enabled === true });
         return ok(await runtimeOf(input).status());
 
-      case 'bot.context-enhancement.set':
+      case API.botContextSet:
         await runtimeOf(input).saveContextEnhancement(input.config);
         return ok(await runtimeOf(input).status());
 
-      case 'bot.eavesdrop.set':
+      case API.botEavesdropSet:
         await runtimeOf(input).save({ eavesdrop: input.eavesdrop });
         return ok(await runtimeOf(input).status());
 
-      case 'bot.mentions.set':
+      case API.botMentionsSet:
         await runtimeOf(input).save({ mentions: input.mentions });
         return ok(await runtimeOf(input).status());
 
-      case 'models.list': {
+      case API.modelsList: {
         const catalog = await harness.modelCatalog();
         const groups = (catalog?.groups ?? []).map((group) => ({
           id: group.id,
@@ -146,7 +147,7 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
         return ok({ groups, default: catalog?.default ?? null });
       }
 
-      case 'permission.list': {
+      case API.permissionList: {
         const catalog = await harness.invoke('permissionPresets', 'catalog', {});
         return ok({
           options: Array.isArray(catalog?.options) ? catalog.options : [],
@@ -154,12 +155,12 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
         });
       }
 
-      case 'presets.list': {
+      case API.presetsList: {
         const runtime = input.botId ? runtimeOf(input) : manager.runtimes[0];
         return ok({ presets: runtime ? await runtime.listPresets() : [] });
       }
 
-      case 'workspaces.list': {
+      case API.workspacesList: {
         const baseline = await harness.workspaceBaseline();
         const items = Array.isArray(baseline?.items) ? baseline.items : [];
         return ok({
@@ -173,44 +174,44 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
         return ok({ version });
 
       // ── 用户身份（飞书分身）────────────────────────────────────────────
-      case 'user.status':
+      case API.userStatus:
         return ok(await requireUserIdentity().status());
 
-      case 'user.connect.begin':
+      case API.userConnectBegin:
         return ok(await requireUserIdentity().connectBegin(input));
 
-      case 'user.connect.cancel':
+      case API.userConnectCancel:
         return ok(await requireUserIdentity().connectCancel());
 
-      case 'user.disconnect':
+      case API.userDisconnect:
         return ok(await requireUserIdentity().disconnect());
 
-      case 'user.refresh':
+      case API.userRefresh:
         return ok(await requireUserIdentity().refresh());
 
-      case 'user.monitor.status':
+      case API.userMonitorStatus:
         return ok(await requireUserMonitor().status());
 
-      case 'user.monitor.chats':
+      case API.userMonitorChats:
         return ok({ chats: await requireUserMonitor().discoverChats() });
 
-      case 'user.monitor.add':
+      case API.userMonitorAdd:
         return ok(await requireUserMonitor().addChat(input));
 
-      case 'user.monitor.remove':
+      case API.userMonitorRemove:
         return ok(await requireUserMonitor().removeChat(input.chatId));
 
-      case 'user.monitor.handoff.set':
+      case API.userMonitorHandoffSet:
         return ok(await requireUserMonitor().setHandoffKeywords(input.keywords));
 
-      case 'user.monitor.worker.set':
+      case API.userMonitorWorkerSet:
         return ok(await requireUserMonitor().setWorker({
           workspaceId: input.workspaceId,
           workspacePath: input.workspacePath,
           preset: input.preset,
         }));
 
-      case 'user.monitor.worker.options': {
+      case API.userMonitorWorkerOptions: {
         const baseline = await harness.workspaceBaseline().catch(() => ({}));
         const items = Array.isArray(baseline?.items) ? baseline.items : [];
         const runtime = manager.runtimes[0] ?? null;
@@ -235,22 +236,25 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
         });
       }
 
-      case 'user.monitor.enable':
+      case API.userMonitorEnable:
         return ok(await requireUserMonitor().setEnabled(input.enabled === true));
 
-      case 'user.monitor.flush':
+      case API.userMonitorFlush:
         return ok(await requireUserMonitor().flushPending());
 
-      case 'user.monitor.poll':
+      case API.userMonitorPoll:
         await requireUserMonitor().pollOnce();
         return ok(await requireUserMonitor().status());
 
-      case 'user.monitor.chat.set':
+      case API.userMonitorChatSet:
         return ok(await requireUserMonitor().setChat(input.chatId, {
           mode: input.mode,
           keywords: input.keywords,
           replyToBots: input.replyToBots,
         }));
+
+      case API.userMonitorReplyRulesSet:
+        return ok(await requireUserMonitor().setReplyRules(input.rules));
 
       default:
         return fail('bad-request', `unknown method: ${String(method)}`);

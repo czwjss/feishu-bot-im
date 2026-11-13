@@ -1,3 +1,4 @@
+import { messageContentOf, messageTypeOf, decodePost, renderPostText } from '../message-content.js';
 /**
  * 以用户身份调飞书 OpenAPI 的最小封装。
  *
@@ -32,17 +33,6 @@ const IMAGE_MIME = Object.freeze({
 
 function stringOf(value) {
   return typeof value === 'string' ? value : '';
-}
-
-function parseJsonObject(value) {
-  if (value && typeof value === 'object') return value;
-  if (typeof value !== 'string' || !value) return null;
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
-  }
 }
 
 function requestSignal({ timeoutMs = DEFAULT_TIMEOUT_MS, signal } = {}) {
@@ -253,32 +243,14 @@ function formatCreateTime(value) {
   return new Date(number).toISOString();
 }
 
-/** 把 post（富文本）消息拼成纯文本。 */
-function postToText(content) {
-  const localized = content?.zh_cn ?? content?.en_us ?? content?.ja_jp ?? content;
-  if (!localized || typeof localized !== 'object') return '';
-  const title = stringOf(localized.title);
-  const paragraphs = Array.isArray(localized.content) ? localized.content : [];
-  const lines = paragraphs.map((paragraph) => {
-    if (!Array.isArray(paragraph)) return '';
-    return paragraph.map((node) => {
-      if (!node || typeof node !== 'object') return '';
-      if (typeof node.text === 'string') return node.text;
-      if (typeof node.href === 'string') return node.href;
-      return '';
-    }).join('');
-  });
-  return [title, ...lines].filter((line) => line).join('\n');
-}
-
 export function extractMessageText(item) {
-  const messageType = stringOf(item?.msg_type);
-  const content = parseJsonObject(item?.body?.content) ?? {};
+  const messageType = messageTypeOf(item);
+  const content = messageContentOf(item);
   switch (messageType) {
     case 'text':
       return stringOf(content.text);
     case 'post':
-      return postToText(content);
+      return renderPostText(decodePost(content));
     case 'image':
       return '[图片]';
     case 'file':
@@ -291,7 +263,7 @@ export function extractMessageText(item) {
       return '[表情]';
     case 'interactive':
       // 卡片默认只拿到精简投影；调用方传 card_msg_content_type 时才拿到原始卡片。
-      return interactiveTextOfContent(content) || '[卡片]';
+      return interactiveTextOfContent(content, { maxLength: Infinity }) || '[卡片]';
     case 'share_chat':
       return '[群名片]';
     case 'share_user':
@@ -495,6 +467,14 @@ function validateText(text) {
   return value;
 }
 
+function userCard(text, title, color) {
+  const value = validateText(text);
+  const heading = typeof title === 'string' ? title.trim() : '';
+  if (heading.length > 100) throw new Error('title 最多 100 字符');
+  if (color && !heading) throw new Error('color 需要同时提供 title');
+  return noticeCard(value, heading || null, normalizeCardColor(color));
+}
+
 /**
  * 以授权用户身份发送交互卡片。正文用 Markdown，可选标题和标题颜色。
  */
@@ -511,11 +491,7 @@ export async function sendCardMessage({
   signal,
 } = {}) {
   const [receiveIdType, receiveId] = resolveReceiveTarget({ chatId, openId, email });
-  const value = validateText(text);
-  const heading = typeof title === 'string' ? title.trim() : '';
-  if (heading.length > 100) throw new Error('title 最多 100 字符');
-  if (color && !heading) throw new Error('color 需要同时提供 title');
-  const card = noticeCard(value, heading || null, normalizeCardColor(color));
+  const card = userCard(text, title, color);
   return postUserMessage({
     accessToken,
     receiveIdType,
@@ -531,7 +507,7 @@ export async function sendCardMessage({
 
 /**
  * 以用户身份回复某条消息（保持引用关系）。
- * 群聊回复优先用它，避免出现无引用的新消息。
+ * 是否引用由调用方的回复规则决定。
  */
 export async function replyCardMessage({
   accessToken,
@@ -545,11 +521,7 @@ export async function replyCardMessage({
 } = {}) {
   const id = stringOf(messageId).trim();
   if (!id) throw new Error('messageId 不能为空');
-  const value = validateText(text);
-  const heading = typeof title === 'string' ? title.trim() : '';
-  if (heading.length > 100) throw new Error('title 最多 100 字符');
-  if (color && !heading) throw new Error('color 需要同时提供 title');
-  const card = noticeCard(value, heading || null, normalizeCardColor(color));
+  const card = userCard(text, title, color);
   const data = await requestFeishu({
     path: `/open-apis/im/v1/messages/${encodeURIComponent(id)}/reply`,
     method: 'POST',

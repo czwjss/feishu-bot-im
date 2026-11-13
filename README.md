@@ -25,9 +25,12 @@
 - **人物查询**：`feishu_bot_people` 按姓名模糊查询群成员并返回精确 open_id；群成员缓存 6 小时，可主动 refresh。
 - **历史查询**：`feishu_bot_messages` 按群、thread 和时间范围读取历史；可选本地关键词筛选，不是飞书全文搜索。
 - **用户身份（飞书分身）**：Host 默认挂载 `feishu_avatar_*` 工具，以你本人身份读群历史、按群或联系人发卡片/图片/文件；复用机器人应用，设备授权连接，不需要重定向 URL。
-- **会话命名**：飞书会话按聊天名命名（私聊用对方名字，群聊用群名），标题在首次创建时写入，之后固定不再自动改名。
+- **会话命名**：机器人会话首次创建时按聊天名命名；分身 Worker 使用监听会话名，重建后也会重新命名。
 - **转人工**：关键词可在设置页配置（默认「转人工 / 人工客服 / 找真人 / 我要投诉」）；命中后机器人不回复、分身丢弃当前批次，等人处理。
 - **分身消息监听**：在「分身」弹层选择会话后，以你本人身份轮询新消息，攒批交给 Worker 会话处理；Worker 用 `feishu_avatar_send` 回复（可带 `replyToMessageId` 引用原消息、`title` 按需设置标题）。流式卡片收尾后才入库；群聊默认只处理 @我 / 回复我，可改关键词。
+- **设置自动保存**：机器人配置、名称和颜色、分身回复规则修改后自动保存；下拉框与开关即时提交，文本停止输入 600 毫秒后提交，失败保留草稿并支持重试。
+- **检查连接**：只校验应用凭证并读取当前长连接状态，不选择会话、不向群聊或私聊发送测试消息。旧版 `bot.test` 接口也使用相同的只读检查。
+- **分身回复规则**：设置页可编辑回复规则或恢复默认模板；会话信息和规则分别通过 Worker 专属动态上下文注入，新消息与背景记录作为用户消息投递。规则保存后从下一次模型请求起生效。
 
 ## 快速开始
 
@@ -70,8 +73,8 @@ feishu_avatar_me / feishu_avatar_messages / feishu_avatar_send
 这些工具由 Host 的 `feishu-bot-im` 插件**默认注册**，和其他 Host 工具一样
 无需修改 Agent 预设；插件不提供预设。
 
-配置步骤、权限清单和错误码见 [docs/user-identity.md](docs/user-identity.md)。
-监听与自动回复的设计见 [docs/user-message-monitor-design.md](docs/user-message-monitor-design.md)，机器人侧入站流程见 [docs/bot-inbound-flow.html](docs/bot-inbound-flow.html)。
+分身文档入口：[使用与排障](docs/user-identity.md) · [开发架构](docs/user-identity-architecture.md) · [监听与派发规则](docs/user-message-monitor-design.md) · [权限清单](docs/feishu-scopes.md)。
+可视化：[分身消息流程](docs/feishu-avatar-message-flow.svg) · [机器人入站流程](docs/bot-inbound-flow.html)。
 
 ## 常用命令
 
@@ -133,3 +136,18 @@ pnpm run build:client
 ```
 
 `npm test` 会先自动构建；发布前 `prepublishOnly` 也会构建。
+
+核心模块按职责组织：
+
+| 模块 | 职责 |
+| --- | --- |
+| `src/bridge.js` | 入站消息、会话绑定和轮次路由 |
+| `src/interactions.js` | 审批与提问的唯一标识、回调校验、超时和取消 |
+| `src/menu.js` | 菜单草稿、配置应用与失败重试 |
+| `src/contracts.js` | 前后端共享的 RPC 名称、颜色和配置枚举 |
+| `src/json-store.js` | 串行更新、原子写入与读取错误处理 |
+| `src/message-content.js` | API/事件消息正文和富文本的共同解析 |
+| `client/hooks.js` / `client/async.js` | 查询、串行提交、可见性轮询和编辑草稿 |
+
+配置写入成功后才更新内存；只有文件不存在时使用默认值，JSON 损坏或读取失败会报错并阻止覆盖。
+旧版消息上下文兼容逻辑仅作用于本插件绑定的会话，新消息继续通过 `systemPrompt.context` 注入。

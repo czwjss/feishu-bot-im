@@ -2,66 +2,19 @@ import React from 'react';
 
 import { API, Boundary, CSS, S, rpc, t } from './shared.js';
 import { AddBotModal, BotCard } from './bot.js';
+import { usePolling, useRpcQuery } from './hooks.js';
 
 const h = React.createElement;
 
     export function SettingsPage({ connection }) {
-      const [state, setState] = React.useState({ bots: [], version: null });
+      const { data, error, loaded, refresh } = useRpcQuery(connection, API.botsList);
+      const state = data ?? { bots: [], version: null };
+      usePolling(refresh, { interval: 30_000, scope: connection });
       const [models, setModels] = React.useState([]);
       const [presets, setPresets] = React.useState([]);
       const [workspaces, setWorkspaces] = React.useState([]);
       const [permissionOptions, setPermissionOptions] = React.useState([]);
       const [addMode, setAddMode] = React.useState(null);
-      const [error, setError] = React.useState(null);
-      const [loaded, setLoaded] = React.useState(false);
-
-      const refresh = React.useCallback(async () => {
-        try {
-          const value = await rpc(connection, API.botsList, {});
-          // 数据没变就不触发重渲染（轮询只关心状态变化）
-          setState((previous) => {
-            const nextBots = value.bots ?? [];
-            const same = previous.version === (value.version ?? null)
-              && JSON.stringify(previous.bots) === JSON.stringify(nextBots);
-            return same ? previous : { bots: nextBots, version: value.version ?? null };
-          });
-          setError(null);
-          setLoaded(true);
-          return value;
-        } catch (cause) {
-          setError(cause.message);
-          setLoaded(true);
-          return null;
-        }
-      }, [connection]);
-
-      // 状态轮询：页面可见时 30 秒一次，隐藏时完全暂停，回到页面立即补一次。
-      React.useEffect(() => {
-        const POLL_MS = 30_000;
-        let timer = null;
-        const tick = () => { if (!document.hidden) void refresh(); };
-        const start = () => {
-          if (timer) clearInterval(timer);
-          timer = setInterval(tick, POLL_MS);
-        };
-        const onVisibility = () => {
-          if (document.hidden) {
-            if (timer) clearInterval(timer);
-            timer = null;
-          } else {
-            void refresh();
-            start();
-          }
-        };
-        void refresh();
-        start();
-        document.addEventListener('visibilitychange', onVisibility);
-        return () => {
-          if (timer) clearInterval(timer);
-          document.removeEventListener('visibilitychange', onVisibility);
-        };
-      }, [refresh]);
-
       React.useEffect(() => {
         if (!loaded || state.bots.length === 0) return;
         let alive = true;
@@ -88,13 +41,13 @@ const h = React.createElement;
         return () => { alive = false; };
       }, [connection, loaded, state.bots.length]);
 
-      if (!loaded) {
+      if (!loaded || !data) {
         return h('div', { style: S.page },
           h('h2', { style: S.title }, t('飞书机器人', 'Feishu bots')),
           error
             ? h('div', null,
               h('p', { style: S.error }, `${t('读取失败：', 'Failed: ')}${error}`),
-              h('button', { type: 'button', style: S.btn('primary'), onClick: () => { setError(null); void refresh(); } }, t('重试', 'Retry')))
+              h('button', { type: 'button', style: S.btn('primary'), onClick: () => { void refresh(); } }, t('重试', 'Retry')))
             : h('p', { style: S.sub }, t('正在读取…', 'Loading…')));
       }
 

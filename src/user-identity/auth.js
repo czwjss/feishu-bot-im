@@ -1,7 +1,7 @@
 /**
  * 用户身份的 token 生命周期。
  *
- * Host（设置页）和预设工具（./user-identity）共用：读 token、按需用 refresh_token
+ * 设置页、全局工具和监听器共用：读 token、按需用 refresh_token
  * 换新 token、原子写回。
  */
 import { getUserInfo } from './api.js';
@@ -9,7 +9,7 @@ import { maskAppId, resolveIdentityApp } from './app.js';
 import { NotAuthorizedError, isRefreshTokenDeadError } from './errors.js';
 import { refreshUserAccessToken, tokenDocument } from './oauth.js';
 
-/** 同一进程内 Host 和 Preset 可能同时刷新同一份 token。 */
+/** 同一进程内不同入口可能同时刷新同一份 token。 */
 const refreshFlights = new Map();
 
 export class UserIdentityAuth {
@@ -46,7 +46,7 @@ export class UserIdentityAuth {
     return this.#configStore.config;
   }
 
-  /** 重新读取磁盘上的配置和 token；Host 设置页与预设工具共用文件。 */
+  /** 重新读取磁盘上的配置和 token；设置页、工具和监听器共用文件。 */
   async reload() {
     await this.#configStore.load();
     await this.#tokenStore.load();
@@ -127,7 +127,7 @@ export class UserIdentityAuth {
     return refreshed.accessToken;
   }
 
-  /** 用 refresh_token 刷新；Host 与 Preset 也共享同一次请求。 */
+  /** 用 refresh_token 刷新；同一路径共享一次进行中的请求。 */
   async refresh(options = {}) {
     const key = this.#tokenStore.path;
     const existing = refreshFlights.get(key);
@@ -192,25 +192,28 @@ export class UserIdentityAuth {
   }
 
   /** 设备授权成功后落库：先拉一次用户信息，再保存 token。 */
-  async acceptDeviceToken(token, { app } = {}) {
+  async acceptDeviceToken(token, { app, signal } = {}) {
+    signal?.throwIfAborted();
     const resolved = app ?? await this.resolveApp();
     const user = await getUserInfo({
       accessToken: token.accessToken,
       fetchImpl: this.#fetchImpl,
       timeoutMs: this.#timeoutMs,
+      signal,
     });
+    signal?.throwIfAborted();
     if (!user.openId) throw new Error('飞书没有返回授权用户的 open_id');
     const previous = this.#tokenStore.document;
-    const sameApp = Boolean(previous?.appId && previous.appId === resolved.appId);
+    const sameIdentity = previous?.appId === resolved.appId && previous?.user?.openId === user.openId;
     const saved = await this.#tokenStore.save(tokenDocument({
       token,
       appId: resolved.appId,
       user,
-      // 切换机器人应用时不能沿用旧应用的 refresh_token/scope/user。
-      previous: sameApp ? previous : null,
+      // 切换应用或用户时，不能继承上一份授权的 refresh_token、scope 和有效期。
+      previous: sameIdentity ? previous : null,
       now: this.#now(),
       preserveAuthorizedAt: false,
-    }));
+    }), { signal });
     this.#logger?.info?.(`[im-feishu] 用户身份已授权：${user.name || user.openId}`);
     return saved;
   }

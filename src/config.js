@@ -6,8 +6,8 @@
  *
  *   { version: 2, bots: [ { id, appId, secretRef, alias, ...settings } ] }
  */
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { JsonStore } from './json-store.js';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 
 import { normalizeContextEnhancementConfig } from './context-enhancement.js';
@@ -15,9 +15,8 @@ import { normalizeEavesdropConfig } from './eavesdrop.js';
 import { normalizeMentionsConfig } from './mentions.js';
 import { randomUUID } from 'node:crypto';
 
-export const ACCESS_MODES = Object.freeze({ ALL: 'all', ALLOWLIST: 'allowlist' });
-export const BUSY_MODES = Object.freeze({ QUEUE: 'queue', STEER: 'steer' });
-export const BOT_COLORS = Object.freeze(['blue', 'green', 'purple', 'orange', 'pink']);
+import { ACCESS_MODES, BUSY_MODES, BOT_COLORS } from './contracts.js';
+export { ACCESS_MODES, BUSY_MODES, BOT_COLORS };
 
 
 function cleanString(value) {
@@ -142,249 +141,148 @@ export function configPaths(config = {}) {
   };
 }
 
-async function readJson(path) {
-  try {
-    return JSON.parse(await readFile(path, 'utf8'));
-  } catch (error) {
-    if (error?.code === 'ENOENT') return null;
-    throw error;
-  }
-}
-
-async function writeJsonAtomic(path, value) {
-  await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  await rename(temporary, path);
-}
-
 export class ConfigStore {
-  #path;
-  #doc = Object.freeze({ version: 2, bots: Object.freeze([]) });
-  #queue = Promise.resolve();
+  #store;
 
-  constructor(path) {
-    this.#path = path;
-  }
-
-  get bots() {
-    return this.#doc.bots;
-  }
-
-  bot(id) {
-    return this.#doc.bots.find((item) => item.id === id) ?? null;
-  }
-
-  async load() {
-    const parsed = await readJson(this.#path).catch(() => null);
-    this.#doc = normalizeDocument(parsed);
-    return this;
-  }
-
-  #write(next) {
-    const run = this.#queue.then(async () => {
-      await writeJsonAtomic(this.#path, next);
-      this.#doc = next;
-      return next;
-    });
-    this.#queue = run.catch(() => undefined);
-    return run;
-  }
+  constructor(path) { this.#store = new JsonStore(path, normalizeDocument); }
+  get bots() { return this.#store.value.bots; }
+  bot(id) { return this.bots.find((item) => item.id === id) ?? null; }
+  async load() { await this.#store.load(); return this; }
 
   add(botInput) {
-    const bot = normalizeBot({
-      id: `bot_${randomUUID().slice(0, 8)}`,
-      color: botInput?.color ?? nextColor(this.#doc.bots),
-      ...botInput,
-    });
-    if (!bot) throw new Error('App ID 不能为空');
-    if (this.#doc.bots.some((item) => item.appId === bot.appId)) {
-      throw new Error('这个飞书应用已经绑定过了');
-    }
-    return this.#write(Object.freeze({
-      version: 2,
-      bots: Object.freeze([...this.#doc.bots, bot]),
-    })).then(() => bot);
+    let bot;
+    return this.#store.update((doc) => {
+      bot = normalizeBot({
+        id: `bot_${randomUUID().slice(0, 8)}`,
+        ...botInput,
+        color: botInput?.color ?? nextColor(doc.bots),
+      });
+      if (!bot) throw new Error('App ID 不能为空');
+      if (doc.bots.some((item) => item.appId === bot.appId || item.id === bot.id)) {
+        throw new Error('这个飞书应用已经绑定过了');
+      }
+      return { version: 2, bots: [...doc.bots, bot] };
+    }).then(() => bot);
   }
 
   update(id, patch) {
-    const current = this.bot(id);
-    if (!current) throw new Error(`机器人不存在：${id}`);
-    const next = normalizeBot({ ...current, ...patch, id, appId: current.appId }, { legacyId: id });
-    const bots = this.#doc.bots.map((item) => (item.id === id ? next : item));
-    return this.#write(Object.freeze({ version: 2, bots: Object.freeze(bots) })).then(() => next);
+    let next;
+    return this.#store.update((doc) => {
+      const current = doc.bots.find((item) => item.id === id);
+      if (!current) throw new Error(`机器人不存在：${id}`);
+      next = normalizeBot({ ...current, ...patch, id, appId: current.appId }, { legacyId: id });
+      return { version: 2, bots: doc.bots.map((item) => (item.id === id ? next : item)) };
+    }).then(() => next);
   }
 
   remove(id) {
-    const bots = this.#doc.bots.filter((item) => item.id !== id);
-    return this.#write(Object.freeze({ version: 2, bots: Object.freeze(bots) }));
+    return this.#store.update((doc) => ({ version: 2, bots: doc.bots.filter((item) => item.id !== id) }));
   }
 
   clear() {
-    return this.#write(Object.freeze({ version: 2, bots: Object.freeze([]) }));
+    return this.#store.update(() => ({ version: 2, bots: [] }));
   }
+}
+
+function normalizeState(parsed) {
+  const source = parsed && typeof parsed === 'object' ? parsed : {};
+  const record = (key) => Object.freeze({ ...(source[key] && typeof source[key] === 'object' && !Array.isArray(source[key]) ? source[key] : {}) });
+  return Object.freeze({
+    sessions: record('sessions'), meta: record('meta'), overrides: record('overrides'),
+    usage: record('usage'), stats: record('stats'), tools: record('tools'),
+    seen: Object.freeze([...new Set(Array.isArray(source.seen) ? source.seen.filter((id) => typeof id === 'string') : [])].slice(-800)),
+    chatTypes: Object.freeze(Object.fromEntries(Object.entries(record('chatTypes')).filter(([, type]) => type === 'p2p' || type === 'group'))),
+  });
 }
 
 /** Chat → Session bindings and inbound dedupe, one store per bot. */
 export class StateStore {
-  #path;
-  #value = { sessions: {}, seen: [] };
-  #cache = Promise.resolve();
+  #store;
 
-  constructor(path) {
-    this.#path = path;
-  }
+  constructor(path) { this.#store = new JsonStore(path, normalizeState); }
+  get value() { return this.#store.value; }
+  async load() { await this.#store.load(); return this; }
 
-  get value() {
-    return this.#value;
-  }
+  statsFor(key) { return this.value.stats[key] === true; }
+  toolsFor(key) { return this.value.tools[key] === true; }
 
-  async load() {
-    const parsed = await readJson(this.#path).catch(() => null);
-    const sessions = parsed && typeof parsed.sessions === 'object' && parsed.sessions ? parsed.sessions : {};
-    const seen = Array.isArray(parsed?.seen) ? parsed.seen.filter((id) => typeof id === 'string') : [];
-    const meta = parsed && typeof parsed.meta === 'object' && parsed.meta ? parsed.meta : {};
-    const overrides = parsed && typeof parsed.overrides === 'object' && parsed.overrides ? parsed.overrides : {};
-    const usage = parsed && typeof parsed.usage === 'object' && parsed.usage ? parsed.usage : {};
-    const stats = parsed && typeof parsed.stats === 'object' && parsed.stats ? parsed.stats : {};
-    const tools = parsed && typeof parsed.tools === 'object' && parsed.tools ? parsed.tools : {};
-    this.#value = { sessions: { ...sessions }, seen, meta: { ...meta }, overrides: { ...overrides }, usage: { ...usage }, stats: { ...stats }, tools: { ...tools } };
-    return this;
-  }
-
-  #persist() {
-    const snapshot = {
-      sessions: { ...this.#value.sessions },
-      seen: this.#value.seen.slice(-800),
-      meta: { ...(this.#value.meta ?? {}) },
-      overrides: { ...(this.#value.overrides ?? {}) },
-      usage: { ...(this.#value.usage ?? {}) },
-      stats: { ...(this.#value.stats ?? {}) },
-      tools: { ...(this.#value.tools ?? {}) },
-    };
-    this.#value = snapshot;
-    const run = this.#cache.then(() => writeJsonAtomic(this.#path, snapshot));
-    this.#cache = run.catch(() => undefined);
-    return run;
-  }
-
-  /** Per-chat display switch for token/context statistics. Off by default. */
-  statsFor(key) {
-    return this.#value.stats?.[key] === true;
-  }
-
-  async setStats(key, enabled) {
+  async #setFlag(field, key, enabled) {
     if (typeof key !== 'string') return false;
-    const stats = { ...(this.#value.stats ?? {}) };
-    if (enabled) stats[key] = true;
-    else delete stats[key];
-    this.#value = { ...this.#value, stats };
-    await this.#persist();
+    await this.#store.update((state) => {
+      const flags = { ...state[field] };
+      if (enabled === true) flags[key] = true;
+      else delete flags[key];
+      return { ...state, [field]: flags };
+    });
     return enabled === true;
   }
 
-  /** Per-chat display switch for the tool-call panel. Off by default. */
-  toolsFor(key) {
-    return this.#value.tools?.[key] === true;
-  }
-
-  async setTools(key, enabled) {
-    if (typeof key !== 'string') return false;
-    const tools = { ...(this.#value.tools ?? {}) };
-    if (enabled) tools[key] = true;
-    else delete tools[key];
-    this.#value = { ...this.#value, tools };
-    await this.#persist();
-    return enabled === true;
-  }
-
-  /** Persisted token totals for one chat (cumulative across turns). */
-  usageFor(key) {
-    return this.#value.usage?.[key] ?? null;
-  }
+  setStats(key, enabled) { return this.#setFlag('stats', key, enabled); }
+  setTools(key, enabled) { return this.#setFlag('tools', key, enabled); }
+  usageFor(key) { return this.value.usage[key] ?? null; }
 
   async addUsage(key, delta) {
-    const current = this.#value.usage?.[key] ?? { input: 0, output: 0, cache: 0, calls: 0 };
-    const next = {
-      input: current.input + (delta.input ?? 0),
-      output: current.output + (delta.output ?? 0),
-      cache: current.cache + (delta.cache ?? 0),
-      calls: current.calls + (delta.calls ?? 0),
-    };
-    this.#value = { ...this.#value, usage: { ...(this.#value.usage ?? {}), [key]: next } };
-    await this.#persist();
-    return next;
+    const state = await this.#store.update((state) => {
+      const current = state.usage[key] ?? {};
+      const next = Object.fromEntries(['input', 'output', 'cache', 'calls'].map((field) => [field, (current[field] ?? 0) + (delta[field] ?? 0)]));
+      return { ...state, usage: { ...state.usage, [key]: next } };
+    });
+    return state.usage[key];
   }
 
-  sessionFor(key) {
-    return this.#value.sessions[key] ?? null;
+  sessionFor(key) { return this.value.sessions[key] ?? null; }
+  chatTypeFor(key) { return this.value.chatTypes[key] ?? null; }
+
+  async setChatType(key, type) {
+    if (!['p2p', 'group'].includes(type)) return;
+    await this.#store.update((state) => state.chatTypes[key] === type ? state : {
+      ...state, chatTypes: { ...state.chatTypes, [key]: type },
+    });
   }
 
   keyForSession(sessionId) {
-    const found = Object.entries(this.#value.sessions).find(([, value]) => value === sessionId);
-    return found ? found[0] : null;
+    return Object.entries(this.value.sessions).find(([, value]) => value === sessionId)?.[0] ?? null;
   }
 
   async bindSession(key, sessionId) {
-    this.#value = { ...this.#value, sessions: { ...this.#value.sessions, [key]: sessionId } };
-    await this.#persist();
+    await this.#store.update((state) => ({ ...state, sessions: { ...state.sessions, [key]: sessionId } }));
     return sessionId;
   }
 
   async unbindSession(key) {
-    const sessions = { ...this.#value.sessions };
-    delete sessions[key];
-    this.#value = { ...this.#value, sessions };
-    await this.#persist();
+    await this.#store.update((state) => {
+      const sessions = { ...state.sessions };
+      delete sessions[key];
+      return { ...state, sessions };
+    });
   }
 
-  hasSeen(messageId) {
-    return this.#value.seen.includes(messageId);
-  }
-
+  hasSeen(messageId) { return this.value.seen.includes(messageId); }
   async markSeen(messageId) {
-    if (this.hasSeen(messageId)) return;
-    this.#value = { ...this.#value, seen: [...this.#value.seen, messageId].slice(-800) };
-    await this.#persist();
+    await this.#store.update((state) => state.seen.includes(messageId) ? state : { ...state, seen: [...state.seen, messageId] });
   }
 
-  /** Per-chat overrides used when the next Session is created (never defaults). */
-  overrideFor(chatKey) {
-    return { ...((this.#value.overrides ?? {})[chatKey] ?? {}) };
-  }
-
+  overrideFor(chatKey) { return { ...this.value.overrides[chatKey] }; }
   async setOverride(chatKey, patch) {
     if (typeof chatKey !== 'string') return this.overrideFor(chatKey);
-    const overrides = { ...(this.#value.overrides ?? {}) };
-    const next = { ...(overrides[chatKey] ?? {}), ...patch };
-    for (const key of Object.keys(next)) if (next[key] === null) delete next[key];
-    if (Object.keys(next).length === 0) delete overrides[chatKey];
-    else overrides[chatKey] = next;
-    this.#value = { ...this.#value, overrides };
-    await this.#persist();
-    return this.overrideFor(chatKey);
+    const state = await this.#store.update((state) => {
+      const overrides = { ...state.overrides };
+      const next = { ...overrides[chatKey], ...patch };
+      for (const key of Object.keys(next)) if (next[key] === null) delete next[key];
+      if (Object.keys(next).length === 0) delete overrides[chatKey];
+      else overrides[chatKey] = next;
+      return { ...state, overrides };
+    });
+    return { ...state.overrides[chatKey] };
   }
 
-  get overrides() {
-    return { ...(this.#value.overrides ?? {}) };
-  }
-
-  /** Per-session facts the chat side needs (currently the workspace). */
+  get overrides() { return { ...this.value.overrides }; }
   async setSessionMeta(sessionId, patch) {
     if (typeof sessionId !== 'string') return;
-    const meta = { ...(this.#value.meta ?? {}) };
-    meta[sessionId] = { ...(meta[sessionId] ?? {}), ...patch, at: Date.now() };
-    this.#value = { ...this.#value, meta };
-    await this.#persist();
+    await this.#store.update((state) => ({
+      ...state, meta: { ...state.meta, [sessionId]: { ...state.meta[sessionId], ...patch, at: Date.now() } },
+    }));
   }
-
-  get meta() {
-    return { ...(this.#value.meta ?? {}) };
-  }
-
-  async reset() {
-    this.#value = { sessions: {}, seen: [], meta: {}, overrides: {} };
-    await writeJsonAtomic(this.#path, this.#value);
-    return this.#value;
-  }
+  get meta() { return { ...this.value.meta }; }
+  reset() { return this.#store.update(() => ({})); }
 }

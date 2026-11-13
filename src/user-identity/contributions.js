@@ -1,8 +1,8 @@
 /**
  * 把飞书分身能力挂到 Host：只注册模型工具。
  *
- * 规则文案统一在 `src/policy.js` 的 FEISHU_POLICY 里，由 Host 注册一次，
- * 机器人和分身共用，这里不再单独注册 policy section。
+ * 全局能力约定由 `src/policy.js` 注册一次；自动批次的会话信息和回复规则
+ * 由 `worker-context.js` 按 Worker 会话注入，这里不注册提示词。
  * Host 默认调用，因此不需要在 Agent 预设里再挂任何子插件。
  */
 import { appendFile } from 'node:fs/promises';

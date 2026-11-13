@@ -1,52 +1,10 @@
 import React from 'react';
 import { NS } from './locale.js';
 
-const h = React.createElement;
-const RPC_ENDPOINT = 'im-feishu';
+import { API, RPC_ENDPOINT, CONTEXT_ENHANCEMENT_FIELDS } from '../src/contracts.js';
+export { API };
 
-    export const API = {
-      botAccessSet: 'bot.access.set',
-      botAdd: 'bot.add',
-      botAliasSet: 'bot.alias.set',
-      botBusyModeSet: 'bot.busy-mode.set',
-      botColorSet: 'bot.color.set',
-      botContextSet: 'bot.context-enhancement.set',
-      botEavesdropSet: 'bot.eavesdrop.set',
-      botMentionsSet: 'bot.mentions.set',
-      botBotReplySet: 'bot.bot-reply.set',
-      botProcessDetailSet: 'bot.process-detail.set',
-      botModelSet: 'bot.model.set',
-      botPresetSet: 'bot.preset.set',
-      botPermissionSet: 'bot.permission.set',
-      botReconnect: 'bot.reconnect',
-      botRemove: 'bot.remove',
-      botTest: 'bot.test',
-      botWorkspaceSet: 'bot.workspace.set',
-      botsList: 'bots.list',
-      modelsList: 'models.list',
-      presetsList: 'presets.list',
-      provisionBegin: 'provision.begin',
-      provisionCancel: 'provision.cancel',
-      provisionPoll: 'provision.poll',
-      workspacesList: 'workspaces.list',
-      permissionList: 'permission.list',
-      userStatus: 'user.status',
-      userConnectBegin: 'user.connect.begin',
-      userConnectCancel: 'user.connect.cancel',
-      userDisconnect: 'user.disconnect',
-      userRefresh: 'user.refresh',
-      userMonitorStatus: 'user.monitor.status',
-      userMonitorChats: 'user.monitor.chats',
-      userMonitorAdd: 'user.monitor.add',
-      userMonitorRemove: 'user.monitor.remove',
-      userMonitorEnable: 'user.monitor.enable',
-      userMonitorWorkerSet: 'user.monitor.worker.set',
-      userMonitorHandoffSet: 'user.monitor.handoff.set',
-      userMonitorWorkerOptions: 'user.monitor.worker.options',
-      userMonitorPoll: 'user.monitor.poll',
-      userMonitorFlush: 'user.monitor.flush',
-      userMonitorChatSet: 'user.monitor.chat.set',
-    };
+const h = React.createElement;
 
     let boundTranslate = null;
     let activeLocale = '';
@@ -65,7 +23,7 @@ const RPC_ENDPOINT = 'im-feishu';
     }
     export const text = (pair) => (Array.isArray(pair) ? t(pair[0], pair[1]) : String(pair));
 
-    export const CE_FIELDS = ['senderId', 'senderName', 'botId', 'sentAt', 'conversationTitle'];
+    export const CE_FIELDS = CONTEXT_ENHANCEMENT_FIELDS;
     export const CE_LABELS = {
       senderId: ['发送者 Open ID', 'Sender Open ID'],
       senderName: ['发送者名称', 'Sender name'],
@@ -73,9 +31,10 @@ const RPC_ENDPOINT = 'im-feishu';
       sentAt: ['发送时间', 'Sent at'],
       conversationTitle: ['群名称', 'Group name'],
     };
-    // 固定 5 色：每个颜色自带主色/浅底/描边三档，运行时不做颜色计算。
+    // 固定色板：每个颜色自带主色/浅底/描边三档，运行时不做颜色计算。
     export const BOT_COLORS = {
       blue: { main: '#3370ff', soft: 'rgba(51,112,255,.10)', ring: 'rgba(51,112,255,.32)', edge: '#93b4ff' },
+      pink: { main: '#d94690', soft: 'rgba(217,70,144,.10)', ring: 'rgba(217,70,144,.30)', edge: '#eda3c9' },
       red: { main: '#e5484d', soft: 'rgba(229,72,77,.10)', ring: 'rgba(229,72,77,.30)', edge: '#f0a9ab' },
       green: { main: '#00b96b', soft: 'rgba(0,185,107,.10)', ring: 'rgba(0,185,107,.28)', edge: '#7fd9b4' },
       purple: { main: '#7c4dff', soft: 'rgba(124,77,255,.10)', ring: 'rgba(124,77,255,.30)', edge: '#bda6ff' },
@@ -83,7 +42,7 @@ const RPC_ENDPOINT = 'im-feishu';
     };
     export const COLOR_NAMES = {
       blue: ['蓝色', 'Blue'], red: ['红色', 'Red'], green: ['绿色', 'Green'],
-      purple: ['紫色', 'Purple'], orange: ['橙色', 'Orange'],
+      purple: ['紫色', 'Purple'], orange: ['橙色', 'Orange'], pink: ['粉色', 'Pink'],
     };
     export const emptyScope = () => ({ enabled: true, fields: ['senderId', 'senderName', 'botId', 'sentAt'], guidance: '' });
     export const emptyEnhancement = () => ({ group: emptyScope(), direct: emptyScope() });
@@ -111,7 +70,37 @@ const RPC_ENDPOINT = 'im-feishu';
 .bxf-card > .bxf-head { background: var(--dsw-alias-bg-layer-1, #fff); }
 .bxf-card:hover { box-shadow: 0 8px 22px rgba(15,23,42,.07); border-color: var(--dsw-alias-border-l2); }
 .bxf-head { border-radius: 0; }
-.bxf-panel-head:hover .bxf-panel-title { color: var(--bxf-accent, #3370ff); }
+.bxf-bot-settings { padding: 14px; display: grid; gap: 12px; border-top: 1px solid var(--dsw-alias-border-l1, #e5e7eb);
+  background: var(--dsw-alias-bg-layer-2, #f7f8fa); }
+.bxf-panel { min-width: 0; border: 1px solid var(--dsw-alias-border-l1, #e5e7eb); border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1, #fff); }
+.bxf-panel-head { display: flex; align-items: center; gap: 8px; padding: 0 14px; min-height: 48px; }
+.bxf-panel-toggle { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; padding: 14px 0;
+  border: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+.bxf-panel-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.bxf-panel-toggle:hover { color: var(--bxf-accent, #3370ff); }
+.bxf-panel-toggle:focus-visible { outline: 2px solid var(--bxf-accent, #3370ff); outline-offset: 3px; border-radius: 4px; }
+.bxf-panel-chevron { flex: none; color: var(--dsw-alias-label-secondary, #6b7280); transition: transform .15s; }
+.bxf-panel-toggle[aria-expanded="true"] .bxf-panel-chevron { transform: rotate(90deg); }
+.bxf-panel-action { flex: none; }
+.bxf-panel-content { border-top: 1px solid var(--dsw-alias-border-l1, #e5e7eb); padding: 14px; container-type: inline-size; }
+.bxf-panel-body { display: grid; gap: 16px; min-width: 0; }
+.bxf-field { min-width: 0; }
+.bxf-panel-body :is(input, select, textarea) { min-width: 0; font-family: inherit; }
+.bxf-panel-body select { text-overflow: ellipsis; }
+.bxf-panel-body textarea { resize: vertical; max-width: 100%; }
+.bxf-general-fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.bxf-field-wide { grid-column: 1 / -1; }
+.bxf-panel-danger .bxf-panel-title { color: var(--dsw-alias-state-error-primary, #dc2626); }
+.bxf-bot-meta { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; margin-top: 6px; }
+.bxf-bot-meta > span { min-width: 0; overflow-wrap: anywhere; }
+.bxf-bot-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+@container (max-width: 440px) {
+  .bxf-general-fields { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bxf-panel-chevron { transition: none; }
+}
 .bxf-btn:hover { filter: brightness(.97); }
 .bxf-icon-btn:hover { background: rgba(148,163,184,.18); color: var(--bxf-accent, var(--dsw-alias-brand-primary)); }
 .bxf-mini { background: transparent !important; -webkit-appearance: none; appearance: none;
@@ -141,6 +130,10 @@ const RPC_ENDPOINT = 'im-feishu';
 .bxf-tip:hover .bxf-tip-body, .bxf-tip:focus .bxf-tip-body, .bxf-tip:focus-within .bxf-tip-body {
   opacity: 1; visibility: visible; }
 .bxf-labelrow { display: flex; align-items: center; gap: 2px; margin-bottom: 5px; }
+.bxf-save-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0;
+  font-size: 11px; color: var(--dsw-alias-label-secondary); }
+.bxf-save-status > span { min-width: 0; overflow-wrap: anywhere; }
+.bxf-save-status[data-state="error"] { color: var(--dsw-alias-state-error-primary); }
 `;
 
     export const S = {
@@ -161,7 +154,6 @@ const RPC_ENDPOINT = 'im-feishu';
       grow: { flex: 1, minWidth: 0 },
       name: { fontSize: '14px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
       nameRow: { display: 'flex', alignItems: 'center', gap: '4px' },
-      idRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginTop: '2px' },
       iconBtn: {
         border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px 4px', borderRadius: '6px',
         fontSize: '12px', lineHeight: 1, color: 'var(--dsw-alias-label-secondary)', transition: 'background .15s ease, color .15s ease',
@@ -172,9 +164,6 @@ const RPC_ENDPOINT = 'im-feishu';
         background: tone === 'ok' ? 'rgba(16,185,129,.12)' : tone === 'warn' ? 'rgba(245,158,11,.16)' : 'rgba(148,163,184,.18)',
         color: tone === 'ok' ? 'var(--dsw-alias-state-success-primary)' : tone === 'warn' ? 'var(--dsw-alias-state-warn-primary)' : 'var(--dsw-alias-state-idle-primary)',
       }),
-      body: { borderTop: '1px solid var(--dsw-alias-border-l1, #e5e7eb)', padding: '4px 14px 14px' },
-      panel: { borderTop: '1px solid var(--dsw-alias-border-l1, #f1f5f9)', padding: '10px 0' },
-      panelHead: { display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, padding: '2px 0' },
       panelBody: { marginTop: '8px', display: 'grid', gap: '10px' },
       label: { display: 'block', fontSize: '12px', fontWeight: 500, marginBottom: '4px', color: 'var(--dsw-alias-label-secondary, #4b5563)' },
       hint: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #6b7280)', marginTop: '3px', lineHeight: 1.5 },
@@ -269,27 +258,35 @@ const RPC_ENDPOINT = 'im-feishu';
         h('span', { className: 'bxf-tip-body', role: 'tooltip' }, hint)) : null);
     }
 
-    export function Field({ label, hint, children }) {
-      return h('div', null,
+    export function Field({ label, hint, children, fullWidth = false }) {
+      return h('div', { className: `bxf-field${fullWidth ? ' bxf-field-wide' : ''}` },
         label ? h(FieldLabel, { label, hint }) : null,
         children);
     }
 
-    export function Panel({ title, action, children, defaultOpen = false }) {
+    export function SaveStatus({ state, onRetry }) {
+      if (state.status === 'idle') return null;
+      const label = state.status === 'error' ? `${t('保存失败：', 'Save failed: ')}${state.error}`
+        : state.status === 'pending' ? t('等待保存…', 'Waiting to save…')
+          : state.status === 'saving' ? t('保存中…', 'Saving…') : t('已保存', 'Saved');
+      return h('div', { className: 'bxf-save-status', 'data-state': state.status, role: 'status' },
+        h('span', null, label),
+        state.status === 'error' ? h('button', { type: 'button', className: 'bxf-mini', onClick: onRetry }, t('重试', 'Retry')) : null);
+    }
+
+    export function Panel({ title, action, children, defaultOpen = false, bodyClassName = '', danger = false }) {
       const [open, setOpen] = React.useState(defaultOpen);
-      return h('section', { style: S.panel },
-        h('div', {
-          className: 'bxf-panel-head',
-          style: S.panelHead,
-          role: 'button',
-          tabIndex: 0,
-          'aria-expanded': open,
-          onClick: () => setOpen((value) => !value),
-          onKeyDown: (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setOpen((value) => !value); } },
-        },
-        h('span', { className: 'bxf-panel-title' }, title),
-        action ? h('div', { style: { marginLeft: 'auto' }, onClick: (event) => event.stopPropagation() }, action) : null),
-        open ? h('div', { style: S.panelBody }, children) : null);
+      return h('section', { className: `bxf-panel${danger ? ' bxf-panel-danger' : ''}` },
+        h('div', { className: 'bxf-panel-head' },
+          h('button', { type: 'button', className: 'bxf-panel-toggle', 'aria-expanded': open,
+            onClick: () => setOpen((value) => !value),
+          },
+            h('span', { className: 'bxf-panel-title' }, title),
+            h('svg', { className: 'bxf-panel-chevron', width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, 'aria-hidden': true },
+              h('path', { d: 'm9 5 7 7-7 7' }))),
+          action ? h('div', { className: 'bxf-panel-action' }, action) : null),
+        h('div', { className: 'bxf-panel-content', hidden: !open },
+          h('div', { className: `bxf-panel-body ${bodyClassName}`.trim() }, children)));
     }
 
     export function StatusBadge({ state }) {

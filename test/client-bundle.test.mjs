@@ -45,5 +45,5 @@ assert.equal(section.options.id, 'im-feishu');
 assert.equal(section.options.locale, 'imFeishu');
 assert.equal(typeof section.component, 'function');
 assert.equal(readFileSync(new URL('../client.js', import.meta.url), 'utf8').includes('__ModuleLoader__'), true);
-assert.match(readFileSync(new URL('../client/shared.js', import.meta.url), 'utf8'), /const RPC_ENDPOINT = 'im-feishu'/);
+assert.match(readFileSync(new URL('../src/contracts.js', import.meta.url), 'utf8'), /const RPC_ENDPOINT = 'im-feishu'/);
 console.log('client bundle: 9 assertions passed');

@@ -4,7 +4,8 @@ import { createRpcHandler, RPC_ENDPOINT, RPC_PATH } from '../src/rpc.js';
 const calls = [];
 const runtime = {
   status: async () => ({ id: 'bot_1', state: 'connected' }),
-  sendTest: async () => { calls.push('test'); },
+  checkConnection: async () => { calls.push('check'); return { credentialsValid: true, connected: true, connectionState: 'connected' }; },
+  sendTest: async () => { assert.fail('connection checks must never send test messages'); },
   save: async (patch) => { calls.push(['save', patch]); return {}; },
   saveWorkspace: async (w) => { calls.push(['ws', w]); return w; },
   saveContextEnhancement: async (c) => { calls.push(['ce', c]); return c; },
@@ -39,6 +40,14 @@ assert.equal(list.value.version, '0.1.0');
 
 const added = await handle('bot.add', { appId: 'cli_x', appSecret: 's' });
 assert.equal(added.value.state, 'connected');
+
+for (const method of ['bot.check', 'bot.test']) {
+  const checked = await handle(method, { botId: 'bot_1' });
+  assert.equal(checked.value.credentialsValid, true);
+  assert.equal(checked.value.connected, true);
+  assert.equal(checked.value.sent, undefined);
+  assert.equal(calls.at(-1), 'check', `${method} only checks connectivity, including cached old clients`);
+}
 
 await handle('bot.alias.set', { botId: 'bot_1', alias: '小名' });
 assert.deepEqual(calls.at(-1), ['save', { alias: '小名' }]);
@@ -92,4 +101,4 @@ assert.equal(bad.error.code, 'bad-request');
 // 未知机器人向上抛错，由 installRpc 转成 {ok:false} 交给前端
 await assert.rejects(() => handle('bot.reconnect', { botId: 'bot_x' }), /机器人不存在/);
 
-console.log('rpc handler (multi-bot): 19 assertions passed');
+console.log('rpc handler (multi-bot): assertions passed');

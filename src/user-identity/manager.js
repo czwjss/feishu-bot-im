@@ -1,7 +1,7 @@
 /**
- * 用户身份（飞书分身）的 Host 半。
+ * 用户身份（飞书分身）的设置与授权管理。
  *
- * 复用机器人应用与 credentials；不注册任何模型工具，工具在 ./user-identity 子路径。
+ * 复用机器人应用与 credentials；全局工具由 contributions.js 注册。
  */
 import { DEFAULT_USER_SCOPE } from './config.js';
 
@@ -13,6 +13,7 @@ export class UserIdentityManager {
   #logger;
   #qrCodeDataUrl = null;
   #keepaliveTimer = null;
+  #connectGeneration = 0;
 
   constructor({ configStore, botConfigStore, auth, connect, logger = null }) {
     this.#configStore = configStore;
@@ -37,16 +38,21 @@ export class UserIdentityManager {
 
   async connectBegin(input = {}) {
     const botId = typeof input?.botId === 'string' ? input.botId.trim() : '';
+    if (botId && !this.#botConfigStore?.bot(botId)) throw new Error(`机器人不存在：${botId}`);
+    const generation = ++this.#connectGeneration;
+    this.#connect.cancel();
+    this.#qrCodeDataUrl = null;
     if (botId) {
-      if (!this.#botConfigStore?.bot(botId)) throw new Error(`机器人不存在：${botId}`);
       await this.#configStore.save({ botId });
+      this.#checkConnect(generation);
     }
     // scope 是一组固定集合，不保留旧配置里的额外权限。
     if (this.#configStore.config.scope !== DEFAULT_USER_SCOPE) {
       await this.#configStore.save({ scope: DEFAULT_USER_SCOPE });
+      this.#checkConnect(generation);
     }
-    this.#qrCodeDataUrl = null;
     const started = await this.#connect.begin();
+    this.#checkConnect(generation);
     let qrCodeDataUrl = null;
     if (started?.url) {
       try {
@@ -56,6 +62,7 @@ export class UserIdentityManager {
         qrCodeDataUrl = null;
       }
     }
+    this.#checkConnect(generation);
     this.#qrCodeDataUrl = qrCodeDataUrl;
     if (!qrCodeDataUrl) {
       this.#connect.cancel();
@@ -64,13 +71,19 @@ export class UserIdentityManager {
     return Object.freeze({ ...started, qrCodeDataUrl });
   }
 
+  #checkConnect(generation) {
+    if (generation !== this.#connectGeneration) throw new DOMException('授权已取消', 'AbortError');
+  }
+
   connectCancel() {
+    this.#connectGeneration += 1;
     this.#connect.cancel();
     this.#qrCodeDataUrl = null;
     return this.status();
   }
 
   async disconnect() {
+    this.#connectGeneration += 1;
     this.#connect.cancel();
     this.#qrCodeDataUrl = null;
     await this.#auth.disconnect();
@@ -116,6 +129,7 @@ export class UserIdentityManager {
   }
 
   dispose() {
+    this.#connectGeneration += 1;
     if (this.#keepaliveTimer) {
       clearInterval(this.#keepaliveTimer);
       this.#keepaliveTimer = null;

@@ -29,6 +29,10 @@ const config = normalizeMonitorConfig({
 assert.equal(config.chats.length, 1);
 assert.equal(config.pollIntervalMs, 5_000);
 assert.equal(config.chats[0].chatMode, 'p2p');
+assert.equal(normalizeMonitorConfig({}).pollIntervalMs, 30_000, 'new default polls every thirty seconds');
+assert.equal(normalizeMonitorConfig({ version: 1, pollIntervalMs: 60_000 }).pollIntervalMs, 30_000, 'old persisted default migrates');
+assert.equal(normalizeMonitorConfig({ version: 1, pollIntervalMs: 15_000 }).pollIntervalMs, 15_000, 'custom interval is preserved');
+assert.equal(normalizeMonitorConfig({ version: 2, pollIntervalMs: 60_000 }).pollIntervalMs, 60_000, 'explicit new configuration stays configurable');
 
 // 2) 状态规范化：消息有条数上限，seen 截断。
 const state = normalizeMonitorState({
@@ -109,8 +113,10 @@ try {
 
   await monitor.pollOnce();
   const recorded = store.state.chats[chatId].messages;
-  assert.equal(recorded.length, 2, 'user message + bot message are both recorded');
-  assert.deepEqual(recorded.map((m) => m.messageId), ['m-bot', 'm-new']);
+  assert.equal(recorded.length, 3, 'own messages are retained alongside people and bots');
+  assert.deepEqual(recorded.map((m) => m.messageId), ['m-self', 'm-bot', 'm-new']);
+  assert.equal(recorded[0].contextOnly, true, 'own messages do not trigger a reply');
+  assert.equal(recorded[0].isSelf, true);
   const bot = recorded.find((m) => m.messageId === 'm-bot');
   const fromColleague = recorded.find((m) => m.messageId === 'm-new');
   assert.equal(bot.senderName, '机器人');
@@ -121,17 +127,17 @@ try {
 
   // 重复轮询不重复记录。
   await monitor.pollOnce();
-  assert.equal(store.state.chats[chatId].messages.length, 2);
+  assert.equal(store.state.chats[chatId].messages.length, 3);
 
   // 5) 记录保留在状态里。
-  assert.equal(store.state.chats[chatId].messages.length, 2);
+  assert.equal(store.state.chats[chatId].messages.length, 3);
   assert.equal(store.state.chats[chatId].cursorTimeMs, now - 5_000);
 
 } finally {
   await rm(dir, { recursive: true, force: true });
 }
 
-// 9) 群聊默认只在 @我 / 回复我 时记录；关键词模式按关键词过滤。
+// 9) 群聊触发条件只影响是否入批，不丢弃其余上下文。
 {
   const dir2 = await mkdtemp(join(tmpdir(), 'im-feishu-trigger-'));
   try {
@@ -163,8 +169,9 @@ try {
       getMessage: async ({ messageId }) => (messageId === 'om_self_msg' ? { senderOpenId: 'ou_self' } : { senderOpenId: 'ou_other' }),
     });
     await monitor2.pollOnce();
-    const kept = store2.state.chats.oc_group_x.messages.map((message) => message.messageId);
-    assert.deepEqual(kept, ['g2', 'g3'], 'only mentions and replies to me are recorded');
+    const kept = store2.state.chats.oc_group_x.messages;
+    assert.deepEqual(kept.map((message) => message.messageId), ['g1', 'g2', 'g3', 'g4']);
+    assert.deepEqual(kept.filter((message) => !message.contextOnly).map((message) => message.messageId), ['g2', 'g3'], 'only mentions and replies can trigger');
     assert.equal(store2.state.chats.oc_group_x.cursorTimeMs, now - 10_000, 'cursor advances past filtered messages');
 
     // 关键词模式。
@@ -172,7 +179,7 @@ try {
     assert.deepEqual(store2.config.chats[0].keywords, ['上线']);
     await store2.saveState({ chats: { oc_group_x: { cursorTimeMs: now - 60_000, seen: [], messages: [] } } });
     await monitor2.pollOnce();
-    const keywordKept = store2.state.chats.oc_group_x.messages.map((message) => message.messageId);
+    const keywordKept = store2.state.chats.oc_group_x.messages.filter((message) => !message.contextOnly).map((message) => message.messageId);
     assert.ok(keywordKept.includes('g4'), 'keyword match is recorded');
     assert.ok(!keywordKept.includes('g1'), 'unrelated message stays filtered');
     assert.ok(keywordKept.includes('g2'), 'mentions still pass in keyword mode');
@@ -235,7 +242,7 @@ try {
   }
 }
 
-// 12) 启动时清理过期的临时状态记录。
+// 12) 不按文案或年龄猜测并清理消息。
 {
   const dir5 = await mkdtemp(join(tmpdir(), 'im-feishu-prune-'));
   try {
@@ -267,10 +274,10 @@ try {
       now: () => now,
       listMessages: async () => ({ items: [], hasMore: false, pageToken: null }),
     });
-    // 清理发生在每轮轮询，所以直接跑一轮即可。
+    // 空轮询也不会删除看起来像临时状态的正文。
     await monitor5.pollOnce();
     const kept = store5.state.chats[chatId].messages.map((message) => message.messageId);
-    assert.deepEqual(kept, ['om_keep', 'om_fresh'], 'stale transient status is pruned, fresh one stays');
+    assert.deepEqual(kept, ['om_ack', 'om_keep', 'om_fresh'], 'all message text is preserved');
   } finally {
     await rm(dir5, { recursive: true, force: true });
   }
