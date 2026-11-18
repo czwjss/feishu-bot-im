@@ -11,6 +11,7 @@ import { basename, extname, isAbsolute, resolve } from 'node:path';
 import { normalizeCardColor, noticeCard } from '../cards.js';
 import { cardStreamingOf, interactiveTextOfContent } from '../message-text.js';
 import { FeishuApiError, describeApiCode } from './errors.js';
+import { historyTimeRange, validateCardText } from '../tool-contract.js';
 
 export const FEISHU_API_ORIGIN = 'https://open.feishu.cn';
 export const DEFAULT_TIMEOUT_MS = 15_000;
@@ -41,9 +42,9 @@ function requestSignal({ timeoutMs = DEFAULT_TIMEOUT_MS, signal } = {}) {
 }
 
 /**
- * 发请求并校验飞书业务错误码；返回 `payload.data`。
+ * 发请求并校验飞书业务错误码；默认返回 `payload.data`，二进制下载返回响应流。
  */
-async function requestFeishu({
+export async function requestFeishu({
   path,
   method = 'GET',
   query,
@@ -52,23 +53,31 @@ async function requestFeishu({
   fetchImpl = fetch,
   timeoutMs,
   signal,
+  responseType = 'json',
 }) {
+  signal?.throwIfAborted();
   if (typeof fetchImpl !== 'function') throw new TypeError('飞书 API 需要 fetch 实现');
   const url = new URL(path, FEISHU_API_ORIGIN);
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value === undefined || value === null || value === '') continue;
     url.searchParams.set(key, String(value));
   }
-  const headers = { accept: 'application/json' };
+  const headers = { accept: responseType === 'binary' ? '*/*' : 'application/json' };
   if (accessToken) headers.authorization = `Bearer ${accessToken}`;
-  if (body !== undefined) headers['content-type'] = 'application/json; charset=utf-8';
+  const multipart = body instanceof FormData;
+  if (body !== undefined && !multipart) headers['content-type'] = 'application/json; charset=utf-8';
 
   const response = await fetchImpl(url, {
     method,
     headers,
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }),
     signal: requestSignal({ timeoutMs, signal }),
   });
+  if (responseType === 'binary' && response.ok) {
+    const mediaType = response.headers?.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
+    // Feishu can return a JSON business error with HTTP 200. An attachment can itself be JSON.
+    if (mediaType !== 'application/json' || response.headers?.get('content-disposition')) return response;
+  }
   let payload = null;
   try {
     payload = await response.json();
@@ -94,6 +103,9 @@ async function requestFeishu({
   }
   if (!payload || typeof payload !== 'object') {
     throw new FeishuApiError('飞书接口返回了无法解析的响应', { status: response.status });
+  }
+  if (responseType === 'binary') {
+    throw new FeishuApiError('飞书未返回文件内容', { status: response.status });
   }
   return payload.data ?? {};
 }
@@ -180,13 +192,54 @@ export async function listChats({
   });
 }
 
+/** 按群名搜索授权用户已经加入的群聊。 */
+export async function searchChats({ accessToken, query, pageSize, pageToken, fetchImpl, timeoutMs, signal }) {
+  // Feishu interprets an unquoted hyphen as search syntax.
+  const keyword = query.includes('-') && !(query.startsWith('"') && query.endsWith('"'))
+    ? JSON.stringify(query)
+    : query;
+  const data = await requestFeishu({
+    path: '/open-apis/im/v2/chats/search',
+    method: 'POST',
+    query: { page_size: pageSize, page_token: pageToken },
+    body: {
+      query: keyword,
+      filter: { search_types: ['private', 'external', 'public_joined'], disable_search_by_user: true },
+    },
+    accessToken,
+    fetchImpl,
+    timeoutMs,
+    signal,
+  });
+  const items = [];
+  for (const item of Array.isArray(data.items) ? data.items : []) {
+    const chat = item?.meta_data;
+    const chatId = stringOf(chat?.chat_id);
+    if (!/^oc_[A-Za-z0-9_-]{4,}$/.test(chatId)) continue;
+    items.push({
+      chatId,
+      name: stringOf(chat.name),
+      description: stringOf(chat.description),
+      external: chat.external === true,
+      chatStatus: stringOf(chat.chat_status),
+    });
+  }
+  const hasMore = data.has_more === true;
+  const nextToken = stringOf(data.page_token) || stringOf(data.next_page_token);
+  if (hasMore && (!nextToken || nextToken === pageToken)) {
+    throw new FeishuApiError('飞书分页游标缺失或未前进，请重新查询');
+  }
+  const notice = stringOf(data.notice);
+  return { items, hasMore, pageToken: hasMore ? nextToken : '', ...(notice ? { notice } : {}) };
+}
+
 /**
  * 群聊 ID 校验：`oc_` 开头。分身不替用户猜群，只接受明确 ID。
  */
 export function normalizeChatId(value) {
   const chatId = typeof value === 'string' ? value.trim() : '';
   if (!/^oc_[A-Za-z0-9_-]{4,}$/.test(chatId)) {
-    throw new Error('chatId 需要是 oc_ 开头的群 ID');
+    throw new Error('chatId 需要是 oc_ 开头的会话 ID（私聊或群聊）');
   }
   return chatId;
 }
@@ -219,22 +272,6 @@ function resolveReceiveTarget({ chatId, openId, email }) {
     throw new Error('chatId、openId、email 必须且只能提供一个');
   }
   return targets[0];
-}
-
-function toEpochSeconds(value, label) {
-  if (value === undefined || value === null || value === '') return null;
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return Math.floor(value > 1e12 ? value / 1000 : value);
-  }
-  const raw = String(value).trim();
-  if (!raw) return null;
-  if (/^\d+$/.test(raw)) {
-    const number = Number(raw);
-    return Math.floor(number > 1e12 ? number / 1000 : number);
-  }
-  const parsed = Date.parse(raw);
-  if (!Number.isFinite(parsed)) throw new Error(`${label} 需要是 ISO 8601 时间或秒级时间戳`);
-  return Math.floor(parsed / 1000);
 }
 
 function formatCreateTime(value) {
@@ -298,8 +335,8 @@ export function normalizeMessage(item) {
     chatId: stringOf(source.chat_id),
     msgType: stringOf(source.msg_type),
     createTime: formatCreateTime(source.create_time),
-    senderOpenId: stringOf(sender.id),
-    senderName: stringOf(sender.name),
+    senderOpenId: stringOf(sender.open_bot_id) || stringOf(sender.id),
+    senderName: stringOf(sender.sender_name) || stringOf(sender.name),
     senderType: stringOf(sender.sender_type),
     deleted: Boolean(source.deleted),
     mentions: normalizeMentions(source),
@@ -354,9 +391,9 @@ export async function listMessages({
     sort_type: sort === 'asc' ? 'ByCreateTimeAsc' : 'ByCreateTimeDesc',
     // 卡片默认返回精简投影；要原始卡片 JSON 才读得到正文。
     card_msg_content_type: 'user_card_content',
+    with_sender_name: true,
   };
-  const start = toEpochSeconds(startTime, 'startTime');
-  const end = toEpochSeconds(endTime, 'endTime');
+  const { start, end } = historyTimeRange(startTime, endTime);
   if (start !== null) query.start_time = start;
   if (end !== null) query.end_time = end;
   if (typeof pageToken === 'string' && pageToken.trim()) query.page_token = pageToken.trim();
@@ -381,7 +418,7 @@ export async function listMessages({
 /**
  * 会话成员姓名表（open_id → 姓名）。
  *
- * 消息列表不返回发送者姓名，展示时需要另取一次成员表。
+ * 消息列表可能缺少发送者姓名，展示时可用成员表补齐。
  * 读不到成员（外部群等）时返回空 Map，调用方退化为 open_id。
  */
 export async function chatMemberNames({
@@ -422,10 +459,10 @@ export async function chatMemberNames({
 
 /** 本地关键词筛选（不是飞书全文搜索）。 */
 export function filterMessagesByKeyword(items, keyword) {
-  const needle = typeof keyword === 'string' ? keyword.trim().toLowerCase() : '';
+  const needle = typeof keyword === 'string' ? keyword.normalize('NFKC').trim().toLowerCase() : '';
   if (!needle) return items;
   return items.filter((item) => {
-    const text = `${item.text ?? ''} ${item.senderName ?? ''}`.toLowerCase();
+    const text = `${item.text ?? ''} ${item.senderName ?? ''}`.normalize('NFKC').toLowerCase();
     return text.includes(needle);
   });
 }
@@ -450,6 +487,7 @@ async function postUserMessage({
     timeoutMs,
     signal,
   });
+  if (!stringOf(data.message_id)) throw new FeishuApiError('飞书发送未返回 message_id，无法确认发送结果');
   return Object.freeze({
     messageId: stringOf(data.message_id),
     chatId: stringOf(data.chat_id) || (receiveIdType === 'chat_id' ? receiveId : ''),
@@ -458,21 +496,10 @@ async function postUserMessage({
   });
 }
 
-function validateText(text) {
-  const value = typeof text === 'string' ? text.trim() : '';
-  if (!value) throw new Error('text 不能为空');
-  if (value.length > MAX_TEXT_LENGTH) {
-    throw new Error(`text 过长（${value.length} 字符），单条上限 ${MAX_TEXT_LENGTH} 字符`);
-  }
-  return value;
-}
-
 function userCard(text, title, color) {
-  const value = validateText(text);
-  const heading = typeof title === 'string' ? title.trim() : '';
-  if (heading.length > 100) throw new Error('title 最多 100 字符');
+  const { body, heading } = validateCardText(text, title, MAX_TEXT_LENGTH);
   if (color && !heading) throw new Error('color 需要同时提供 title');
-  return noticeCard(value, heading || null, normalizeCardColor(color));
+  return noticeCard(body, heading || null, normalizeCardColor(color));
 }
 
 /**
@@ -512,6 +539,7 @@ export async function sendCardMessage({
 export async function replyCardMessage({
   accessToken,
   messageId,
+  chatId,
   text,
   title,
   color,
@@ -522,6 +550,11 @@ export async function replyCardMessage({
   const id = stringOf(messageId).trim();
   if (!id) throw new Error('messageId 不能为空');
   const card = userCard(text, title, color);
+  if (chatId !== undefined) {
+    const target = normalizeChatId(chatId);
+    const original = await getMessage({ accessToken, messageId: id, fetchImpl, timeoutMs, signal });
+    if (!original?.chatId || original.chatId !== target) throw new Error('replyToMessageId 不属于指定 chatId，已取消发送');
+  }
   const data = await requestFeishu({
     path: `/open-apis/im/v1/messages/${encodeURIComponent(id)}/reply`,
     method: 'POST',
@@ -531,6 +564,7 @@ export async function replyCardMessage({
     timeoutMs,
     signal,
   });
+  if (!stringOf(data.message_id)) throw new FeishuApiError('飞书回复未返回 message_id，无法确认发送结果');
   return Object.freeze({
     messageId: stringOf(data.message_id),
     chatId: stringOf(data.chat_id),
@@ -549,7 +583,7 @@ async function uploadUserMedia({
   path,
   name,
   cwd,
-  fetchImpl,
+  fetchImpl = fetch,
   timeoutMs,
   signal,
 } = {}) {

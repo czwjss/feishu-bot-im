@@ -11,11 +11,17 @@ import { join } from 'node:path';
 import * as Lark from '@larksuiteoapi/node-sdk';
 
 import { DELIVERY_RETRY_MS, isRetryableDeliveryError, sleep } from './feishu-errors.js';
+import { abortableSdkTransport } from './feishu-http.js';
 
 const OPEN_ORIGIN = 'https://open.feishu.cn';
 const CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
+const CHAT_INFO_TTL_MS = 30 * 60 * 1_000;
+const CHAT_INFO_MISS_TTL_MS = 30 * 1_000;
 const MEMBERSHIP_TTL_MS = 5 * 60 * 1_000;
 const MEMBERSHIP_MISS_TTL_MS = 30 * 1_000;
+
+// chat_mode describes the conversation; chat_type is private/public visibility.
+const chatTypeOf = (mode) => mode === 'p2p' ? 'p2p' : ['group', 'topic'].includes(mode) ? 'group' : null;
 
 function assertApiSuccess(operation, response) {
   if (response && typeof response === 'object' && typeof response.code === 'number' && response.code !== 0) {
@@ -88,13 +94,16 @@ export class FeishuBot {
   #token = null;
   #memberCache = new Map();
   #chatCache = new Map();
+  #chatInfoCache = new Map();
   #membershipCache = new Map();
+  #transport;
 
-  constructor({ appId, appSecret, client }) {
+  constructor({ appId, appSecret, client, httpInstance = Lark.defaultHttpInstance }) {
     this.#appId = appId;
     this.#appSecret = appSecret;
     // Tests inject a recording client; production builds the real SDK client.
-    this.#client = client ?? new Lark.Client({ appId, appSecret, domain: Lark.Domain.Feishu });
+    this.#transport = abortableSdkTransport(httpInstance);
+    this.#client = client ?? new Lark.Client({ appId, appSecret, domain: Lark.Domain.Feishu, httpInstance: this.#transport.httpInstance });
   }
 
   get raw() {
@@ -102,70 +111,108 @@ export class FeishuBot {
   }
 
   /** Recall (delete) one message we sent; used to keep the chat clean. */
-  async deleteMessage(messageId) {
+  async deleteMessage(messageId, { signal, strict = false } = {}) {
     if (!messageId) return false;
     try {
-      await this.#client.im.v1.message.delete({ path: { message_id: messageId } });
+      assertApiSuccess('Feishu message recall', await this.#transport.run(signal,
+        () => this.#client.im.v1.message.delete({ path: { message_id: messageId } })));
       return true;
-    } catch {
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (strict) throw error;
       return false;
     }
   }
 
+  /** Chat identity (including old direct-message bindings), without reading messages. */
+  async getChatInfo(chatId, { refresh = false, signal } = {}) {
+    signal?.throwIfAborted();
+    if (!chatId) return null;
+    const cached = this.#chatInfoCache.get(chatId);
+    if (!refresh && cached) {
+      if (cached.pending && !signal) return cached.pending;
+      if (Date.now() < cached.expiresAt) return cached.value;
+    }
+    const entry = { value: null, expiresAt: 0, pending: null };
+    entry.pending = Promise.resolve().then(async () => {
+      try {
+        const response = assertApiSuccess('Feishu chat info', await this.#transport.run(signal,
+          () => this.#client.im.v1.chat.get({ path: { chat_id: chatId } })));
+        const data = response?.data?.chat ?? response?.data;
+        if (!data) return null;
+        const name = typeof data.name === 'string' ? data.name.trim() : '';
+        return { name: name || null, chatType: chatTypeOf(data.chat_mode) };
+      } catch {
+        signal?.throwIfAborted();
+        return null;
+      }
+    }).then((value) => {
+      entry.value = value;
+      entry.expiresAt = Date.now() + (value?.chatType ? CHAT_INFO_TTL_MS : CHAT_INFO_MISS_TTL_MS);
+      entry.pending = null;
+      return value;
+    }).catch((error) => {
+      if (this.#chatInfoCache.get(chatId) === entry) this.#chatInfoCache.delete(chatId);
+      throw error;
+    });
+    this.#chatInfoCache.set(chatId, entry);
+    return entry.pending;
+  }
+
   /** Chat name (needs im:chat:readonly); null when unavailable. */
   async getChatName(chatId) {
-    if (!chatId) return null;
-    try {
-      const response = await this.#client.im.v1.chat.get({ path: { chat_id: chatId } });
-      const name = response?.data?.name ?? response?.data?.chat?.name;
-      return typeof name === 'string' && name.trim() ? name.trim() : null;
-    } catch {
-      return null;
-    }
+    return (await this.getChatInfo(chatId))?.name ?? null;
   }
 
   /** Whether this bot is currently a member of the chat. */
-  async isInChat(chatId, { refresh = false } = {}) {
+  async isInChat(chatId, { refresh = false, signal } = {}) {
+    signal?.throwIfAborted();
     if (!chatId) return false;
     const cached = this.#membershipCache.get(chatId);
     if (!refresh && cached && Date.now() - cached.at < (cached.value ? MEMBERSHIP_TTL_MS : MEMBERSHIP_MISS_TTL_MS)) {
       return cached.value;
     }
-    const response = assertApiSuccess('Feishu chat membership', await this.#client.im.v1.chatMembers.isInChat({
+    const response = assertApiSuccess('Feishu chat membership', await this.#transport.run(signal, () => this.#client.im.v1.chatMembers.isInChat({
       path: { chat_id: chatId },
-    }));
+    })));
     const value = response?.data?.is_in_chat === true;
     this.#membershipCache.set(chatId, { at: Date.now(), value });
     return value;
   }
 
   /** Groups the bot belongs to, cached for six hours. */
-  async getChats({ refresh = false } = {}) {
+  async getChats({ refresh = false, signal } = {}) {
+    signal?.throwIfAborted();
     const cached = this.#chatCache.get('all');
     if (!refresh && cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.chats;
     const chats = [];
     const seen = new Set();
     let pageToken = '';
     for (let page = 0; page < 20; page += 1) {
-      const response = assertApiSuccess('Feishu chat list', await this.#client.im.v1.chat.list({
+      const response = assertApiSuccess('Feishu chat list', await this.#transport.run(signal, () => this.#client.im.v1.chat.list({
         params: { page_size: 100, ...(pageToken ? { page_token: pageToken } : {}) },
-      }));
+      })));
       for (const item of response?.data?.items ?? []) {
         const chatId = item?.chat_id;
         if (!chatId || seen.has(chatId)) continue;
         seen.add(chatId);
-        chats.push({ chatId, name: String(item?.name ?? '').trim() });
+        // The default directory lists groups. Honor an explicit mode when supplied.
+        chats.push({ chatId, name: String(item?.name ?? '').trim(),
+          chatType: item?.chat_mode ? chatTypeOf(item.chat_mode) : 'group' });
       }
       if (!response?.data?.has_more) break;
-      pageToken = response?.data?.page_token;
-      if (!pageToken) break;
+      const nextToken = response?.data?.page_token;
+      if (!nextToken || nextToken === pageToken) throw new Error('飞书群列表分页游标缺失或未前进');
+      if (page === 19) throw new Error('飞书群列表超过本次 2000 个会话读取上限，未缓存不完整目录');
+      pageToken = nextToken;
     }
     this.#chatCache.set('all', { at: Date.now(), chats });
     return chats;
   }
 
   /** Full chat roster (open_id + name), cached for six hours. */
-  async getChatMembers(chatId, { refresh = false } = {}) {
+  async getChatMembers(chatId, { refresh = false, signal } = {}) {
+    signal?.throwIfAborted();
     if (!chatId) return [];
     const cached = this.#memberCache.get(chatId);
     if (!refresh && cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.members;
@@ -173,10 +220,10 @@ export class FeishuBot {
     const seen = new Set();
     let pageToken = '';
     for (let page = 0; page < 20; page += 1) {
-      const response = assertApiSuccess('Feishu chat members', await this.#client.im.v1.chatMembers.get({
+      const response = assertApiSuccess('Feishu chat members', await this.#transport.run(signal, () => this.#client.im.v1.chatMembers.get({
         path: { chat_id: chatId },
         params: { member_id_type: 'open_id', page_size: 100, ...(pageToken ? { page_token: pageToken } : {}) },
-      }));
+      })));
       for (const item of response?.data?.items ?? []) {
         const openId = item?.member_id;
         if (!openId || seen.has(openId)) continue;
@@ -184,8 +231,10 @@ export class FeishuBot {
         members.push({ openId, name: String(item?.name ?? '').trim() });
       }
       if (!response?.data?.has_more) break;
-      pageToken = response?.data?.page_token;
-      if (!pageToken) break;
+      const nextToken = response?.data?.page_token;
+      if (!nextToken || nextToken === pageToken) throw new Error('飞书群成员分页游标缺失或未前进');
+      if (page === 19) throw new Error('飞书群成员超过本次 2000 人读取上限，未缓存不完整成员表');
+      pageToken = nextToken;
     }
     this.#memberCache.set(chatId, { at: Date.now(), members });
     return members;
@@ -200,6 +249,7 @@ export class FeishuBot {
     pageToken = null,
     order = 'newest',
     withSenderName = true,
+    signal,
   } = {}) {
     if (!threadId && !chatId) throw new Error('缺少 chatId 或 threadId');
     const params = {
@@ -208,11 +258,12 @@ export class FeishuBot {
       page_size: Math.min(50, Math.max(1, Number(pageSize) || 20)),
       sort_type: order === 'oldest' ? 'ByCreateTimeAsc' : 'ByCreateTimeDesc',
       with_sender_name: withSenderName === true,
+      card_msg_content_type: 'user_card_content',
     };
-    if (startTime) params.start_time = String(Math.floor(Number(startTime) / 1000));
-    if (endTime) params.end_time = String(Math.floor(Number(endTime) / 1000));
+    if (startTime !== null) params.start_time = String(Math.floor(Number(startTime) / 1000));
+    if (endTime !== null) params.end_time = String(Math.floor(Number(endTime) / 1000));
     if (pageToken) params.page_token = pageToken;
-    const response = assertApiSuccess('Feishu message history', await this.#client.im.v1.message.list({ params }));
+    const response = assertApiSuccess('Feishu message history', await this.#transport.run(signal, () => this.#client.im.v1.message.list({ params })));
     return {
       items: Array.isArray(response?.data?.items) ? response.data.items : [],
       hasMore: response?.data?.has_more === true,
@@ -221,24 +272,26 @@ export class FeishuBot {
   }
 
   /** Read one message (reply recognition and quoted-message context). */
-  async getMessage(messageId) {
+  async getMessage(messageId, { strict = false, signal } = {}) {
     if (!messageId) return null;
     try {
-      const response = await this.#client.im.v1.message.get({
+      const response = assertApiSuccess('Feishu message lookup', await this.#transport.run(signal, () => this.#client.im.v1.message.get({
         path: { message_id: messageId },
         params: { card_msg_content_type: 'user_card_content' },
-      });
+      })));
       const item = (response?.data?.items ?? [])[0];
       if (!item) return null;
       return {
-        senderId: item.sender?.id ?? item.sender?.sender_id?.open_id ?? null,
+        senderId: item.sender?.open_bot_id || item.sender?.id || item.sender?.sender_id?.open_id || null,
         senderType: item.sender?.sender_type ?? null,
         messageId: item.message_id ?? messageId,
         msgType: item.msg_type ?? item.message_type ?? null,
         bodyContent: item.body?.content ?? '',
         mentions: Array.isArray(item.mentions) ? item.mentions : [],
       };
-    } catch {
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (strict) throw error;
       return null;
     }
   }
@@ -376,63 +429,68 @@ export class FeishuBot {
   }
 
   /** Upload bytes as a Feishu file resource (`im.v1.file.create`). */
-  async uploadFile(bytes, name) {
-    const response = assertApiSuccess('Feishu file upload', await this.#client.im.v1.file.create({
+  async uploadFile(bytes, name, { signal } = {}) {
+    const response = assertApiSuccess('Feishu file upload', await this.#transport.run(signal, () => this.#client.im.v1.file.create({
       data: { file_type: 'stream', file_name: name, file: Buffer.from(bytes) },
-    }));
+    })));
     const key = response?.file_key ?? response?.data?.file_key;
     if (!key) throw new Error('Feishu file upload returned no file_key');
     return key;
   }
 
   /** Upload bytes as a Feishu message image (`im.v1.image.create`). */
-  async uploadImage(bytes) {
-    const response = assertApiSuccess('Feishu image upload', await this.#client.im.v1.image.create({
+  async uploadImage(bytes, { signal } = {}) {
+    const response = assertApiSuccess('Feishu image upload', await this.#transport.run(signal, () => this.#client.im.v1.image.create({
       data: { image_type: 'message', image: Buffer.from(bytes) },
-    }));
+    })));
     const key = response?.image_key ?? response?.data?.image_key;
     if (!key) throw new Error('Feishu image upload returned no image_key');
     return key;
   }
 
-  async sendFile(chatId, fileKey, name) {
-    const response = assertApiSuccess('Feishu file message', await this.#client.im.v1.message.create({
+  async sendFile(chatId, fileKey, name, { signal } = {}) {
+    const response = assertApiSuccess('Feishu file message', await this.#transport.run(signal, () => this.#client.im.v1.message.create({
       params: { receive_id_type: 'chat_id' },
       data: {
         receive_id: chatId,
         msg_type: 'file',
         content: JSON.stringify({ file_key: fileKey, file_name: name }),
       },
-    }));
-    return response?.data?.message_id ?? null;
+    })));
+    const messageId = response?.data?.message_id;
+    if (!messageId) throw new Error('Feishu file message returned no message_id');
+    return messageId;
   }
 
-  async sendImage(chatId, imageKey) {
-    const response = assertApiSuccess('Feishu image message', await this.#client.im.v1.message.create({
+  async sendImage(chatId, imageKey, { signal } = {}) {
+    const response = assertApiSuccess('Feishu image message', await this.#transport.run(signal, () => this.#client.im.v1.message.create({
       params: { receive_id_type: 'chat_id' },
       data: {
         receive_id: chatId,
         msg_type: 'image',
         content: JSON.stringify({ image_key: imageKey }),
       },
-    }));
-    return response?.data?.message_id ?? null;
+    })));
+    const messageId = response?.data?.message_id;
+    if (!messageId) throw new Error('Feishu image message returned no message_id');
+    return messageId;
   }
 
   /** Send one interactive card; returns its message id. */
-  async sendCard(chatId, card) {
+  async sendCard(chatId, card, { signal } = {}) {
     const uuid = randomUUID();
     let response;
     for (let attempt = 0; ; attempt += 1) {
       try {
-        response = assertApiSuccess('Feishu card send', await this.#client.im.v1.message.create({
+        response = assertApiSuccess('Feishu card send', await this.#transport.run(signal, () => this.#client.im.v1.message.create({
           params: { receive_id_type: 'chat_id' },
           data: { receive_id: chatId, msg_type: 'interactive', content: JSON.stringify(card), uuid },
-        }));
+        })));
         break;
       } catch (error) {
+        signal?.throwIfAborted();
         if (attempt >= DELIVERY_RETRY_MS.length || !isRetryableDeliveryError(error)) throw error;
-        await sleep(DELIVERY_RETRY_MS[attempt]);
+        await sleep(DELIVERY_RETRY_MS[attempt], signal);
       }
     }
     const messageId = response?.data?.message_id;

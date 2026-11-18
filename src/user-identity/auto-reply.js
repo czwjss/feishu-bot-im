@@ -42,11 +42,10 @@ export function renderBatchPrompt({ messages, contextMessages = [] }) {
   };
   return [
     '[飞书分身消息批次]',
-    ...(contextMessages.length ? [
-      '',
-      '最近会话上下文（仅供理解，不作为本批待回复消息）：',
-      ...contextMessages.map(renderMessage),
-    ] : []),
+    '',
+    '最近会话上下文（仅供理解，不作为本批待回复消息）：',
+    '以下仅为本地缓存的部分记录，不代表完整历史。背景不足时，可调用 feishu_avatar_messages，使用会话信息中的 chatId，按需指定时间范围、分页补查；未列出的消息不代表不存在。补查结果仅用于理解本批新消息，不作为新的待回复任务。',
+    ...(contextMessages.length ? contextMessages.map(renderMessage) : ['（暂无本地缓存记录。）']),
     '',
     '新消息（按时间顺序）：',
     ...messages.map(renderMessage),
@@ -72,9 +71,11 @@ export class AutoReplyEngine {
   #clearTimeout;
   #sessionGuard;
   #defaultWorkspaceId;
+  #authorizeDirect;
   #debounceMs;
   #maxWaitMs;
   #timers = new Map();
+  #scheduledAt = new Map();
   #flights = new Map();
   #controllers = new Map();
   #paused = false;
@@ -89,6 +90,7 @@ export class AutoReplyEngine {
     clearTimeout: clearTimeoutImpl = clearTimeout,
     sessionGuard = null,
     defaultWorkspaceId = null,
+    authorizeDirect = null,
     debounceMs = BATCH_DEBOUNCE_MS,
     maxWaitMs = BATCH_MAX_WAIT_MS,
   } = {}) {
@@ -102,6 +104,7 @@ export class AutoReplyEngine {
     this.#clearTimeout = clearTimeoutImpl;
     this.#sessionGuard = sessionGuard;
     this.#defaultWorkspaceId = defaultWorkspaceId;
+    this.#authorizeDirect = authorizeDirect;
     this.#debounceMs = debounceMs;
     this.#maxWaitMs = maxWaitMs;
   }
@@ -115,7 +118,13 @@ export class AutoReplyEngine {
     const timer = this.#timers.get(chatId);
     if (timer !== undefined) this.#clearTimeout?.(timer);
     this.#timers.delete(chatId);
+    this.#scheduledAt.delete(chatId);
     this.#controllers.get(chatId)?.abort();
+  }
+
+  /** Passive scheduling facts for the management panel, never an execution receipt. */
+  status(chatId) {
+    return { dispatching: this.#flights.has(chatId), scheduledAt: this.#scheduledAt.get(chatId) ?? null };
   }
 
   pause() {
@@ -125,20 +134,28 @@ export class AutoReplyEngine {
 
   resume() {
     this.#paused = false;
-    for (const chat of this.#store.config.chats) this.#schedule(chat.chatId);
+    for (const chat of this.#store.monitoredChats) this.#schedule(chat.chatId);
   }
 
   #activeChat(chatId, signal) {
     if (this.#disposed || this.#paused || signal?.aborted || !this.#store.config.enabled) return null;
-    return this.#store.config.chats.find((chat) => chat.chatId === chatId) ?? null;
+    return this.#store.monitoredChat(chatId);
+  }
+
+  async #canDispatch(chat, signal) {
+    if (chat.activationId && this.#authorizeDirect && await this.#authorizeDirect() !== chat.ownerOpenId) return false;
+    const current = this.#activeChat(chat.chatId, signal);
+    return Boolean(current && current.activationId === chat.activationId);
   }
 
   /** Persist message bodies, cursor and pending IDs together before scheduling. */
   async enqueue(chat, messageIds, patch = {}) {
     const activeChat = this.#activeChat(chat.chatId);
-    if (!activeChat) return false;
+    if (!activeChat || activeChat.activationId !== chat.activationId) return false;
+    let updated = false;
     let hasNewMessages = false;
     await this.#store.updateChat(chat.chatId, (entry) => {
+      updated = true;
       const previous = entry.batch ?? {};
       const messages = new Map((patch.messages ?? entry.messages ?? [])
         .map((message) => [message.messageId, message]));
@@ -154,7 +171,8 @@ export class AutoReplyEngine {
           lastAt: pending.length ? (hasNewMessages ? this.#now() : previous.lastAt) : null,
         },
       };
-    });
+    }, chat.activationId);
+    if (!updated) return false;
     if (hasNewMessages || !this.#timers.has(chat.chatId)) this.#schedule(chat.chatId);
     return true;
   }
@@ -164,6 +182,7 @@ export class AutoReplyEngine {
     const existing = this.#timers.get(chatId);
     if (existing !== undefined) this.#clearTimeout?.(existing);
     this.#timers.delete(chatId);
+    this.#scheduledAt.delete(chatId);
     const batch = this.#store.state.chats[chatId]?.batch ?? {};
     if (!batch.messageIds?.length) return;
     const now = this.#now();
@@ -171,8 +190,10 @@ export class AutoReplyEngine {
     const remaining = Math.max(0, firstAt + this.#maxWaitMs - now);
     const wait = retry ? this.#debounceMs
       : batch.messageIds.length >= BATCH_MAX_MESSAGES ? 0 : Math.min(this.#debounceMs, remaining);
+    this.#scheduledAt.set(chatId, now + wait);
     const timer = this.#setTimeout(() => {
       this.#timers.delete(chatId);
+      this.#scheduledAt.delete(chatId);
       void this.flush({ chatId });
     }, wait);
     timer?.unref?.();
@@ -202,7 +223,7 @@ export class AutoReplyEngine {
 
   async #flush(chatId, signal) {
     const chat = this.#activeChat(chatId, signal);
-    if (!chat) return null;
+    if (!chat || !await this.#canDispatch(chat, signal)) return null;
     const entry = this.#store.state.chats[chat.chatId] ?? {};
     const allIds = entry.batch?.messageIds ?? [];
     if (allIds.length === 0) return null;
@@ -213,7 +234,7 @@ export class AutoReplyEngine {
       .filter((message) => triggersReply(chat, message));
     const acceptedIds = new Set(pending.map((message) => message.messageId));
     const excludedIds = allIds.filter((id) => !acceptedIds.has(id));
-    if (excludedIds.length) await this.#acknowledge(chat.chatId, excludedIds);
+    if (excludedIds.length) await this.#acknowledge(chat, excludedIds);
     if (pending.length === 0) return null;
 
     // 有人明确要求真人：整批不处理，等人来。
@@ -222,15 +243,16 @@ export class AutoReplyEngine {
       .map((message) => handoffRequestedIn(message.text, keywordList)).find(Boolean);
     if (handoff) {
       this.#logger?.info?.(`[im-feishu] ${chat.chatId} 命中「${handoff}」，本批转人工，不派发`);
-      await this.#acknowledge(chat.chatId, allIds);
+      await this.#acknowledge(chat, allIds);
       return null;
     }
     const messages = pending.slice(0, BATCH_MAX_MESSAGES);
     const ids = messages.map((message) => message.messageId);
     const sessionId = await this.#ensureSession(chat, entry);
-    if (!this.#activeChat(chat.chatId, signal)) return null;
+    if (!await this.#canDispatch(chat, signal)) return null;
     await this.#store.bindWorkerSession(chat, sessionId);
-    if (!this.#activeChat(chat.chatId, signal)) return null;
+    const current = this.#activeChat(chat.chatId, signal);
+    if (!current || current.activationId !== chat.activationId) return null;
     // 包含本人回复和未触发的消息，但不把后续积压消息提前作为背景派发。
     const latest = this.#store.state.chats[chat.chatId] ?? entry;
     const pendingIds = new Set(latest.batch?.messageIds ?? []);
@@ -243,7 +265,7 @@ export class AutoReplyEngine {
       messages,
       contextMessages,
     }), { signal, requestId });
-    await this.#acknowledge(chat.chatId, ids, { lastDispatchAt: this.#now() });
+    await this.#acknowledge(chat, ids, { lastDispatchAt: this.#now() });
     return chat.chatId;
   }
 
@@ -257,7 +279,7 @@ export class AutoReplyEngine {
       if (unusable) this.#logger?.warn?.(`[im-feishu] ${chat.chatId} 的 Worker 会话已不可用，重建`);
       if (configStale) this.#logger?.info?.(`[im-feishu] ${chat.chatId} 的 Worker 工作区/预设变了，重建会话`);
       sessionId = await this.#harness.createSession(await this.#workerTarget());
-      await this.#patch(chat.chatId, { sessionId, workerConfigKey: workerKey, titleName: null });
+      await this.#patch(chat, { sessionId, workerConfigKey: workerKey, titleName: null });
     }
     await this.#syncTitle(chat, sessionId, this.#store.state.chats[chat.chatId] ?? entry);
     return sessionId;
@@ -269,7 +291,7 @@ export class AutoReplyEngine {
     if (!title || entry.titleName === title) return;
     if (typeof this.#harness.renameSession !== 'function') return;
     const accepted = await this.#harness.renameSession(sessionId, title).catch(() => null);
-    if (accepted) await this.#patch(chat.chatId, { titleName: accepted });
+    if (accepted) await this.#patch(chat, { titleName: accepted });
   }
 
   /** Worker 的工作区/预设指纹：变了就换新会话。 */
@@ -323,9 +345,9 @@ export class AutoReplyEngine {
   }
 
   /** Acknowledge only the snapshot that was handled, preserving concurrent arrivals. */
-  async #acknowledge(chatId, ids, patch = {}) {
+  async #acknowledge(chat, ids, patch = {}) {
     const handled = new Set(ids);
-    await this.#store.updateChat(chatId, (entry) => {
+    await this.#store.updateChat(chat.chatId, (entry) => {
       const remaining = (entry.batch?.messageIds ?? []).filter((id) => !handled.has(id));
       return {
         ...patch,
@@ -335,10 +357,10 @@ export class AutoReplyEngine {
           lastAt: remaining.length ? entry.batch.lastAt : null,
         },
       };
-    });
+    }, chat.activationId);
   }
 
-  async #patch(chatId, patch) {
-    await this.#store.updateChat(chatId, patch);
+  async #patch(chat, patch) {
+    await this.#store.updateChat(chat.chatId, patch, chat.activationId);
   }
 }

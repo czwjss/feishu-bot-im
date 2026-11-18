@@ -8,11 +8,6 @@ export function chatIdOfKey(key) {
   return key.replace(/^chat:/, '') || null;
 }
 
-export function scopedValue(value, scope, fallback) {
-  if (value && typeof value === 'object') return value[scope] ?? fallback;
-  return value ?? fallback;
-}
-
 /** 兜底上限：飞书流式模式会在 10 分钟后自动关闭，超过就不再等。 */
 export const CARD_STUCK_MS = 10 * 60_000;
 

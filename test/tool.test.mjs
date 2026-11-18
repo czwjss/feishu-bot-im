@@ -19,8 +19,8 @@ import {
     send: async (input) => {
       calls.push(input);
       return input.path
-        ? { kind: 'file', chatId: 'oc_daily', fileName: 'a.txt', bytes: 3 }
-        : { kind: 'card', chatId: 'oc_daily', sentAt: '2026-11-04T00:00:00.000Z' };
+        ? { kind: 'file', messageId: 'om_file', chatId: 'oc_daily', fileName: 'a.txt', bytes: 3 }
+        : { kind: 'card', messageId: 'om_card', chatId: 'oc_daily', sentAt: '2026-11-04T00:00:00.000Z' };
     },
   });
   assert.equal(tool.name, SEND_TOOL_NAME);
@@ -80,7 +80,8 @@ import {
   assert.equal(calls[0].scanLimit, 80);
   assert.equal(result.matched, 1);
   assert.match(tool.output.render({}, result)[0].text, /匹配 1 条，扫描 80 条/);
-  assert.match(tool.output.render({}, result)[0].text, /陈志文：今晚上线/);
+  assert.match(tool.output.render({}, result)[0].text, /"senderName":"陈志文"/);
+  assert.match(tool.output.render({}, result)[0].text, /"text":"今晚上线"/);
   assert.match(tool.output.render({}, result)[0].text, /还有更多/);
 }
 
@@ -103,7 +104,8 @@ import {
   assert.equal(result.chats.length, 2);
   assert.equal(result.chats[0].chatId, 'oc_daily');
   assert.equal(result.chats[1].title, '');
-  assert.match(chats.output.render({}, result)[0].text, /日报群（oc_daily，bot_default）/);
+  assert.match(chats.output.render({}, result)[0].text, /"title":"日报群"/);
+  assert.match(chats.output.render({}, result)[0].text, /"chatId":"oc_daily"/);
   assert.match(chats.output.render({}, { chats: [] })[0].text, /没有可用/);
 }
 
@@ -113,7 +115,7 @@ import {
   const people = createPeopleTool({
     find: async (input) => {
       calls.push(input);
-      return { chatId: 'oc_daily', people: [{ name: '陈志文', openId: 'ou_chen' }] };
+      return { chatId: 'oc_daily', matched: 1, hasMore: false, people: [{ name: '陈志文', openId: 'ou_chen' }] };
     },
   });
   assert.equal(people.name, PEOPLE_TOOL_NAME);
@@ -126,7 +128,7 @@ import {
   assert.equal(calls[0].query, '志文');
   assert.equal(calls[0].refresh, true);
   assert.equal(result.people[0].openId, 'ou_chen');
-  assert.match(people.output.render({}, result)[0].text, /陈志文（ou_chen）/);
+  assert.match(people.output.render({}, result)[0].text, /"openId":"ou_chen"/);
   assert.match(people.output.render({}, { chatId: 'oc_daily', people: [] })[0].text, /没有找到/);
 }
 
@@ -179,7 +181,7 @@ console.log('feishu tool output schema: 8 assertions passed');
   assert.equal(tool.name, 'feishu_bot_recall');
   const value = await tool.execute({ messageId: 'om_1' });
   assert.equal(value.recalled, true);
-  assert.deepEqual(calls, [{ bot: undefined, messageId: 'om_1' }]);
+  assert.deepEqual(calls, [{ bot: undefined, messageId: 'om_1', sessionId: undefined, signal: undefined }]);
   await assert.rejects(() => tool.execute({}), /messageId/);
   const text = tool.output.render({}, { recalled: false, messageId: 'om_2' })[0].text;
   assert.match(text, /撤回失败/);

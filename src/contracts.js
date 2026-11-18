@@ -1,19 +1,19 @@
-/** Browser-safe definitions shared by settings and the backend. */
+/** Browser-safe definitions shared by the management panel and the backend. */
 export const RPC_ENDPOINT = 'im-feishu';
 export const ACCESS_MODES = Object.freeze({ ALL: 'all', ALLOWLIST: 'allowlist' });
 export const BUSY_MODES = Object.freeze({ QUEUE: 'queue', STEER: 'steer' });
-// Keep both existing pink configurations and the red option exposed by the UI.
-export const BOT_COLORS = Object.freeze(['blue', 'green', 'purple', 'orange', 'pink', 'red']);
 export const CONTEXT_ENHANCEMENT_FIELDS = Object.freeze([
   'senderId', 'senderName', 'botId', 'sentAt', 'conversationTitle',
 ]);
 
 export const API = Object.freeze({
+  managementSnapshot: 'management.snapshot',
+  chatSessions: 'chat.sessions.list',
+  chatBind: 'chat.bind',
+  chatUnbind: 'chat.unbind',
   botAccessSet: 'bot.access.set',
   botAdd: 'bot.add',
-  botAliasSet: 'bot.alias.set',
   botBusyModeSet: 'bot.busy-mode.set',
-  botColorSet: 'bot.color.set',
   botContextSet: 'bot.context-enhancement.set',
   botEavesdropSet: 'bot.eavesdrop.set',
   botMentionsSet: 'bot.mentions.set',
@@ -25,8 +25,6 @@ export const API = Object.freeze({
   botReconnect: 'bot.reconnect',
   botRemove: 'bot.remove',
   botCheck: 'bot.check',
-  // Legacy clients use this name; the server now routes it to the same read-only check.
-  botTest: 'bot.test',
   botWorkspaceSet: 'bot.workspace.set',
   botsList: 'bots.list',
   modelsList: 'models.list',
@@ -42,10 +40,12 @@ export const API = Object.freeze({
   userDisconnect: 'user.disconnect',
   userRefresh: 'user.refresh',
   userMonitorStatus: 'user.monitor.status',
+  userMonitorDetail: 'user.monitor.detail',
   userMonitorChats: 'user.monitor.chats',
   userMonitorAdd: 'user.monitor.add',
   userMonitorRemove: 'user.monitor.remove',
   userMonitorEnable: 'user.monitor.enable',
+  userMonitorDirectEnable: 'user.monitor.direct.enable',
   userMonitorWorkerSet: 'user.monitor.worker.set',
   userMonitorHandoffSet: 'user.monitor.handoff.set',
   userMonitorReplyRulesSet: 'user.monitor.reply-rules.set',

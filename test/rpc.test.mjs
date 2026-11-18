@@ -5,7 +5,6 @@ const calls = [];
 const runtime = {
   status: async () => ({ id: 'bot_1', state: 'connected' }),
   checkConnection: async () => { calls.push('check'); return { credentialsValid: true, connected: true, connectionState: 'connected' }; },
-  sendTest: async () => { assert.fail('connection checks must never send test messages'); },
   save: async (patch) => { calls.push(['save', patch]); return {}; },
   saveWorkspace: async (w) => { calls.push(['ws', w]); return w; },
   saveContextEnhancement: async (c) => { calls.push(['ce', c]); return c; },
@@ -41,16 +40,26 @@ assert.equal(list.value.version, '0.1.0');
 const added = await handle('bot.add', { appId: 'cli_x', appSecret: 's' });
 assert.equal(added.value.state, 'connected');
 
-for (const method of ['bot.check', 'bot.test']) {
-  const checked = await handle(method, { botId: 'bot_1' });
-  assert.equal(checked.value.credentialsValid, true);
-  assert.equal(checked.value.connected, true);
-  assert.equal(checked.value.sent, undefined);
-  assert.equal(calls.at(-1), 'check', `${method} only checks connectivity, including cached old clients`);
-}
+const checked = await handle('bot.check', { botId: 'bot_1' });
+assert.equal(checked.value.credentialsValid, true);
+assert.equal(checked.value.connected, true);
+assert.equal(checked.value.sent, undefined);
+assert.equal(calls.at(-1), 'check', 'connection diagnostics only check connectivity');
 
-await handle('bot.alias.set', { botId: 'bot_1', alias: '小名' });
-assert.deepEqual(calls.at(-1), ['save', { alias: '小名' }]);
+const beforeRejectedCalls = calls.length;
+for (const method of ['bot.test', 'bot.slash-sync', 'version']) {
+  assert.equal((await handle(method, { botId: 'bot_1' })).error.code, 'bad-request');
+}
+for (const method of ['bot.check', 'bot.reconnect', 'bot.remove', 'bot.model.set', 'presets.list']) {
+  for (const botId of [undefined, '', ' ', ' bot_1 ', 1]) {
+    assert.equal((await handle(method, { botId })).error.code, 'bad-request');
+  }
+}
+assert.equal(calls.length, beforeRejectedCalls, 'obsolete and unscoped calls cannot act on the first robot');
+
+const beforeRename = calls.length;
+assert.equal((await handle('bot.alias.set', { botId: 'bot_1', alias: '小名' })).ok, false);
+assert.equal(calls.length, beforeRename, 'removed rename endpoint cannot change the stored name');
 
 await handle('bot.busy-mode.set', { botId: 'bot_1', scope: 'direct', mode: 'steer' });
 assert.deepEqual(calls.at(-1), ['save', { busyMode: { direct: 'steer' } }], 'direct scope only');

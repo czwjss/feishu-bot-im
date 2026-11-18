@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { build } from 'esbuild';
 import { createQuery, startPolling, syncDraft, commitDraft, remainingSeconds } from '../client/async.js';
-import { BOT_COLORS, API, RPC_ENDPOINT } from '../src/contracts.js';
-import { normalizeColor } from '../src/config.js';
+import { API, RPC_ENDPOINT } from '../src/contracts.js';
+import { normalizeBot } from '../src/config.js';
 import { createRpcHandler } from '../src/rpc.js';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -119,23 +119,20 @@ test('scan countdown follows the server expiry, including non-five-minute grants
   assert.equal(remainingSeconds(null, 0), 0);
 });
 
-test('every displayed color round-trips and shared RPC names reach the backend', async () => {
+test('legacy bot accents are ignored and shared RPC names reach the backend', async () => {
   const result = await build({ entryPoints: [new URL('../client/shared.js', import.meta.url).pathname], bundle: true, write: false, format: 'cjs', platform: 'node', external: ['react'] });
   const module = { exports: {} };
   runInNewContext(result.outputFiles[0].text, { module, exports: module.exports, require: () => ({ Component: class {}, createElement() {} }) });
-  const palette = module.exports.BOT_COLORS;
-  assert.deepEqual(Object.keys(palette).sort(), [...BOT_COLORS].sort());
-  for (const color of Object.keys(palette)) {
-    assert.equal(normalizeColor(color), color);
-    assert.match(palette[color].main, /^#[\da-f]{6}$/i);
-    assert.ok(module.exports.COLOR_NAMES[color]);
-  }
+  const bot = normalizeBot({ appId: 'cli_legacy', alias: '机器人原名', color: 'orange' });
+  assert.equal(bot.alias, '机器人原名');
+  assert.equal(Object.hasOwn(bot, 'color'), false);
+  assert.equal(module.exports.API.botsList, API.botsList);
   assert.equal(RPC_ENDPOINT, 'im-feishu');
   const handler = createRpcHandler({ manager: { status: async () => ({ bots: [] }) }, version: 'test' });
   assert.deepEqual(await handler(API.botsList, {}), { ok: true, value: { bots: [], version: 'test' } });
 });
 
-test('a bot card can mount with a populated model catalog before its draft effect runs', async () => {
+test('bot settings can mount with a populated model catalog before the draft effect runs', async () => {
   const React = {
     Component: class {},
     createElement: (type, props, ...children) => ({ type, props, children }),
@@ -145,7 +142,7 @@ test('a bot card can mount with a populated model catalog before its draft effec
   const result = await build({ entryPoints: [new URL('../client/bot.js', import.meta.url).pathname], bundle: true, write: false, format: 'cjs', platform: 'node', external: ['react'] });
   const module = { exports: {} };
   runInNewContext(result.outputFiles[0].text, { module, exports: module.exports, require: () => React, navigator: { language: 'zh-CN' } });
-  const card = module.exports.BotCard({
+  const card = module.exports.BotSettings({
     connection: {}, bot: { id: 'first-render', state: 'connected' },
     models: [{ provider: 'test', model: 'test-model', label: 'Test model' }],
     presets: [], workspaces: [], permissionOptions: [], onChanged() {},

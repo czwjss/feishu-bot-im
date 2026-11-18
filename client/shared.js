@@ -31,19 +31,6 @@ const h = React.createElement;
       sentAt: ['发送时间', 'Sent at'],
       conversationTitle: ['群名称', 'Group name'],
     };
-    // 固定色板：每个颜色自带主色/浅底/描边三档，运行时不做颜色计算。
-    export const BOT_COLORS = {
-      blue: { main: '#3370ff', soft: 'rgba(51,112,255,.10)', ring: 'rgba(51,112,255,.32)', edge: '#93b4ff' },
-      pink: { main: '#d94690', soft: 'rgba(217,70,144,.10)', ring: 'rgba(217,70,144,.30)', edge: '#eda3c9' },
-      red: { main: '#e5484d', soft: 'rgba(229,72,77,.10)', ring: 'rgba(229,72,77,.30)', edge: '#f0a9ab' },
-      green: { main: '#00b96b', soft: 'rgba(0,185,107,.10)', ring: 'rgba(0,185,107,.28)', edge: '#7fd9b4' },
-      purple: { main: '#7c4dff', soft: 'rgba(124,77,255,.10)', ring: 'rgba(124,77,255,.30)', edge: '#bda6ff' },
-      orange: { main: '#ff8800', soft: 'rgba(255,136,0,.12)', ring: 'rgba(255,136,0,.30)', edge: '#ffc183' },
-    };
-    export const COLOR_NAMES = {
-      blue: ['蓝色', 'Blue'], red: ['红色', 'Red'], green: ['绿色', 'Green'],
-      purple: ['紫色', 'Purple'], orange: ['橙色', 'Orange'], pink: ['粉色', 'Pink'],
-    };
     export const emptyScope = () => ({ enabled: true, fields: ['senderId', 'senderName', 'botId', 'sentAt'], guidance: '' });
     export const emptyEnhancement = () => ({ group: emptyScope(), direct: emptyScope() });
 
@@ -58,66 +45,30 @@ const h = React.createElement;
 }
 .bxf-page input, .bxf-page select { height: 34px; }
 .bxf-page input:focus, .bxf-page select:focus, .bxf-page textarea:focus {
-  outline: 2px solid var(--bxf-accent-ring, rgba(51,112,255,.32));
+  outline: 2px solid color-mix(in srgb, var(--dsw-alias-brand-primary, #3370ff) 32%, transparent);
   outline-offset: 1px;
-  border-color: var(--bxf-accent-edge, #93b4ff);
+  border-color: var(--dsw-alias-brand-primary, #3370ff);
 }
 .bxf-page select option:checked {
   background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-label-primary, #3370ff)) !important;
   color: var(--dsw-alias-label-primary-foreground, var(--dsw-alias-bg-base, #fff)) !important;
 }
-.bxf-card { transition: box-shadow .16s ease, border-color .16s ease; background: var(--dsw-alias-bg-layer-1, #fff); }
-.bxf-card > .bxf-head { background: var(--dsw-alias-bg-layer-1, #fff); }
-.bxf-card:hover { box-shadow: 0 8px 22px rgba(15,23,42,.07); border-color: var(--dsw-alias-border-l2); }
-.bxf-head { border-radius: 0; }
-.bxf-bot-settings { padding: 14px; display: grid; gap: 12px; border-top: 1px solid var(--dsw-alias-border-l1, #e5e7eb);
-  background: var(--dsw-alias-bg-layer-2, #f7f8fa); }
-.bxf-panel { min-width: 0; border: 1px solid var(--dsw-alias-border-l1, #e5e7eb); border-radius: 10px;
-  background: var(--dsw-alias-bg-layer-1, #fff); }
-.bxf-panel-head { display: flex; align-items: center; gap: 8px; padding: 0 14px; min-height: 48px; }
-.bxf-panel-toggle { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; padding: 14px 0;
-  border: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
-.bxf-panel-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.bxf-panel-toggle:hover { color: var(--bxf-accent, #3370ff); }
-.bxf-panel-toggle:focus-visible { outline: 2px solid var(--bxf-accent, #3370ff); outline-offset: 3px; border-radius: 4px; }
-.bxf-panel-chevron { flex: none; color: var(--dsw-alias-label-secondary, #6b7280); transition: transform .15s; }
-.bxf-panel-toggle[aria-expanded="true"] .bxf-panel-chevron { transform: rotate(90deg); }
-.bxf-panel-action { flex: none; }
-.bxf-panel-content { border-top: 1px solid var(--dsw-alias-border-l1, #e5e7eb); padding: 14px; container-type: inline-size; }
-.bxf-panel-body { display: grid; gap: 16px; min-width: 0; }
 .bxf-field { min-width: 0; }
-.bxf-panel-body :is(input, select, textarea) { min-width: 0; font-family: inherit; }
-.bxf-panel-body select { text-overflow: ellipsis; }
-.bxf-panel-body textarea { resize: vertical; max-width: 100%; }
-.bxf-general-fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-.bxf-field-wide { grid-column: 1 / -1; }
-.bxf-panel-danger .bxf-panel-title { color: var(--dsw-alias-state-error-primary, #dc2626); }
-.bxf-bot-meta { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; margin-top: 6px; }
-.bxf-bot-meta > span { min-width: 0; overflow-wrap: anywhere; }
 .bxf-bot-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-@container (max-width: 440px) {
-  .bxf-general-fields { grid-template-columns: minmax(0, 1fr); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .bxf-panel-chevron { transition: none; }
-}
-.bxf-btn:hover { filter: brightness(.97); }
-.bxf-icon-btn:hover { background: rgba(148,163,184,.18); color: var(--bxf-accent, var(--dsw-alias-brand-primary)); }
 .bxf-mini { background: transparent !important; -webkit-appearance: none; appearance: none;
   font-size: 11px; padding: 3px 8px; border-radius: 7px; cursor: pointer;
   border: 1px solid var(--dsw-alias-border-l1, #e2e8f0); background: transparent; color: var(--dsw-alias-label-secondary); }
-.bxf-mini:hover { color: var(--bxf-accent, #3370ff); border-color: var(--bxf-accent-edge, #93b4ff); background: var(--bxf-accent-soft, rgba(51,112,255,.10)) !important; }
-.bxf-check { background: transparent !important; -webkit-appearance: none; appearance: none;
-  width: 27px; height: 27px; border-radius: 8px; cursor: pointer; flex: none;
-  border: 1px solid var(--dsw-alias-border-l1, #d1d5db); background: transparent;
-  color: var(--bxf-accent, #3370ff); font-size: 13px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
-.bxf-check:hover, .bxf-check:focus { background: var(--bxf-accent-soft, rgba(51,112,255,.10)) !important; border-color: var(--bxf-accent-edge, #93b4ff); }
-.bxf-check:active { background: var(--bxf-accent-soft, rgba(51,112,255,.10)) !important; }
+.bxf-mini:hover { color: var(--dsw-alias-brand-primary, #3370ff); border-color: var(--dsw-alias-brand-primary, #3370ff); background: color-mix(in srgb, var(--dsw-alias-brand-primary, #3370ff) 10%, transparent) !important; }
+.bxf-button { appearance: none; display: inline-flex; align-items: center; justify-content: center;
+  min-height: 34px; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer;
+  border: 1px solid var(--dsw-alias-border-l1, #d1d5db); background: transparent; color: inherit; }
+.bxf-button:not(:disabled):hover { background: var(--dsw-alias-bg-layer-2, #f7f8fa); border-color: var(--dsw-alias-border-l2, #d1d5db); }
+.bxf-button[data-variant="primary"] { border-color: transparent;
+  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-label-primary, #111318));
+  color: var(--dsw-alias-label-primary-foreground, var(--dsw-alias-bg-base, #fff)); }
+.bxf-button[data-variant="primary"]:not(:disabled):hover { border-color: transparent;
+  background: var(--dsw-alias-button-primary-hover, var(--dsw-alias-button-primary-fill, var(--dsw-alias-label-primary, #252830))); }
 .bxf-danger:hover { background: rgba(185,28,28,.07); border-color: rgba(185,28,28,.55); }
-.bxf-check:disabled { opacity: .45; cursor: default; }
-.bxf-fieldrow { display: flex; align-items: flex-end; gap: 8px; }
-.bxf-fieldgrow { flex: 1; min-width: 0; }
-.bxf-btn:active { transform: translateY(1px); }
 .bxf-tip { position: relative; display: inline-flex; align-items: center; justify-content: center;
   width: 15px; height: 15px; margin-left: 6px; border-radius: 50%;
   background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); font-size: 10px; font-weight: 700;
@@ -129,7 +80,6 @@ const h = React.createElement;
   transition: opacity .12s ease; z-index: 30; pointer-events: none; }
 .bxf-tip:hover .bxf-tip-body, .bxf-tip:focus .bxf-tip-body, .bxf-tip:focus-within .bxf-tip-body {
   opacity: 1; visibility: visible; }
-.bxf-labelrow { display: flex; align-items: center; gap: 2px; margin-bottom: 5px; }
 .bxf-save-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0;
   font-size: 11px; color: var(--dsw-alias-label-secondary); }
 .bxf-save-status > span { min-width: 0; overflow-wrap: anywhere; }
@@ -137,28 +87,9 @@ const h = React.createElement;
 `;
 
     export const S = {
-      page: { padding: '18px 22px', maxWidth: '980px', color: 'var(--dsw-alias-label-primary, #1c1c1e)' },
-      head: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '14px' },
-      title: { margin: 0, fontSize: '18px', fontWeight: 600 },
-      sub: { margin: '2px 0 0', fontSize: '12px', color: 'var(--dsw-alias-label-secondary, #6b7280)' },
       labelrow: { display: 'flex', alignItems: 'center', marginBottom: '5px' },
-      card: {
-        border: '1px solid var(--dsw-alias-border-l1, #e5e7eb)',
-        borderRadius: '12px',
-        background: 'var(--dsw-alias-bg-layer-1, #fff)',
-        marginBottom: '12px',
-        overflow: 'hidden',
-        boxShadow: '0 1px 2px rgba(15,23,42,.04)',
-      },
-      cardHead: { display: 'flex', alignItems: 'center', gap: '10px', padding: '13px 16px', cursor: 'pointer' },
       grow: { flex: 1, minWidth: 0 },
-      name: { fontSize: '14px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
       nameRow: { display: 'flex', alignItems: 'center', gap: '4px' },
-      iconBtn: {
-        border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px 4px', borderRadius: '6px',
-        fontSize: '12px', lineHeight: 1, color: 'var(--dsw-alias-label-secondary)', transition: 'background .15s ease, color .15s ease',
-      },
-      meta: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary, #6b7280)', marginTop: '2px' },
       badge: (tone) => ({
         display: 'inline-block', padding: '1px 8px', borderRadius: '999px', fontSize: '11px',
         background: tone === 'ok' ? 'rgba(16,185,129,.12)' : tone === 'warn' ? 'rgba(245,158,11,.16)' : 'rgba(148,163,184,.18)',
@@ -183,22 +114,7 @@ const h = React.createElement;
           ? 'var(--dsw-alias-label-primary-foreground, var(--dsw-alias-bg-base, #fff))'
           : 'inherit',
       }),
-      dangerBtn: {
-        padding: '5px 12px', fontSize: '12px', borderRadius: '8px', cursor: 'pointer',
-        border: '1px solid var(--dsw-alias-state-error-primary)', background: 'transparent', color: 'var(--dsw-alias-state-error-primary)',
-      },
       error: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' },
-      toast: {
-        position: 'fixed', top: '24px', left: '50%', transform: 'translateX(-50%)',
-        background: 'var(--dsw-alias-bg-overlay)', color: 'var(--dsw-alias-label-primary)', fontSize: '13px', border: '1px solid var(--dsw-alias-border-l1)',
-        padding: '8px 18px', borderRadius: '8px', zIndex: 9999,
-        boxShadow: '0 6px 20px rgba(0,0,0,0.18)', pointerEvents: 'none',
-      },
-      check: {
-        width: '27px', height: '27px', borderRadius: '8px', cursor: 'pointer', flex: 'none',
-        border: '1px solid var(--dsw-alias-border-l2, #d1d5db)', background: 'transparent',
-        color: 'var(--bxf-accent, #3370ff)', fontSize: '13px', lineHeight: 1,
-      },
       checkRow: { display: 'flex', flexWrap: 'wrap', gap: '6px 14px' },
       checkLabel: { fontSize: '12px', display: 'flex', gap: '5px', alignItems: 'center' },
       overlay: {
@@ -258,8 +174,8 @@ const h = React.createElement;
         h('span', { className: 'bxf-tip-body', role: 'tooltip' }, hint)) : null);
     }
 
-    export function Field({ label, hint, children, fullWidth = false }) {
-      return h('div', { className: `bxf-field${fullWidth ? ' bxf-field-wide' : ''}` },
+    export function Field({ label, hint, children, className = '' }) {
+      return h('div', { className: `bxf-field ${className}`.trim() },
         label ? h(FieldLabel, { label, hint }) : null,
         children);
     }
@@ -272,21 +188,6 @@ const h = React.createElement;
       return h('div', { className: 'bxf-save-status', 'data-state': state.status, role: 'status' },
         h('span', null, label),
         state.status === 'error' ? h('button', { type: 'button', className: 'bxf-mini', onClick: onRetry }, t('重试', 'Retry')) : null);
-    }
-
-    export function Panel({ title, action, children, defaultOpen = false, bodyClassName = '', danger = false }) {
-      const [open, setOpen] = React.useState(defaultOpen);
-      return h('section', { className: `bxf-panel${danger ? ' bxf-panel-danger' : ''}` },
-        h('div', { className: 'bxf-panel-head' },
-          h('button', { type: 'button', className: 'bxf-panel-toggle', 'aria-expanded': open,
-            onClick: () => setOpen((value) => !value),
-          },
-            h('span', { className: 'bxf-panel-title' }, title),
-            h('svg', { className: 'bxf-panel-chevron', width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, 'aria-hidden': true },
-              h('path', { d: 'm9 5 7 7-7 7' }))),
-          action ? h('div', { className: 'bxf-panel-action' }, action) : null),
-        h('div', { className: 'bxf-panel-content', hidden: !open },
-          h('div', { className: `bxf-panel-body ${bodyClassName}`.trim() }, children)));
     }
 
     export function StatusBadge({ state }) {

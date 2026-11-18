@@ -72,7 +72,7 @@ try {
   await store.load();
   await store.saveConfig({
     enabled: true,
-    chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all' }],
+    chats: [{ chatId, name: '测试群聊', chatMode: 'group', mode: 'all' }],
   });
 
   const prompts = [];
@@ -137,7 +137,7 @@ try {
   assert.match(prompts[0].text, /文档发我/);
   assert.doesNotMatch(prompts[0].text, new RegExp(chatId));
   assert.doesNotMatch(prompts[0].text, /feishu_avatar_send|同一批次最多回复一次|要求：/);
-  assert.match(prompts[0].text, /om_1/, 'direct chat retains message ids for context and lookup');
+  assert.match(prompts[0].text, /om_1/, 'batch retains message ids for context and lookup');
   assert.doesNotMatch(prompts[0].text, /replyToMessageId/, 'reply rules are not repeated in the message batch');
 
   // 3) 派发后批次清空
@@ -166,7 +166,7 @@ try {
       statePath: join(dir, 'title-state.json'),
     });
     await titleStore.load();
-    await titleStore.saveConfig({ enabled: true, chats: [{ chatId, name: '小金刚', chatMode: 'p2p', mode: 'all' }] });
+    await titleStore.saveConfig({ enabled: true, chats: [{ chatId, name: '小金刚', chatMode: 'group', mode: 'all' }] });
     const renames = [];
     const titleEngine = new AutoReplyEngine({
       store: titleStore,
@@ -228,7 +228,7 @@ try {
   // 6) 显式允许机器人消息时，与真人消息一样正常派发。
   await store.saveConfig({
     enabled: true,
-    chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all', replyToBots: true }],
+    chats: [{ chatId, name: '测试群聊', chatMode: 'group', mode: 'all', replyToBots: true }],
   });
   const botChat = store.config.chats[0];
   await store.saveState({
@@ -275,7 +275,7 @@ try {
   await store.saveConfig({
     enabled: true,
     worker: { workspaceId: 'ws_feishu', preset: 'standard' },
-    chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all' }],
+    chats: [{ chatId, name: '测试群聊', chatMode: 'group', mode: 'all' }],
   });
   const sessionsBefore = sessions.length;
   assert.ok(await engine.flush({ ...store.config.chats[0] }));
@@ -290,7 +290,7 @@ try {
       statePath: join(dir, 'fallback-state.json'),
     });
     await fallbackStore.load();
-    await fallbackStore.saveConfig({ enabled: true, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all' }] });
+    await fallbackStore.saveConfig({ enabled: true, chats: [{ chatId, name: '测试群聊', chatMode: 'group', mode: 'all' }] });
     const created = [];
     const fallbackEngine = new AutoReplyEngine({
       store: fallbackStore,

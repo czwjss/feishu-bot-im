@@ -44,7 +44,7 @@ async function monitorFixture(t, overrides = {}) {
   const configPath = join(root, 'monitor.json');
   const statePath = join(root, 'state.json');
   const store = await new MonitorStore({ configPath, statePath }).load();
-  await store.saveConfig({ enabled: true, chats: [{ chatId, chatMode: 'p2p', name: '私聊' }] });
+  await store.saveConfig({ enabled: true, chats: [{ chatId, chatMode: 'group', mode: 'all', name: '测试群' }] });
   const prompts = [];
   const harness = {
     createSession: async () => 'session-worker',
@@ -417,7 +417,7 @@ test('replacement workers receive the chat title even when the previous worker w
   await f.monitor.setWorker({ preset: 'new-preset' });
   await f.engine.enqueue(f.chat, ['om_2'], { messages: [message(2)] });
   await f.engine.flush(f.chat);
-  assert.deepEqual(renames, [['worker-1', '私聊'], ['worker-2', '私聊']]);
+  assert.deepEqual(renames, [['worker-1', '测试群'], ['worker-2', '测试群']]);
 });
 
 test('streaming cards apply keyword triggers to their completed body', async (t) => {

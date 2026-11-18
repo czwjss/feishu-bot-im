@@ -94,3 +94,30 @@ test('identity and token patches do not lose concurrent independent fields', asy
   assert.equal(tokens.document.accessToken, '');
   assert.equal(tokens.document.refreshToken, '');
 });
+
+test('current multi-bot configuration round-trips without rewriting and preserves scoped settings', async (t) => {
+  const path = join(await directory(t), 'config.json');
+  const store = await new ConfigStore(path).load();
+  await store.add({ id: 'bot-a', appId: 'cli_a', secretRef: 'credential-a', busyMode: { direct: 'steer', group: 'queue' } });
+  await store.add({ id: 'bot-b', appId: 'cli_b', busyMode: { direct: 'queue', group: 'steer' } });
+  await store.update('bot-a', { workspace: '/work/a' });
+  const before = await readFile(path, 'utf8');
+  const restored = await new ConfigStore(path).load();
+  assert.deepEqual(restored.bots, store.bots);
+  assert.deepEqual(restored.bot('bot-a').busyMode, { direct: 'steer', group: 'queue' });
+  assert.equal(restored.bot('bot-a').secretRef, 'credential-a');
+  assert.equal(restored.bot('bot-b').secretRef, 'IM_FEISHU_SECRET_BOT-B');
+  assert.equal(await readFile(path, 'utf8'), before);
+});
+
+test('unsupported configuration documents fail without being replaced by defaults', async (t) => {
+  const path = join(await directory(t), 'config.json');
+  for (const input of [{ appId: 'cli_flat' }, { bots: {} }, []]) {
+    const before = JSON.stringify(input);
+    await writeFile(path, before);
+    const store = new ConfigStore(path);
+    await assert.rejects(store.load(), { code: 'INVALID_CONFIG' });
+    await assert.rejects(store.add({ appId: 'cli_new' }), { code: 'INVALID_CONFIG' });
+    assert.equal(await readFile(path, 'utf8'), before);
+  }
+});

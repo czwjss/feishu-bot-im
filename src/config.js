@@ -15,8 +15,8 @@ import { normalizeEavesdropConfig } from './eavesdrop.js';
 import { normalizeMentionsConfig } from './mentions.js';
 import { randomUUID } from 'node:crypto';
 
-import { ACCESS_MODES, BUSY_MODES, BOT_COLORS } from './contracts.js';
-export { ACCESS_MODES, BUSY_MODES, BOT_COLORS };
+import { ACCESS_MODES, BUSY_MODES } from './contracts.js';
+export { ACCESS_MODES, BUSY_MODES };
 
 
 function cleanString(value) {
@@ -52,41 +52,21 @@ function normalizeBusyMode(value) {
   return value === BUSY_MODES.STEER ? BUSY_MODES.STEER : BUSY_MODES.QUEUE;
 }
 
-/** Accept either a legacy scalar or a per-scope `{ direct, group }` object. */
-function normalizeScoped(value, normalizeFn) {
-  if (value && typeof value === 'object') {
-    return Object.freeze({ direct: normalizeFn(value.direct), group: normalizeFn(value.group) });
-  }
-  const shared = normalizeFn(value);
-  return Object.freeze({ direct: shared, group: shared });
-}
-
-export function normalizeColor(value) {
-  return BOT_COLORS.includes(value) ? value : 'blue';
-}
-
-function nextColor(bots) {
-  const used = new Set(bots.map((bot) => bot.color));
-  return BOT_COLORS.find((color) => !used.has(color)) ?? BOT_COLORS[0];
-}
-
 export function secretRefFor(botId) {
   return `IM_FEISHU_SECRET_${String(botId).toUpperCase()}`;
 }
 
 /** One bot's settings, with defaults for everything a fresh bot lacks. */
-export function normalizeBot(value, { legacyId } = {}) {
+export function normalizeBot(value) {
   const source = value && typeof value === 'object' ? value : {};
   const appId = cleanString(source.appId);
   if (!appId) return null;
-  const id = cleanString(source.id) ?? legacyId ?? `bot_${randomUUID().slice(0, 8)}`;
+  const id = cleanString(source.id) ?? `bot_${randomUUID().slice(0, 8)}`;
   return Object.freeze({
     id,
     appId,
-    // v1 kept the secret under the shared ref; keep pointing at it after migration.
-    secretRef: cleanString(source.secretRef) ?? (legacyId ? 'IM_FEISHU_APP_SECRET' : secretRefFor(id)),
+    secretRef: cleanString(source.secretRef) ?? secretRefFor(id),
     alias: cleanString(source.alias)?.slice(0, 40) ?? null,
-    color: normalizeColor(source.color),
     botName: cleanString(source.botName),
     botOpenId: cleanString(source.botOpenId),
     workspace: cleanString(source.workspace),
@@ -95,7 +75,10 @@ export function normalizeBot(value, { legacyId } = {}) {
     respondToBotMessages: source.respondToBotMessages !== false,
     processDetail: source.processDetail === 'brief' ? 'brief' : 'detailed',
     permissionPreset: cleanString(source.permissionPreset),
-    busyMode: normalizeScoped(source.busyMode, normalizeBusyMode),
+    busyMode: Object.freeze({
+      direct: normalizeBusyMode(source.busyMode?.direct),
+      group: normalizeBusyMode(source.busyMode?.group),
+    }),
     contextEnhancement: normalizeContextEnhancementConfig(source.contextEnhancement),
     eavesdrop: normalizeEavesdropConfig(source.eavesdrop),
     mentions: normalizeMentionsConfig(source.mentions),
@@ -106,6 +89,9 @@ export function normalizeBot(value, { legacyId } = {}) {
 
 
 export function normalizeDocument(value) {
+  if (value != null && (typeof value !== 'object' || !Array.isArray(value.bots))) {
+    throw Object.assign(new Error('机器人配置必须包含 bots 数组，请使用当前多机器人配置格式'), { code: 'INVALID_CONFIG' });
+  }
   const source = value && typeof value === 'object' ? value : {};
   const bots = [];
   const seenAppIds = new Set();
@@ -117,11 +103,6 @@ export function normalizeDocument(value) {
     seenAppIds.add(bot.appId);
     seenIds.add(bot.id);
     bots.push(bot);
-  }
-  // v1 was a single flat bot object.
-  if (bots.length === 0 && source.appId) {
-    const legacy = normalizeBot(source, { legacyId: 'bot_default' });
-    if (legacy) bots.push(legacy);
   }
   return Object.freeze({ version: 2, bots: Object.freeze(bots) });
 }
@@ -155,7 +136,6 @@ export class ConfigStore {
       bot = normalizeBot({
         id: `bot_${randomUUID().slice(0, 8)}`,
         ...botInput,
-        color: botInput?.color ?? nextColor(doc.bots),
       });
       if (!bot) throw new Error('App ID 不能为空');
       if (doc.bots.some((item) => item.appId === bot.appId || item.id === bot.id)) {
@@ -170,7 +150,7 @@ export class ConfigStore {
     return this.#store.update((doc) => {
       const current = doc.bots.find((item) => item.id === id);
       if (!current) throw new Error(`机器人不存在：${id}`);
-      next = normalizeBot({ ...current, ...patch, id, appId: current.appId }, { legacyId: id });
+      next = normalizeBot({ ...current, ...patch, id, appId: current.appId });
       return { version: 2, bots: doc.bots.map((item) => (item.id === id ? next : item)) };
     }).then(() => next);
   }
@@ -244,17 +224,34 @@ export class StateStore {
     return Object.entries(this.value.sessions).find(([, value]) => value === sessionId)?.[0] ?? null;
   }
 
-  async bindSession(key, sessionId) {
-    await this.#store.update((state) => ({ ...state, sessions: { ...state.sessions, [key]: sessionId } }));
+  async bindSession(key, sessionId, { expectedSessionId, validate, preserveTitle = false } = {}) {
+    await this.#store.update((state) => {
+      if (expectedSessionId !== undefined && (state.sessions[key] ?? null) !== expectedSessionId) {
+        throw Object.assign(new Error('会话绑定已变化，请刷新后重新选择'), { code: 'conflict' });
+      }
+      validate?.();
+      if (state.sessions[key] === sessionId && (!preserveTitle || state.meta[sessionId]?.preserveTitle)) return state;
+      return {
+        ...state, sessions: { ...state.sessions, [key]: sessionId },
+        meta: preserveTitle ? { ...state.meta, [sessionId]: { ...state.meta[sessionId], preserveTitle: true } } : state.meta,
+      };
+    });
     return sessionId;
   }
 
-  async unbindSession(key) {
+  async unbindSession(key, expectedSessionId) {
+    let previous = null;
     await this.#store.update((state) => {
+      previous = state.sessions[key] ?? null;
+      if (previous && expectedSessionId !== undefined && previous !== expectedSessionId) {
+        throw Object.assign(new Error('会话绑定已变化，请刷新后再解绑'), { code: 'conflict' });
+      }
+      if (!previous) return state;
       const sessions = { ...state.sessions };
       delete sessions[key];
       return { ...state, sessions };
     });
+    return previous;
   }
 
   hasSeen(messageId) { return this.value.seen.includes(messageId); }

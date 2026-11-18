@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 
 import { FEISHU_POLICY } from '../src/policy.js';
 
-assert.match(FEISHU_POLICY, /飞书回复保持简洁、分段清晰/);
+assert.match(FEISHU_POLICY, /发送内容规则（强制，适用于 feishu_bot_send、feishu_avatar_send 及飞书自动回复）/);
 assert.match(FEISHU_POLICY, /飞书来源的轮次由桥接自动流式回复/);
 assert.match(FEISHU_POLICY, /不要为了重复回复再调它/);
 assert.match(FEISHU_POLICY, /只有 Web 轮次需要另发消息时才用/);
@@ -21,9 +21,10 @@ console.log('feishu policy: 13 assertions passed');
 // 只有一套 policy：机器人与分身的规则都在 FEISHU_POLICY 里，标题规则只出现一次。
 assert.match(FEISHU_POLICY, /feishu_bot_send/);
 assert.match(FEISHU_POLICY, /feishu_avatar_send/);
+assert.match(FEISHU_POLICY, /feishu_avatar_chats 查本人已加入的群/);
 assert.match(FEISHU_POLICY, /飞书分身（用户身份）规则/);
 assert.equal(FEISHU_POLICY.split('\n').filter((line) => line.includes('标题按需')).length, 1);
-console.log('feishu single policy: 4 assertions passed');
+console.log('feishu single policy: 5 assertions passed');
 
 // 调整后仍然保留关键约束，避免为了省 token 删掉会改变行为的规则。
 for (const rule of [

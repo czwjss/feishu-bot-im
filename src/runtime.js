@@ -16,6 +16,7 @@ import { normalizeCardColor, noticeCard } from './cards.js';
 import { describeMessageForEavesdrop } from './eavesdrop.js';
 import { RegistrationManager } from './registration.js';
 import { syncSlashCommands } from './slash-commands.js';
+import { boundedInteger, historyOptions, historyTimeRange, validateCardText } from './tool-contract.js';
 
 /** 扫码补齐权限时，由二维码携带的目标配置。 */
 export const REQUIRED_SCOPES = Object.freeze([
@@ -39,11 +40,6 @@ const STATES = Object.freeze({
   RECONNECTING: 'reconnecting',
   ERROR: 'error',
 });
-
-function maskAppId(appId) {
-  if (!appId) return null;
-  return appId.length > 12 ? `${appId.slice(0, 8)}••••${appId.slice(-4)}` : 'cli_••••';
-}
 
 export class BotRuntime {
   #ctx;
@@ -106,6 +102,10 @@ export class BotRuntime {
     return this.#stateStore.keyForSession(sessionId);
   }
 
+  get sessionBindings() {
+    return this.#stateStore.value.sessions;
+  }
+
   #writeStatus() {
     if (!this.#dataDir || this.#disposed) return;
     const config = this.config ?? {};
@@ -116,7 +116,6 @@ export class BotRuntime {
       updatedAt: new Date().toISOString(),
       appId: config.appId ?? null,
       alias: config.alias ?? null,
-      color: config.color ?? 'blue',
       botName: config.botName ?? null,
       ws: this.#bot?.connectionStatus?.() ?? null,
       inbound: this.#bridge?.stats?.() ?? null,
@@ -163,9 +162,7 @@ export class BotRuntime {
       state: this.#state,
       configured: Boolean(config.appId) && described?.configured === true,
       appId: config.appId ?? null,
-      appIdMasked: maskAppId(config.appId),
       alias: config.alias ?? null,
-      color: config.color ?? 'blue',
       botName: config.botName ?? null,
       botOpenId: config.botOpenId ?? null,
       workspace: config.workspace ?? null,
@@ -174,7 +171,7 @@ export class BotRuntime {
       respondToBotMessages: config.respondToBotMessages !== false,
       processDetail: config.processDetail === 'brief' ? 'brief' : 'detailed',
       permissionPreset: config.permissionPreset ?? null,
-      busyMode: config.busyMode ?? 'queue',
+      busyMode: config.busyMode ?? { direct: 'queue', group: 'queue' },
       contextEnhancement: config.contextEnhancement ?? null,
       eavesdrop: config.eavesdrop ?? null,
       mentions: config.mentions ?? null,
@@ -346,104 +343,188 @@ export class BotRuntime {
 
 
   /** Fail early when the selected bot cannot send to a group. */
-  async #assertInChat(chatId) {
+  async #assertInChat(chatId, signal) {
+    signal?.throwIfAborted();
     if (!String(chatId).startsWith('oc_')) return;
     const label = this.config?.alias ?? this.config?.botName ?? this.botId;
-    const inChat = await this.#bot.isInChat(chatId);
+    const inChat = await this.#bot.isInChat(chatId, { signal });
+    signal?.throwIfAborted();
     if (!inChat) throw new Error(`机器人 ${label} 不在群 ${chatId}；请换 bot 或先把机器人拉进群`);
   }
 
-  /** Recall one of this bot's own messages; false when Feishu refuses. */
-  async recallMessage(messageId) {
+  /** Verify ownership; administrators must not accidentally recall another sender's message. */
+  async recallMessage(messageId, signal) {
     if (!this.#bot) throw new Error('机器人尚未连接');
-    return this.#bot.deleteMessage(messageId);
+    signal?.throwIfAborted();
+    const message = await this.#bot.getMessage(messageId, { strict: true, signal });
+    if (!message) throw new Error('找不到要撤回的消息');
+    const identities = [this.config.botOpenId, this.config.appId].filter(Boolean);
+    if (message.senderType !== 'app' || !identities.includes(message.senderId)) {
+      throw new Error('只能撤回所选机器人自己发送的消息');
+    }
+    signal?.throwIfAborted();
+    return this.#bot.deleteMessage(messageId, { strict: true, signal });
   }
 
   /** Send a standalone interactive card with Markdown text. */
-  async sendCardText(chatId, text, title = null, color = null) {
+  async sendCardText(chatId, text, title = null, color = null, signal) {
     if (!this.#bot) throw new Error('机器人尚未连接');
     if (!chatId) throw new Error('缺少飞书群 chatId');
-    const body = typeof text === 'string' ? text.trim().slice(0, 4000) : '';
-    if (!body) throw new Error('卡片正文不能为空');
-    const heading = typeof title === 'string' ? title.trim().slice(0, 100) : '';
-    await this.#assertInChat(chatId);
-    await this.#bot.sendCard(chatId, noticeCard(body, heading || null, normalizeCardColor(color)));
-    return { sentAt: new Date().toISOString() };
+    const { body, heading } = validateCardText(text, title, 4000);
+    await this.#assertInChat(chatId, signal);
+    const messageId = await this.#bot.sendCard(chatId, noticeCard(body, heading || null, normalizeCardColor(color)), { signal });
+    if (!messageId) throw new Error('飞书发送未返回 message_id，无法确认发送结果');
+    return { messageId, sentAt: new Date().toISOString() };
   }
 
   /** Upload and send one file/image to a chat. */
-  async sendFileToChat(chatId, path, name, signal) {
+  async sendFileToChat(chatId, path, name, signal, cwd) {
     if (!this.#bot) throw new Error('机器人尚未连接');
     if (!chatId) throw new Error('缺少飞书群 chatId');
-    await this.#assertInChat(chatId);
-    const base = this.config?.workspace ?? process.cwd();
+    await this.#assertInChat(chatId, signal);
+    const base = cwd || this.config?.workspace || process.cwd();
     const absolute = isAbsolute(path) ? path : resolve(base, path);
     signal?.throwIfAborted?.();
     const info = await stat(absolute).catch(() => null);
     if (!info?.isFile()) throw new Error(`文件不存在或不是普通文件：${absolute}`);
-    const LIMIT = 30 * 1024 * 1024;
-    if (info.size > LIMIT) throw new Error(`文件超过飞书 30MB 上限：${info.size} 字节`);
+    const fileName = basename(typeof name === 'string' && name.trim() ? name.trim() : absolute).replace(/[\u0000-\u001f]/g, '').slice(0, 120) || 'file';
+    const isImage = /\.(png|jpe?g|webp|gif|bmp|ico|tiff?|heic)$/i.test(fileName);
+    const limitMB = isImage ? 10 : 30;
+    if (info.size > limitMB * 1024 * 1024) throw new Error(`${isImage ? '图片' : '文件'}超过飞书 ${limitMB}MB 上限：${info.size} 字节`);
     const bytes = await readFile(absolute);
-    const fileName = (typeof name === 'string' && name.trim() ? name.trim() : basename(absolute)).slice(0, 120);
     signal?.throwIfAborted?.();
-    if (/\.(png|jpe?g|webp|gif)$/i.test(fileName)) {
-      const imageKey = await this.#bot.uploadImage(bytes);
-      await this.#bot.sendImage(chatId, imageKey);
+    let messageId;
+    if (isImage) {
+      const imageKey = await this.#bot.uploadImage(bytes, { signal });
+      signal?.throwIfAborted();
+      messageId = await this.#bot.sendImage(chatId, imageKey, { signal });
     } else {
-      const fileKey = await this.#bot.uploadFile(bytes, fileName);
-      await this.#bot.sendFile(chatId, fileKey, fileName);
+      const fileKey = await this.#bot.uploadFile(bytes, fileName, { signal });
+      signal?.throwIfAborted();
+      messageId = await this.#bot.sendFile(chatId, fileKey, fileName, { signal });
     }
-    return { fileName, bytes: bytes.length, chatId };
+    if (!messageId) throw new Error('飞书发送未返回 message_id，无法确认发送结果');
+    return { kind: isImage ? 'image' : 'file', messageId, fileName, bytes: bytes.length, chatId };
   }
 
   /** Groups the bot belongs to, with the bound Session when one exists. */
-  async listChats({ refresh = false } = {}) {
+  async listChats({ refresh = false, onError = null, signal } = {}) {
+    signal?.throwIfAborted();
     const sessions = this.#stateStore.value.sessions ?? {};
     const bound = new Map();
     for (const [key, sessionId] of Object.entries(sessions)) {
       if (!key.startsWith('chat:')) continue;
       const chatId = chatIdOfKey(key);
       if (!chatId) continue;
-      const chat = bound.get(chatId) ?? { sessionId: '', kind: 'chat' };
-      if (key.startsWith('chat:')) {
-        chat.kind = 'chat';
-        chat.sessionId = sessionId;
-      } else {
-        if (!chat.sessionId) chat.sessionId = sessionId;
-      }
-      bound.set(chatId, chat);
+      bound.set(chatId, sessionId);
     }
-    const apiChats = await Promise.resolve(this.#bot?.getChats?.({ refresh })).catch(() => []);
+    const apiChats = await Promise.resolve(this.#bot?.getChats?.({ refresh, signal })).catch((error) => {
+      signal?.throwIfAborted();
+      if (!onError) throw error;
+      onError?.(error);
+      return [];
+    }) ?? [];
     const known = new Map();
-    for (const item of apiChats) known.set(item.chatId, { title: item.name || '' });
+    for (const item of apiChats) known.set(item.chatId, { title: item.name || '', chatType: item.chatType });
     for (const chatId of bound.keys()) if (!known.has(chatId)) known.set(chatId, { title: '' });
     const alias = this.config?.alias ?? this.config?.botName ?? this.botId;
     const rows = [];
     for (const [chatId, item] of known) {
-      const chat = bound.get(chatId) ?? { sessionId: '', kind: 'chat' };
+      signal?.throwIfAborted();
+      const sessionId = bound.get(chatId) || '';
       let title = item.title;
-      if (!title) title = await Promise.resolve(this.#bot?.getChatName?.(chatId)).catch(() => null) ?? '';
-      rows.push({ bot: alias, chatId, title, sessionId: chat.sessionId, kind: chat.kind });
+      let chatType = ['p2p', 'group'].includes(item.chatType) ? item.chatType : this.#stateStore.chatTypeFor(`chat:${chatId}`);
+      if (!title || !chatType) {
+        if (this.#bot?.getChatInfo) {
+          const info = await this.#bot.getChatInfo(chatId, { refresh, signal }).catch((error) => {
+            signal?.throwIfAborted();
+            return null;
+          });
+          title ||= info?.name || '';
+          if (['p2p', 'group'].includes(info?.chatType)) chatType = info.chatType;
+        } else if (!title) {
+          title = await Promise.resolve(this.#bot?.getChatName?.(chatId)).catch(() => null) ?? '';
+        }
+      }
+      signal?.throwIfAborted();
+      rows.push({ bot: alias, botId: this.botId, chatId, title, sessionId, kind: 'chat', chatType: chatType || 'unknown' });
     }
     return rows.sort((left, right) => String(left.title || left.chatId).localeCompare(String(right.title || right.chatId)));
   }
 
+  /** Bind an existing Session without changing its title, model, history or workspace. */
+  async bindChat({ chatId, sessionId, expectedSessionId }, { prepare, validate }) {
+    const bridge = this.#bridge;
+    const change = async (assertIdle = () => {}) => {
+      const session = await prepare();
+      await this.#stateStore.bindSession(`chat:${chatId}`, sessionId, { expectedSessionId, preserveTitle: true, validate: () => {
+        assertIdle();
+        if (this.#disposed || this.#bridge !== bridge) {
+          throw Object.assign(new Error('连接状态已变化，请刷新后重新绑定'), { code: 'conflict' });
+        }
+        validate();
+      } });
+      return session;
+    };
+    const session = bridge ? await bridge.changeChatBinding(chatId, expectedSessionId, change) : await change();
+    if (expectedSessionId && expectedSessionId !== sessionId && !this.handlesSession(expectedSessionId)) {
+      this.#contexts.delete(expectedSessionId);
+    }
+    return { botId: this.botId, chatId, sessionId, previousSessionId: expectedSessionId, session };
+  }
+
+  /** Remove this robot's exact binding, including a deleted or offline DSH Session. */
+  async unbindChat({ chatId, sessionId }) {
+    if (![chatId, sessionId].every((id) => typeof id === 'string' && id.trim() && id === id.trim())) {
+      throw Object.assign(new Error('缺少有效的会话 ID 或绑定 Session ID'), { code: 'bad-request' });
+    }
+    const previous = this.#bridge
+      ? await this.#bridge.unbindChat(chatId, sessionId)
+      : await this.#stateStore.unbindSession(`chat:${chatId}`, sessionId);
+    if (previous && !this.handlesSession(previous)) this.#contexts.delete(previous);
+    return { botId: this.botId, chatId, previousSessionId: previous, unbound: Boolean(previous) };
+  }
+
+  /** Management projection: never exposes credentials or alters chat/session bindings. */
+  async managementSnapshot({ refresh = false } = {}) {
+    let directoryError = null;
+    const chats = await this.listChats({ refresh, onError: (error) => { directoryError = error.message; } });
+    return {
+      botId: this.botId,
+      inbound: this.#bridge?.stats() ?? null,
+      directoryError,
+      chats: chats.map((chat) => {
+        const key = `chat:${chat.chatId}`;
+        const overrides = this.#stateStore.overrideFor(key);
+        const meta = this.#stateStore.meta[chat.sessionId] ?? {};
+        return {
+          botId: this.botId, chatId: chat.chatId,
+          title: chat.title || meta.titleName || chat.chatId,
+          chatType: chat.chatType,
+          sessionId: chat.sessionId || null,
+          activity: this.#bridge?.managementState(key) ?? null,
+          usage: this.#stateStore.usageFor(key),
+          nextSession: {
+            workspace: overrides.workspace ?? this.config.workspace ?? null,
+            model: overrides.model ?? this.config.model ?? null,
+            preset: overrides.preset ?? this.config.agentPreset ?? null,
+            overrides: Object.keys(overrides),
+          },
+        };
+      }),
+    };
+  }
+
   /** Read history messages from this chat or one thread. */
-  async listMessages({
-    chatId, threadId = null, startTime = null, endTime = null,
-    limit = 20, scanLimit = 200, pageToken = null, order = 'newest', query = '',
-  }) {
+  async listMessages(args) {
+    const { chatId, threadId = null, startTime, endTime, scanLimit, pageToken, signal } = args;
     if (!this.#bot) throw new Error('机器人尚未连接');
     if (!chatId) throw new Error('缺少 chatId');
-    await this.#assertInChat(chatId);
-    const startMs = startTime ? Date.parse(startTime) : null;
-    const endMs = endTime ? Date.parse(endTime) : null;
-    if (startTime && !Number.isFinite(startMs)) throw new Error('startTime 必须是 ISO 时间');
-    if (endTime && !Number.isFinite(endMs)) throw new Error('endTime 必须是 ISO 时间');
-    if (startMs && endMs && startMs >= endMs) throw new Error('startTime 必须早于 endTime');
-    const pageLimit = Math.min(50, Math.max(1, Math.floor(Number(limit) || 20)));
-    const scanCap = Math.min(500, Math.max(pageLimit, Math.floor(Number(scanLimit) || 200)));
-    const needle = String(query ?? '').normalize('NFKC').toLowerCase().trim();
+    const { start, end } = historyTimeRange(startTime, endTime);
+    if (threadId && (start !== null || end !== null)) throw new Error('threadId 不支持 startTime/endTime，请只使用 threadId 或按 chatId 查询时间范围');
+    const { limit: pageLimit, order, query: needle } = historyOptions(args);
+    const scanCap = boundedInteger(scanLimit, 200, 500, 'scanLimit');
+    await this.#assertInChat(chatId, signal);
     const map = (item) => {
       const at = Number(item?.create_time) || 0;
       const sender = item?.sender ?? {};
@@ -452,9 +533,9 @@ export class BotRuntime {
         at,
         time: at ? new Date(at).toISOString() : '',
         senderId: sender.id_type === 'open_id' ? String(sender.id ?? '') : String(sender.open_bot_id ?? sender.id ?? ''),
-        senderName: String(sender.sender_name ?? '').trim(),
+        senderName: String(sender.sender_name ?? sender.name ?? '').trim(),
         type: String(item?.msg_type ?? ''),
-        text: describeMessageForEavesdrop(item).text.slice(0, 2000),
+        text: describeMessageForEavesdrop(item, { maxLength: Infinity }).text,
         threadId: String(item?.thread_id ?? ''),
       };
     };
@@ -462,37 +543,42 @@ export class BotRuntime {
     let scanned = 0;
     const matched = [];
     let hasMore = false;
-    let hitLimit = false;
     for (let page = 0; page < 10; page += 1) {
+      signal?.throwIfAborted();
+      // Consume every fetched item before advancing its page cursor. Fetch only
+      // the remaining output capacity so matching messages are never skipped.
       const result = await this.#bot.listMessages(chatId, {
-        threadId, startTime: startMs, endTime: endMs,
-        pageSize: needle ? Math.min(50, scanCap - scanned) : pageLimit,
-        pageToken: token, order,
+        threadId, startTime: start === null ? null : start * 1000, endTime: end === null ? null : end * 1000,
+        pageSize: Math.min(pageLimit - matched.length, scanCap - scanned),
+        pageToken: token, order, signal,
       });
+      signal?.throwIfAborted();
       for (const item of result.items) {
         scanned += 1;
         const row = map(item);
-        if (!needle || row.text.normalize('NFKC').toLowerCase().includes(needle)) matched.push(row);
-        if (matched.length >= pageLimit) { hitLimit = true; break; }
+        if (!needle || `${row.text} ${row.senderName}`.normalize('NFKC').toLowerCase().includes(needle)) matched.push(row);
       }
       hasMore = result.hasMore;
-      token = result.pageToken;
-      if (!hasMore || !token || scanned >= scanCap || matched.length >= pageLimit) break;
+      if (hasMore && (!result.pageToken || result.pageToken === token)) throw new Error('飞书分页游标缺失或未前进，请重新查询');
+      token = hasMore ? result.pageToken : null;
+      if (!hasMore || scanned >= scanCap || matched.length >= pageLimit) break;
     }
     return {
-      chatId, threadId: threadId || '', query: needle, messages: matched.slice(0, pageLimit),
-      scanned, matched: matched.length, hasMore: hasMore || matched.length > pageLimit,
+      chatId, threadId: threadId || '', query: needle, messages: matched,
+      scanned, matched: matched.length, hasMore,
       pageToken: token || '',
     };
   }
 
   /** Fuzzy lookup in the cached group roster; refreshes only when asked. */
-  async findPeople(chatId, query, { refresh = false } = {}) {
+  async findPeople(chatId, query, { refresh = false, signal } = {}) {
     if (!this.#bot) throw new Error('机器人尚未连接');
     if (!chatId) throw new Error('缺少 chatId');
     const needle = String(query ?? '').normalize('NFKC').toLowerCase().replace(/\s+/g, '');
     if (!needle) throw new Error('查询关键词不能为空');
-    const members = await this.#bot.getChatMembers(chatId, { refresh });
+    signal?.throwIfAborted();
+    const members = await this.#bot.getChatMembers(chatId, { refresh, signal });
+    signal?.throwIfAborted();
     const ranked = [];
     for (const member of members) {
       const name = String(member.name ?? '').normalize('NFKC').toLowerCase().replace(/\s+/g, '');
@@ -501,12 +587,7 @@ export class BotRuntime {
       if (rank >= 0) ranked.push({ rank, name: member.name || member.openId, openId: member.openId });
     }
     ranked.sort((left, right) => left.rank - right.rank || String(left.name).localeCompare(String(right.name)));
-    return { chatId, people: ranked.slice(0, 10).map(({ name, openId }) => ({ name, openId })) };
-  }
-
-  async syncSlashCommands() {
-    if (!this.#bot) throw new Error('机器人尚未连接');
-    return syncSlashCommands(this.#bot, { logger: this.#logger });
+    return { chatId, matched: ranked.length, hasMore: ranked.length > 10, people: ranked.slice(0, 10).map(({ name, openId }) => ({ name, openId })) };
   }
 
   /** Check credentials and the current socket without choosing a chat or sending a message. */
@@ -760,7 +841,7 @@ export class RuntimeManager {
       const runtime = this.#runtimes.get(bot.id);
       bots.push(runtime ? await runtime.status() : {
         id: bot.id, state: 'idle', configured: Boolean(bot.appId), appId: bot.appId,
-        appIdMasked: maskAppId(bot.appId), alias: bot.alias, botName: bot.botName,
+        alias: bot.alias, botName: bot.botName,
       });
     }
     return { bots, presetsReady: typeof this.#presetSource === 'function' };
@@ -782,10 +863,6 @@ export class RuntimeManager {
     }
     // 未绑定任何聊天的会话（子智能体）只转发用量，不渲染卡片。
     for (const runtime of this.#runtimes.values()) runtime.onForeignSessionEvent(session, event);
-  }
-
-  handlesSession(sessionId) {
-    return Boolean(sessionId && this.#runtimeForSession(sessionId));
   }
 
   #runtimeForSession(sessionId) {
@@ -821,10 +898,10 @@ export class RuntimeManager {
     const wanted = typeof bot === 'string' ? bot.trim() : '';
     const list = this.runtimes;
     if (wanted) {
-      const hit = list.find((item) => item.config?.alias === wanted
-        || item.config?.botName === wanted
-        || item.config?.appId === wanted
-        || item.botId === wanted);
+      const exact = list.find((item) => item.config?.appId === wanted || item.botId === wanted);
+      const named = list.filter((item) => item.config?.alias === wanted || item.config?.botName === wanted);
+      if (!exact && named.length > 1) throw new Error(`有多个同名机器人：${wanted}；请使用 feishu_bot_chats 返回的 botId 或应用 ID`);
+      const hit = exact ?? named[0];
       if (!hit) {
         const names = list.map((item) => item.config?.alias ?? item.config?.botName ?? item.botId).join('、');
         throw new Error(`没有这个机器人：${wanted}；当前可选：${names || '（无）'}`);
@@ -847,26 +924,26 @@ export class RuntimeManager {
     return { runtime, target };
   }
 
-  async send({ sessionId, bot, chatId, text, title, color, path, name, signal }) {
+  async send({ sessionId, bot, chatId, text, title, color, path, name, signal, cwd }) {
+    signal?.throwIfAborted();
     const hasText = typeof text === 'string' && text.trim().length > 0;
     const hasFile = typeof path === 'string' && path.trim().length > 0;
     if (hasText === hasFile) throw new Error('text 和 path 必须且只能提供一个');
     if (hasFile && (title || color)) throw new Error('title/color 仅用于文本卡片');
     const resolved = this.#deliveryTarget({ sessionId, bot, chatId });
     if (hasText) {
-      const result = await resolved.runtime.sendCardText(resolved.target, text, title, color);
-      return { kind: 'card', chatId: resolved.target, sentAt: result.sentAt };
+      const result = await resolved.runtime.sendCardText(resolved.target, text, title, color, signal);
+      return { kind: 'card', chatId: resolved.target, ...result };
     }
-    const result = await resolved.runtime.sendFileToChat(resolved.target, path, name, signal);
-    return { ...result, kind: 'file' };
+    return resolved.runtime.sendFileToChat(resolved.target, path, name, signal, cwd);
   }
 
   /** Recall one message the bot itself sent. */
-  async recall({ bot, messageId }) {
+  async recall({ bot, messageId, sessionId, signal }) {
     const id = typeof messageId === 'string' ? messageId.trim() : '';
     if (!id) throw new Error('缺少 messageId');
-    const runtime = this.#runtimeForDelivery({ bot });
-    const ok = await runtime.recallMessage(id);
+    const runtime = this.#runtimeForDelivery({ bot, sessionId });
+    const ok = await runtime.recallMessage(id, signal);
     return { recalled: ok, messageId: id };
   }
 
@@ -875,19 +952,19 @@ export class RuntimeManager {
     return resolved.runtime.listMessages({ chatId: resolved.target, ...options });
   }
 
-  async listChats({ bot, refresh = false } = {}) {
+  async listChats({ bot, refresh = false, signal } = {}) {
     const wanted = typeof bot === 'string' ? bot.trim() : '';
     const runtimes = wanted
       ? [this.#runtimeForDelivery({ bot: wanted })]
       : this.runtimes;
     const rows = [];
-    for (const runtime of runtimes) rows.push(...await runtime.listChats({ refresh: refresh === true }));
+    for (const runtime of runtimes) rows.push(...await runtime.listChats({ refresh: refresh === true, signal }));
     return rows;
   }
 
-  async findPeople({ sessionId, bot, chatId, query, refresh = false }) {
+  async findPeople({ sessionId, bot, chatId, query, refresh = false, signal }) {
     const resolved = this.#deliveryTarget({ sessionId, bot, chatId });
-    return resolved.runtime.findPeople(resolved.target, query, { refresh: refresh === true });
+    return resolved.runtime.findPeople(resolved.target, query, { refresh: refresh === true, signal });
   }
 
   dispose() {

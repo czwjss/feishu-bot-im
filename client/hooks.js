@@ -10,14 +10,15 @@ export function usePolling(task, { interval, enabled = true, immediate = true, s
     [interval, enabled, immediate, scope]);
 }
 
-export function useRpcQuery(connection, method, initialValue = null) {
+export function useRpcQuery(connection, method, initialValue = null, payload = {}) {
   const [data, setData] = React.useState(initialValue);
   const [error, setError] = React.useState(null);
   const [loaded, setLoaded] = React.useState(false);
-  const query = React.useMemo(() => createQuery(() => rpc(connection, method, {}), {
+  const payloadKey = JSON.stringify(payload);
+  const query = React.useMemo(() => createQuery(() => rpc(connection, method, JSON.parse(payloadKey)), {
     onValue(value) { setData(value); setError(null); setLoaded(true); },
     onError(failure) { setError(failure?.message ?? String(failure)); setLoaded(true); },
-  }), [connection, method]);
+  }), [connection, method, payloadKey]);
   React.useEffect(() => {
     query.activate();
     setData(initialValue); setError(null); setLoaded(false);

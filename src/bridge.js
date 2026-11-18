@@ -5,7 +5,7 @@
  * single edited message → final answer. One chat maps to one DSH Session.
  */
 import { TurnRunner } from './turn.js';
-import { CARD_STUCK_MS, cardStreamingOf, chatIdOfKey, scopedValue, textOfContentOrPost } from './message-text.js';
+import { CARD_STUCK_MS, cardStreamingOf, chatIdOfKey, textOfContentOrPost } from './message-text.js';
 import { handoffRequestedIn } from './handoff.js';
 
 /** 挂起卡片的检查间隔：流式卡片通常很快收尾，30 秒查一次足够。 */
@@ -140,6 +140,47 @@ export class FeishuBridge {
   /** Inbound counters surfaced in status.json for operations. */
   stats() {
     return { ...this.#stats };
+  }
+
+  /** Read-only observations; absence of a live turn is not a delivery receipt. */
+  managementState(chatKey) {
+    const sessionId = this.#state.sessionFor(chatKey);
+    return {
+      running: Boolean(sessionId && this.#turnOrigin.has(sessionId)),
+      queuedMessages: this.#batchQueue.get(chatKey)?.length ?? 0,
+      pendingCards: [...this.#pendingCards.values()].filter((item) => item.chatId === chatIdOfKey(chatKey)).length,
+    };
+  }
+
+  /** Change bindings between deliveries, retaining queued messages and DSH work. */
+  changeChatBinding(chatId, expectedSessionId, change) {
+    return this.#inboundQueue.run(chatId, async () => {
+      const key = `chat:${chatId}`;
+      const current = this.#state.sessionFor(key);
+      const assertIdle = () => {
+        if (this.#disposed) throw Object.assign(new Error('连接状态已变化，请刷新后再调整绑定'), { code: 'conflict' });
+        if (current === expectedSessionId && (this.#turnOrigin.has(current)
+          || this.#batchQueue.get(key)?.length
+          || [...this.#feishuPromptOrigins.values()].some((origin) => origin.chatKey === key && origin.sessionId === current))) {
+          throw Object.assign(new Error('当前会话仍在处理或有消息排队，请结束后再调整绑定'), { code: 'busy' });
+        }
+      };
+      assertIdle();
+      const result = await change(assertIdle);
+      if (current !== this.#state.sessionFor(key)) {
+        this.#eavesdrop.reset(key);
+        if (current && !this.#state.keyForSession(current)) {
+          this.#forgetSessionOrigin(current);
+          this.#triggerMessages.delete(current);
+        }
+      }
+      return result;
+    });
+  }
+
+  unbindChat(chatId, expectedSessionId) {
+    return this.changeChatBinding(chatId, expectedSessionId,
+      () => this.#state.unbindSession(`chat:${chatId}`, expectedSessionId));
   }
 
   /** Append one line per inbound event so "did anything arrive" is answerable. */
@@ -444,7 +485,7 @@ export class FeishuBridge {
     if (busy) {
       // 明确开了 steer 且当前是飞书轮次时，仍然按插话处理，不攒批。
       const scopeKey = args.chatType === 'p2p' ? 'direct' : 'group';
-      const wanted = scopedValue(this.#config.busyMode, scopeKey, 'queue') === 'steer' ? 'steer' : 'queue';
+      const wanted = this.#config.busyMode?.[scopeKey] === 'steer' ? 'steer' : 'queue';
       const effective = wanted === 'steer' && this.#turnOrigin.get(sessionId) === 'feishu' ? 'steer' : 'queue';
       if (effective === 'queue') {
         const queue = this.#batchQueue.get(args.chatKey) ?? [];
@@ -545,7 +586,7 @@ export class FeishuBridge {
     const eavesdropBlock = renderEavesdropBlock(eavesdropEntries);
 
     const scopeKey = chatType === 'p2p' ? 'direct' : 'group';
-    const wanted = scopedValue(this.#config.busyMode, scopeKey, 'queue') === 'steer' ? 'steer' : 'queue';
+    const wanted = this.#config.busyMode?.[scopeKey] === 'steer' ? 'steer' : 'queue';
     // 当前轮不是飞书发起的（绑定会话里 Web 正在跑）时，飞书消息只能排队，不能插入。
     const activeOrigin = sessionId ? this.#turnOrigin.get(sessionId) : null;
     const mode = wanted === 'steer' && activeOrigin !== 'feishu' ? 'queue' : wanted;
@@ -613,11 +654,11 @@ export class FeishuBridge {
     }
   }
 
-  /** Cached display name; a failed lookup is remembered briefly. */
-  /** 旧会话第一次见到时补一次标题，之后按 meta 记录跳过。 */
+  /** Keep bot-managed titles in sync; manually bound Sessions keep their own title. */
   async #syncSessionTitle(sessionId, chatId, chatType, openId) {
-    const title = await this.#sessionTitle(chatId, chatType, openId);
     const meta = this.#state.meta?.[sessionId] ?? {};
+    if (meta.preserveTitle) return;
+    const title = await this.#sessionTitle(chatId, chatType, openId);
     if (!title || meta.titleName === title) return;
     await this.#renameSession(sessionId, title);
     await this.#state.setSessionMeta?.(sessionId, { titleName: title });

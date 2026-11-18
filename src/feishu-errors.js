@@ -4,6 +4,7 @@
  * Kept separate from the turn runner so card-delivery code reads as lifecycle
  * instead of HTTP-status plumbing.
  */
+import { setTimeout as delay } from 'node:timers/promises';
 
 export const RATE_LIMIT_CODE = 230020;
 export const RATE_LIMIT_RETRY_MS = Object.freeze([1_000, 2_000]);
@@ -14,7 +15,7 @@ const TRANSIENT_NETWORK_CODES = new Set([
   'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET',
 ]);
 
-export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+export const sleep = (ms, signal) => delay(ms, undefined, { signal });
 
 /** First Feishu/API error code found in the nested Axios response shape. */
 export function feishuErrorCode(error) {

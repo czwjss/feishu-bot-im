@@ -172,7 +172,7 @@
 <text x="1355" y="738" font-size="19" fill="#fff" font-weight="650" text-anchor="middle">3.2</text>
 <text x="1388" y="739" font-size="25" fill="#142c42" font-weight="650" text-anchor="start">会话、规则与消息分开输入</text>
 <text x="1338" y="768" font-size="20" fill="#33465a" font-weight="400" text-anchor="start">动态块 1：名称 / chatId / 私聊或群聊</text>
-<text x="1338" y="796" font-size="20" fill="#33465a" font-weight="400" text-anchor="start">动态块 2：回复规则（设置页自定义）</text>
+<text x="1338" y="796" font-size="20" fill="#33465a" font-weight="400" text-anchor="start">动态块 2：回复规则（主面板自定义）</text>
 <text x="1338" y="824" font-size="20" fill="#33465a" font-weight="400" text-anchor="start">用户消息：本批正文 / ID / 时间 / 背景</text>
 <text x="1338" y="852" font-size="20" fill="#33465a" font-weight="400" text-anchor="start">两块 context 仅注入对应分身 Worker</text>
 <text x="1338" y="880" font-size="20" fill="#33465a" font-weight="400" text-anchor="start">全局 section 保留主动发送能力</text>
@@ -216,12 +216,12 @@
 <text x="1356" y="1756" font-size="23" fill="#142c42" font-weight="600" text-anchor="start">开关与可见性</text>
 <text x="1356" y="1792" font-size="20" fill="#526a80" font-weight="400" text-anchor="start">关闭监听会取消待派发任务，</text>
 <text x="1356" y="1822" font-size="20" fill="#526a80" font-weight="400" text-anchor="start">已被 Host 接收的任务不随开关撤销。</text>
-<text x="1356" y="1852" font-size="20" fill="#526a80" font-weight="400" text-anchor="start">设置页主要显示待处理数、检查时间和错误；</text>
+<text x="1356" y="1852" font-size="20" fill="#526a80" font-weight="400" text-anchor="start">主面板显示 Worker、待处理数与派发时间；</text>
 <text x="1356" y="1882" font-size="20" fill="#526a80" font-weight="400" text-anchor="start">目前不显示每条消息的跳过原因。</text>
 <rect x="64" y="1982" width="1792" height="168" rx="20" fill="#e5f3f2" stroke="#a3cecb" stroke-width="1"/>
 <text x="88" y="2024" font-size="27" fill="#145d63" font-weight="650" text-anchor="start">Worker 的两块动态上下文</text>
 <text x="88" y="2064" font-size="22" fill="#23565e" font-weight="400" text-anchor="start">会话信息标签：feishu_avatar_reply_task_chat；回复规则标签：feishu_avatar_reply_task_rules。</text>
-<text x="88" y="2096" font-size="22" fill="#23565e" font-weight="400" text-anchor="start">标签由程序包裹，规则在设置页编辑；本批正文、消息 ID、时间及背景保持为用户消息快照。</text>
+<text x="88" y="2096" font-size="22" fill="#23565e" font-weight="400" text-anchor="start">标签由程序包裹，规则在主面板编辑；本批正文、消息 ID、时间及背景保持为用户消息快照。</text>
 <text x="88" y="2128" font-size="22" fill="#23565e" font-weight="400" text-anchor="start">派发成功即清队；转人工只作用于当前批次；发送目标由提示词约束，工具仍接受显式目标。</text>
 <text x="64" y="2188" font-size="18" fill="#62768a" font-weight="400" text-anchor="start">源码：monitor.js · monitor-store.js · auto-reply.js · worker-context.js · harness.js · tools.js · auth.js</text>
 </svg>

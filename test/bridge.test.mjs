@@ -168,7 +168,7 @@ function makeBridge(overrides = {}) {
     botOpenId: 'ou_bot',
     workspace: null,
     model: null,
-    busyMode: 'queue',
+    busyMode: { direct: 'queue', group: 'queue' },
     access: { group: 'all', allowOpenIds: [], managers: ['ou_user'] },
     // Tests opt in explicitly; production normalization turns this on by default.
     eavesdrop: { enabled: false, limit: 0 },
@@ -712,7 +712,7 @@ function message(overrides = {}) {
 
 // 13j) 跨来源 steer 强制排队：Web 轮次运行时飞书消息不能插入
 {
-  const { harness, bridge } = makeBridge({ busyMode: 'steer' });
+  const { harness, bridge } = makeBridge({ busyMode: { direct: 'steer', group: 'steer' } });
   await state.bindSession('chat:oc_steer', 'sess-ext');
   await bridge.onSessionEvent({ id: 'sess-ext' }, { type: 'turn/start', data: { turn: 1 } });
   const promptsBefore = harness.prompts.length;
@@ -722,7 +722,7 @@ function message(overrides = {}) {
   assert.equal(harness.prompts.at(-1)?.options?.mode, 'queue', 'buffered batch runs as a queue');
   assert.match(harness.prompts.at(-1).content[0].text, /排队合并/);
 
-  const own = makeBridge({ busyMode: 'steer' });
+  const own = makeBridge({ busyMode: { direct: 'steer', group: 'steer' } });
   await state.bindSession('chat:oc_steer2', 'sess-own');
   await own.bridge.handleMessage(message({ chat_id: 'oc_steer2', content: JSON.stringify({ text: '第一步' }) }));
   await own.bridge.onSessionEvent({ id: 'sess-own' }, { type: 'turn/start', data: { turn: 1 } });
@@ -786,7 +786,7 @@ function message(overrides = {}) {
   const { bot, bridge } = makeBridge();
   await state.bindSession('chat:oc_webturn', 'sess-web-turn');
   await bridge.onSessionEvent({ id: 'sess-web-turn' }, { type: 'turn/start', data: { turn: 1 } });
-  bridge.onAssistantStream({ session: { id: 'sess-web-turn' } }, { chunk: { type: 'text-delta', text: 'Web 流式内容' } });
+  bridge.onAssistantStream({ session: { id: 'sess-web-turn' } }, { type: 'chunk', chunk: { type: 'text-delta', text: 'Web 流式内容' } });
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(bot.cards.length, 0, 'silent Web turn never streams to Feishu');
   let approvalsNext = 0;
@@ -950,7 +950,7 @@ function message(overrides = {}) {
   Date.now = () => base + 11_000;
   try {
     for (let i = 0; i < 8; i += 1) {
-      bridge.onAssistantStream({ session: { id: 'sess-flush' } }, { chunk: { type: 'text-delta', text: `片段${i}` } });
+      bridge.onAssistantStream({ session: { id: 'sess-flush' } }, { type: 'chunk', chunk: { type: 'text-delta', text: `片段${i}` } });
     }
     await new Promise((resolve) => setTimeout(resolve, 120));
   } finally {
@@ -987,7 +987,7 @@ function message(overrides = {}) {
   const base = Date.now();
   Date.now = () => base + 11_000;
   try {
-    bridge.onAssistantStream({ session: { id: 'sess-429' } }, { chunk: { type: 'text-delta', text: '限频后重试' } });
+    bridge.onAssistantStream({ session: { id: 'sess-429' } }, { type: 'chunk', chunk: { type: 'text-delta', text: '限频后重试' } });
     await new Promise((resolve) => setTimeout(resolve, 1_200));
   } finally {
     Date.now = realNow;

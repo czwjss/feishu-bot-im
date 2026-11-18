@@ -7,7 +7,6 @@
 import { JsonStore, definedFields } from '../json-store.js';
 
 export const USER_IDENTITY_VERSION = 1;
-export const USER_IDENTITY_SCOPE_VERSION = 4;
 
 export const CORE_USER_SCOPES = Object.freeze([
   'offline_access',
@@ -27,7 +26,7 @@ export const CHAT_MEDIA_SEARCH_USER_SCOPES = Object.freeze([
   'search:message',
 ]);
 
-/** 只保留文档相关，不包含 Wiki、表格、多维表格。 */
+/** 文档读取和搜索。 */
 export const DOCS_READ_USER_SCOPES = Object.freeze([
   'docx:document:readonly',
   'docs:doc:readonly',
@@ -46,11 +45,23 @@ export const DOCS_WRITE_USER_SCOPES = Object.freeze([
   'docs:permission.member:update',
 ]);
 
+export const CLOUD_SPACE_USER_SCOPES = Object.freeze([
+  'space:document:retrieve',
+  'space:folder:create',
+  'space:document:move',
+  'space:document:delete',
+  'wiki:space:retrieve',
+  'wiki:node:retrieve',
+  'wiki:node:create', // 飞书创建和删除 Wiki 节点所需的权限。
+  'wiki:node:move',
+]);
+
 export const DEFAULT_USER_SCOPE = [
   ...CORE_USER_SCOPES,
   ...CHAT_MEDIA_SEARCH_USER_SCOPES,
   ...DOCS_READ_USER_SCOPES,
   ...DOCS_WRITE_USER_SCOPES,
+  ...CLOUD_SPACE_USER_SCOPES,
 ].join(' ');
 
 export const USER_IDENTITY_FILE = 'user-identity.json';
@@ -71,7 +82,6 @@ export function normalizeIdentityConfig(value) {
   const source = value && typeof value === 'object' ? value : {};
   return Object.freeze({
     version: USER_IDENTITY_VERSION,
-    scopeVersion: USER_IDENTITY_SCOPE_VERSION,
     botId: cleanString(source.botId),
     scope: normalizeUserScope(source.scope),
   });
@@ -83,12 +93,7 @@ export class UserIdentityConfigStore {
   get config() { return this.#store.value; }
 
   async load() {
-    await this.#store.load((raw) => {
-      if (raw && (!Number.isFinite(Number(raw.scopeVersion)) || Number(raw.scopeVersion) < USER_IDENTITY_SCOPE_VERSION)) {
-        return { ...raw, scope: DEFAULT_USER_SCOPE };
-      }
-      return raw;
-    });
+    await this.#store.load();
     return this;
   }
 

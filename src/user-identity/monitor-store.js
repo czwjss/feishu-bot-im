@@ -11,7 +11,7 @@ import { JsonStore, definedFields } from '../json-store.js';
 import { DEFAULT_HANDOFF_KEYWORDS } from '../handoff.js';
 import { normalizeReplyRules } from './worker-context.js';
 
-export const MONITOR_VERSION = 2;
+export const MONITOR_VERSION = 3;
 export const MONITOR_FILE = 'monitor.json';
 export const MONITOR_STATE_FILE = 'monitor-state.json';
 export const MAX_MONITOR_CHATS = 20;
@@ -100,7 +100,7 @@ export function normalizeMonitorConfig(value) {
   const chats = [];
   for (const item of Array.isArray(source.chats) ? source.chats : []) {
     const chat = normalizeMonitorChat(item);
-    if (!chat || seen.has(chat.chatId) || chats.length >= MAX_MONITOR_CHATS) continue;
+    if (!chat || chat.chatMode !== 'group' || seen.has(chat.chatId) || chats.length >= MAX_MONITOR_CHATS) continue;
     seen.add(chat.chatId);
     chats.push(chat);
   }
@@ -112,9 +112,10 @@ export function normalizeMonitorConfig(value) {
     handoffKeywords.push(keyword);
     if (handoffKeywords.length >= MAX_HANDOFF_KEYWORDS) break;
   }
-  // 旧版本持久化的默认 60 秒随本次调整迁移；保留其它自定义间隔。
-  const oldDefault = Number(source.version ?? 1) < 2 && Number(source.pollIntervalMs) === 60_000;
-  const interval = oldDefault ? DEFAULT_POLL_INTERVAL_MS : Number(source.pollIntervalMs);
+  const interval = Number(source.pollIntervalMs);
+  const directId = cleanString(source.directActivation?.id);
+  const directSince = cleanTime(source.directActivation?.sinceMs);
+  const directOwner = cleanString(source.directActivation?.ownerOpenId);
   return Object.freeze({
     version: MONITOR_VERSION,
     enabled: source.enabled === true,
@@ -122,6 +123,8 @@ export function normalizeMonitorConfig(value) {
       ? Math.min(MAX_POLL_INTERVAL_MS, Math.max(MIN_POLL_INTERVAL_MS, Math.trunc(interval)))
       : DEFAULT_POLL_INTERVAL_MS,
     chats: Object.freeze(chats),
+    directActivation: directId && directSince && directOwner
+      ? Object.freeze({ id: directId, sinceMs: directSince, ownerOpenId: directOwner }) : null,
     worker: normalizeWorkerConfig(source.worker),
     replyRules: normalizeReplyRules(source.replyRules),
     handoffKeywords: Object.freeze(handoffProvided ? handoffKeywords : [...DEFAULT_HANDOFF_KEYWORDS]),
@@ -165,7 +168,7 @@ export function normalizePendingCard(value) {
   });
 }
 
-export function normalizeMonitorState(value, configuredChats = []) {
+export function normalizeMonitorState(value) {
   const source = value && typeof value === 'object' ? value : {};
   const sourceChats = source.chats && typeof source.chats === 'object' ? source.chats : {};
   const chats = {};
@@ -197,7 +200,13 @@ export function normalizeMonitorState(value, configuredChats = []) {
     }
     const recentIds = new Set(messages.slice(-MAX_MESSAGES_PER_CHAT).map((message) => message.messageId));
     const scan = entry.scan;
+    const directId = cleanString(entry.direct?.activationId);
+    const directOwner = cleanString(entry.direct?.ownerOpenId);
+    const direct = directId && directOwner && normalizeMonitorChat({
+      chatId, name: entry.direct.name, external: entry.direct.external, chatMode: 'p2p',
+    });
     chats[chatId] = Object.freeze({
+      ...(direct ? { direct: Object.freeze({ ...direct, activationId: directId, ownerOpenId: directOwner }) } : {}),
       cursorTimeMs: cleanTime(entry.cursorTimeMs),
       cursorMessageId: cleanString(entry.cursorMessageId) || null,
       scan: cleanTime(scan?.startTimeMs) && cleanTime(scan?.endTimeMs) && cleanString(scan?.pageToken)
@@ -238,14 +247,6 @@ export function normalizeMonitorState(value, configuredChats = []) {
       chatMode: binding.chatMode === 'p2p' ? 'p2p' : 'group',
     });
   }
-  // 兼容升级前已经创建的 Worker，当前聊天配置会补充最新名称和会话类型。
-  for (const [chatId, entry] of Object.entries(chats)) {
-    if (!entry.sessionId || workerSessions[entry.sessionId]) continue;
-    const chat = configuredChats.find((item) => item.chatId === chatId);
-    workerSessions[entry.sessionId] = Object.freeze({
-      chatId, name: chat?.name || entry.titleName || chatId, chatMode: chat?.chatMode ?? 'group',
-    });
-  }
   return Object.freeze({
     version: MONITOR_VERSION,
     chats: Object.freeze(chats),
@@ -257,12 +258,37 @@ export function normalizeMonitorState(value, configuredChats = []) {
 export class MonitorStore {
   #configStore;
   #stateStore;
+  #directOwner = '';
   constructor({ configPath, statePath }) {
     this.#configStore = new JsonStore(configPath, normalizeMonitorConfig);
-    this.#stateStore = new JsonStore(statePath, (value) => normalizeMonitorState(value, this.config.chats));
+    this.#stateStore = new JsonStore(statePath, normalizeMonitorState);
   }
   get config() { return this.#configStore.value; }
   get state() { return this.#stateStore.value; }
+  get activeDirectActivation() {
+    const activation = this.config.directActivation;
+    return activation?.ownerOpenId === this.#directOwner ? activation : null;
+  }
+
+  setDirectOwner(openId) {
+    this.#directOwner = openId;
+  }
+
+  get monitoredChats() {
+    const { chats } = this.config;
+    const directActivation = this.activeDirectActivation;
+    if (!directActivation) return chats;
+    const groups = new Set(chats.map((chat) => chat.chatId));
+    return [...chats, ...Object.values(this.state.chats).map((entry) => entry.direct)
+      .filter((direct) => direct?.activationId === directActivation.id && !groups.has(direct.chatId))];
+  }
+
+  monitoredChat(chatId) {
+    const group = this.config.chats.find((chat) => chat.chatId === chatId);
+    if (group) return group;
+    const direct = this.state.chats[chatId]?.direct;
+    return direct && direct.activationId === this.activeDirectActivation?.id ? direct : null;
+  }
   async load() {
     await this.#configStore.load();
     await this.#stateStore.load();
@@ -286,10 +312,61 @@ export class MonitorStore {
     });
   }
 
-  /** Merge against the latest state inside the write queue; removed chats stay removed. */
-  updateChat(chatId, update) {
+  /** Register discovered direct chats with a cursor at this activation's start. */
+  recordDirectChats(activation, discovered) {
     return this.saveState((state) => {
-      if (!this.config.chats.some((chat) => chat.chatId === chatId)) return state;
+      if (!this.config.enabled || this.activeDirectActivation?.id !== activation.id) return state;
+      const chats = { ...state.chats };
+      const fresh = new Set();
+      let changed = false;
+      for (const raw of discovered) {
+        if (raw?.chatMode !== 'p2p') continue;
+        const chat = normalizeMonitorChat(raw);
+        if (!chat || this.config.chats.some((group) => group.chatId === chat.chatId)) continue;
+        const stored = chats[chat.chatId];
+        const previous = stored?.direct?.ownerOpenId === activation.ownerOpenId ? stored : {};
+        const direct = { ...chat, name: chat.name || previous.direct?.name || '', activationId: activation.id, ownerOpenId: activation.ownerOpenId };
+        if (previous.direct?.activationId === activation.id) {
+          if (previous.direct.name === direct.name && previous.direct.external === direct.external) continue;
+          chats[chat.chatId] = { ...previous, direct };
+        } else {
+          fresh.add(chat.chatId);
+          chats[chat.chatId] = {
+            ...previous, direct, cursorTimeMs: activation.sinceMs,
+            cursorMessageId: null, scan: null, batch: null, lastPollAt: null, lastError: null,
+          };
+        }
+        changed = true;
+      }
+      return changed ? {
+        ...state, chats,
+        pendingCards: state.pendingCards.filter((card) => !fresh.has(card.chatId)),
+      } : state;
+    });
+  }
+
+  clearDirectBacklog(activationId) {
+    return this.saveState((state) => {
+      const stopped = new Set();
+      const chats = { ...state.chats };
+      for (const [chatId, entry] of Object.entries(chats)) {
+        if (entry.direct?.activationId !== activationId) continue;
+        stopped.add(chatId);
+        chats[chatId] = { ...entry, batch: null, scan: null };
+      }
+      if (!stopped.size) return state;
+      return {
+        ...state, chats,
+        pendingCards: state.pendingCards.filter((card) => !stopped.has(card.chatId)),
+      };
+    });
+  }
+
+  /** Merge against the latest state inside the write queue; removed chats stay removed. */
+  updateChat(chatId, update, activationId) {
+    return this.saveState((state) => {
+      const current = this.monitoredChat(chatId);
+      if (!current || current.activationId !== activationId) return state;
       const entry = state.chats[chatId] ?? {};
       const patch = typeof update === 'function' ? update(entry) : update;
       return { ...state, chats: { ...state.chats, [chatId]: { ...entry, ...patch } } };

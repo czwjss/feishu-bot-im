@@ -91,7 +91,7 @@ export class TurnRunner {
       }
       return;
     }
-    if (frame.type && frame.type !== 'chunk') return;
+    if (frame.type !== 'chunk') return;
     // Chunk frames carry no turn number; one turn is active per Session.
     const turn = this.#activeTurnFor(sessionId);
     if (!turn || turn.silent) return;
@@ -100,8 +100,7 @@ export class TurnRunner {
       turn.streamText = '';
     }
     const chunk = frame?.chunk;
-    // LLM chunks are text-delta; keep the legacy text shape for unit tests.
-    if (!chunk || (chunk.type !== 'text-delta' && chunk.type !== 'text')
+    if (!chunk || chunk.type !== 'text-delta'
       || typeof chunk.text !== 'string' || !chunk.text) return;
     if (!turn.firstTokenAt) turn.firstTokenAt = Date.now();
     turn.streamText = `${turn.streamText ?? ''}${chunk.text}`;
@@ -248,7 +247,7 @@ export class TurnRunner {
       };
       turn.steps.push(step);
       if (callId) turn.openSteps.set(callId, step);
-      await this.#flushTurn(turn, this.#progressText(turn));
+      await this.#flushTurn(turn, buildProgressText());
       return;
     }
     if (event.type === 'tool/result') {
@@ -266,7 +265,7 @@ export class TurnRunner {
           turn.toolMsByStep.set(stepNumber, (turn.toolMsByStep.get(stepNumber) ?? 0) + step.ms);
         }
       }
-      await this.#flushTurn(turn, this.#progressText(turn));
+      await this.#flushTurn(turn, buildProgressText());
       return;
     }
     if (event.type === 'subagent/catalog') {
@@ -351,10 +350,6 @@ export class TurnRunner {
     const parts = Array.isArray(message?.content) ? message.content : [];
     const text = parts.map((part) => (typeof part?.text === 'string' ? part.text : '')).join(' ').trim();
     return text || '工具返回错误';
-  }
-
-  #progressText() {
-    return buildProgressText();
   }
 
   #toolPanel(turn, statusNote, force) {

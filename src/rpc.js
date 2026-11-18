@@ -1,10 +1,12 @@
 /**
- * Management RPC surface for the settings page (multi-bot).
+ * Management RPC surface for the robot-scoped main panel.
  *
  * Carried over DSH's authenticated `/api` connection channel, so the browser
  * keeps its existing login and Host/Origin trust checks.
  */
 import { API, RPC_ENDPOINT } from './contracts.js';
+import { managementSnapshot } from './management.js';
+import { createChatBindings } from './chat-binding.js';
 export { RPC_ENDPOINT };
 export const RPC_PATH = `/api/${RPC_ENDPOINT}`;
 
@@ -17,10 +19,8 @@ function fail(code, message) {
 }
 
 export function createRpcHandler({ manager, harness, version, userIdentity = null, userMonitor = null }) {
-  const runtimeOf = (input) => {
-    const botId = input?.botId ?? manager.runtimes[0]?.botId;
-    return manager.runtimeForBot(botId);
-  };
+  const runtimeOf = (input) => manager.runtimeForBot(input.botId);
+  const chatBindings = createChatBindings({ manager, harness, userMonitor });
 
   const requireUserIdentity = () => {
     if (!userIdentity) throw new Error('用户身份模块没有加载');
@@ -34,9 +34,41 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
 
   return async function handle(method, payload) {
     const input = payload && typeof payload === 'object' ? payload : {};
+    // Robot operations need an explicit target, including delayed autosaves.
+    const scopedAvatar = typeof method === 'string' && (method.startsWith('user.monitor.')
+      || [API.userRefresh, API.userDisconnect, API.userConnectCancel].includes(method));
+    const scopedBot = typeof method === 'string' && method.startsWith('bot.') && method !== API.botAdd;
+    if (scopedAvatar || scopedBot || [API.presetsList, API.userConnectBegin].includes(method)) {
+      if (typeof input.botId !== 'string' || !input.botId.trim() || input.botId !== input.botId.trim()) {
+        return fail('bad-request', '缺少有效的机器人 ID');
+      }
+    }
+    if (scopedAvatar) {
+      const status = await requireUserIdentity().status();
+      if (status.config?.app?.botId !== input.botId) {
+        return fail('conflict', '分身授权不属于当前机器人，请刷新后到对应机器人下管理');
+      }
+    }
     switch (method) {
+      case API.managementSnapshot:
+        if (Object.hasOwn(input, 'botId') && (typeof input.botId !== 'string' || !input.botId.trim())) {
+          return fail('bad-request', '缺少机器人 ID');
+        }
+        return ok(await managementSnapshot({ manager, harness, userMonitor, refresh: input.refresh === true, botId: input.botId }));
       case API.botsList:
         return ok({ ...(await manager.status()), version });
+
+      case API.chatSessions:
+        return ok(await chatBindings.list(input));
+
+      case API.chatBind:
+        return ok(await chatBindings.bind(input));
+
+      case API.chatUnbind:
+        if (![input.botId, input.chatId, input.sessionId].every((id) => typeof id === 'string' && id.trim() && id === id.trim())) {
+          return fail('bad-request', '解绑需要明确的机器人 ID、飞书会话 ID 和绑定 Session ID');
+        }
+        return ok(await manager.runtimeForBot(input.botId).unbindChat({ chatId: input.chatId, sessionId: input.sessionId }));
 
       case API.provisionBegin:
         return ok(await manager.provisionBegin(input ?? {}));
@@ -62,20 +94,8 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
         await manager.reconnectBot(input.botId);
         return ok(await manager.status());
 
-      case 'bot.slash-sync':
-        return ok(await runtimeOf(input).syncSlashCommands());
-
       case API.botCheck:
-      case API.botTest:
         return ok(await runtimeOf(input).checkConnection());
-
-      case API.botAliasSet:
-        await runtimeOf(input).save({ alias: typeof input.alias === 'string' && input.alias.trim() ? input.alias.trim() : null });
-        return ok(await runtimeOf(input).status());
-
-      case API.botColorSet:
-        await runtimeOf(input).save({ color: input.color });
-        return ok(await runtimeOf(input).status());
 
       case API.botWorkspaceSet:
         await runtimeOf(input).saveWorkspace(input.workspace);
@@ -155,10 +175,8 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
         });
       }
 
-      case API.presetsList: {
-        const runtime = input.botId ? runtimeOf(input) : manager.runtimes[0];
-        return ok({ presets: runtime ? await runtime.listPresets() : [] });
-      }
+      case API.presetsList:
+        return ok({ presets: await runtimeOf(input).listPresets() });
 
       case API.workspacesList: {
         const baseline = await harness.workspaceBaseline();
@@ -169,9 +187,6 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
             .map((item) => ({ path: item.path, title: item.title ?? null })),
         });
       }
-
-      case 'version':
-        return ok({ version });
 
       // ── 用户身份（飞书分身）────────────────────────────────────────────
       case API.userStatus:
@@ -191,6 +206,9 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
 
       case API.userMonitorStatus:
         return ok(await requireUserMonitor().status());
+
+      case API.userMonitorDetail:
+        return ok(requireUserMonitor().chatDetail(input.chatId));
 
       case API.userMonitorChats:
         return ok({ chats: await requireUserMonitor().discoverChats() });
@@ -214,8 +232,7 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
       case API.userMonitorWorkerOptions: {
         const baseline = await harness.workspaceBaseline().catch(() => ({}));
         const items = Array.isArray(baseline?.items) ? baseline.items : [];
-        const runtime = manager.runtimes[0] ?? null;
-        const presets = runtime ? await runtime.listPresets().catch(() => []) : [];
+        const presets = await runtimeOf(input).listPresets().catch(() => []);
         const monitor = requireUserMonitor();
         const defaultWorkspaceId = typeof monitor.resolveDefaultWorkspaceId === 'function'
           ? await monitor.resolveDefaultWorkspaceId().catch(() => null)
@@ -239,8 +256,13 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
       case API.userMonitorEnable:
         return ok(await requireUserMonitor().setEnabled(input.enabled === true));
 
+      case API.userMonitorDirectEnable:
+        if (typeof input.enabled !== 'boolean') return fail('bad-request', 'enabled 必须为布尔值');
+        return ok(await requireUserMonitor().setDirectEnabled(input.enabled));
+
       case API.userMonitorFlush:
-        return ok(await requireUserMonitor().flushPending());
+        if (input.chatId !== undefined && (typeof input.chatId !== 'string' || !input.chatId.trim())) return fail('bad-request', '缺少会话 ID');
+        return ok(await requireUserMonitor().flushPending({ chatId: input.chatId }));
 
       case API.userMonitorPoll:
         await requireUserMonitor().pollOnce();

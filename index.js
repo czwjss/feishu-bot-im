@@ -12,7 +12,6 @@ import { HarnessAdapter } from './src/harness.js';
 import { RuntimeManager } from './src/runtime.js';
 import { createRpcHandler, installRpc } from './src/rpc.js';
 import { createChatsTool, createMessagesTool, createPeopleTool, createRecallTool, createSendTool } from './src/tool.js';
-import { rewriteInjectedContextMessages } from './src/injected-context.js';
 import { FEISHU_POLICY } from './src/policy.js';
 import { UserIdentityAuth } from './src/user-identity/auth.js';
 import { UserIdentityConfigStore, USER_IDENTITY_FILE, USER_TOKEN_FILE } from './src/user-identity/config.js';
@@ -90,21 +89,6 @@ export async function apply(ctx, config = {}) {
     dataDir: paths.root,
     openState,
   });
-
-  ctx.effect(() => ctx.on('agent/pre-step', async (request, next) => {
-    // Only legacy messages in sessions bound to this integration need rewriting.
-    if (!manager.handlesSession(request?.agent?.session?.id)) return next();
-    const decision = await next();
-    if (!decision || typeof decision !== 'object' || decision.kind !== 'enter'
-      || !Array.isArray(decision.messages)) return decision;
-    try {
-      const rewritten = rewriteInjectedContextMessages(decision.messages);
-      return rewritten ? { ...decision, messages: rewritten } : decision;
-    } catch (error) {
-      logger.warn?.('[im-feishu] unable to split the injected context block', error?.message ?? error);
-      return decision;
-    }
-  }, { global: true }), 'feishu-bot: injected context split');
 
   ctx.inject(['systemPrompt'], (promptCtx) => {
     promptCtx.systemPrompt.section({
@@ -218,6 +202,6 @@ export async function apply(ctx, config = {}) {
   try {
     await manager.start();
   } catch (error) {
-    logger.error?.('[im-feishu] initial connection failed; the settings page can retry', error);
+    logger.error?.('[im-feishu] initial connection failed; reconnect from the status page', error);
   }
 }

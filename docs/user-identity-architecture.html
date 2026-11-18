@@ -4,14 +4,14 @@
 <body><main>
 <p>FEISHU AVATAR / DOCUMENTATION</p>
 <h1>飞书分身：从授权到自动回复</h1>
-<p>普通会话主动以本人身份读写飞书，自动 Worker 处理监听消息；两者共用授权和三个全局工具。</p>
+<p>普通会话主动以本人身份读写飞书，自动 Worker 处理监听消息。两者共用授权和六个全局分身工具。</p>
 <nav aria-label="文档导航"><a href="user-identity.md">使用与排障</a><a href="user-identity-architecture.md">开发架构</a><a href="user-message-monitor-design.md">监听与派发规则</a><a href="feishu-scopes.md">权限清单</a></nav>
 <section><h2>职责与入口</h2><table><thead><tr><th>模块</th><th>负责什么</th><th>详细说明</th></tr></thead><tbody>
 <tr><td>设置与授权</td><td>应用选择、扫码、凭证维护、监听和规则配置</td><td><a href="user-identity.md">使用指南</a></td></tr>
-<tr><td>全局工具</td><td>本人信息、历史读取、卡片与媒体发送</td><td><a href="user-identity-architecture.md">注册与接口</a></td></tr>
-<tr><td>监听与派发</td><td>读取消息、等待卡片收尾、合批并投递 Worker</td><td><a href="user-message-monitor-design.md">处理规则</a></td></tr>
+<tr><td>全局工具</td><td>群名搜索、历史读取、卡片与媒体发送、云空间和知识库</td><td><a href="tools.md">工具契约</a></td></tr>
+<tr><td>监听与派发</td><td>自动发现私聊、轮询指定群聊、等待卡片收尾、合批并投递 Worker</td><td><a href="user-message-monitor-design.md">处理规则</a></td></tr>
 <tr><td>Worker 上下文</td><td>会话信息与回复规则分别注入；批次正文作为用户消息</td><td><a href="user-message-monitor-design.md#worker-输入">提示词边界</a></td></tr>
 </tbody></table></section>
 <section><h2>消息处理全流程</h2><p>本页直接引用流程 SVG。<a href="feishu-avatar-message-flow.svg">打开原图</a></p><img src="feishu-avatar-message-flow.svg" alt="飞书分身的消息拉取、合批派发和 Worker 发送流程" loading="lazy"></section>
-<footer>文档以当前仓库源码为准。使用说明、架构、消息规则和权限各自维护，旧链接保留为导航入口。</footer></main></body>
+<footer>文档以当前仓库源码为准。使用说明、架构、消息规则和权限各自维护。</footer></main></body>
 </html>

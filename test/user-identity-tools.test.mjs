@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 
 import { NotAuthorizedError } from '../src/user-identity/errors.js';
 import {
+  CHATS_TOOL_NAME,
   MESSAGES_TOOL_NAME,
   ME_TOOL_NAME,
   SEND_TOOL_NAME,
+  createChatsTool,
   createMeTool,
   createMessagesTool,
   createSendTool,
@@ -36,8 +38,8 @@ function fakeFetch(handler) {
 
 {
   const tools = createUserIdentityTools({ auth: fakeAuth(), fetchImpl: async () => ({}) });
-  assert.deepEqual(tools.map((tool) => tool.name), [ME_TOOL_NAME, MESSAGES_TOOL_NAME, SEND_TOOL_NAME]);
-  assert.deepEqual([ME_TOOL_NAME, MESSAGES_TOOL_NAME, SEND_TOOL_NAME], ['feishu_avatar_me', 'feishu_avatar_messages', 'feishu_avatar_send']);
+  assert.deepEqual(tools.map((tool) => tool.name), [ME_TOOL_NAME, CHATS_TOOL_NAME, MESSAGES_TOOL_NAME, SEND_TOOL_NAME, 'feishu_avatar_cloud', 'feishu_avatar_wiki']);
+  assert.deepEqual([ME_TOOL_NAME, CHATS_TOOL_NAME, MESSAGES_TOOL_NAME, SEND_TOOL_NAME], ['feishu_avatar_me', 'feishu_avatar_chats', 'feishu_avatar_messages', 'feishu_avatar_send']);
   for (const tool of tools) {
     assert.equal(tool.parameters.type, 'object');
     assert.equal(typeof tool.execute, 'function');
@@ -59,6 +61,64 @@ function fakeFetch(handler) {
 }
 
 {
+  const query = '超鸟送实物 - [需求同步群]';
+  const auth = fakeAuth();
+  const fetchImpl = fakeFetch((url) => ({
+    code: 0,
+    data: new URL(url).searchParams.has('page_token') ? {
+      items: [], has_more: false, notice: '没有更多结果',
+    } : {
+      items: [
+        { meta_data: { chat_id: 'oc_first', name: query, description: '项目一', chat_status: 'normal' } },
+        { meta_data: { chat_id: 'oc_second', name: query, external: true } },
+        { meta_data: { chat_id: 'invalid-id', name: query } },
+        { invalid: true },
+      ],
+      has_more: true,
+      next_page_token: 'next_cursor',
+    },
+  }));
+  const tool = createChatsTool({ auth, fetchImpl });
+  await assert.rejects(() => tool.execute({ query: ' ' }), /1–64/);
+  await assert.rejects(() => tool.execute({ query: '群'.repeat(65) }), /1–64/);
+  await assert.rejects(() => tool.execute({ query, limit: 101 }), /1–100/);
+  assert.equal(auth.calls, 0, 'invalid search input should not request credentials');
+
+  const firstPage = await tool.execute({ query: ` ${query} ` });
+  assert.deepEqual(firstPage, {
+    items: [
+      { chatId: 'oc_first', name: query, description: '项目一', external: false, chatStatus: 'normal' },
+      { chatId: 'oc_second', name: query, description: '', external: true, chatStatus: '' },
+    ],
+    hasMore: true,
+    pageToken: 'next_cursor',
+  });
+  const { url, init } = fetchImpl.calls[0];
+  assert.equal(new URL(url).pathname, '/open-apis/im/v2/chats/search');
+  assert.equal(new URL(url).searchParams.get('page_size'), '20');
+  assert.equal(init.headers.authorization, 'Bearer token-1');
+  assert.equal(init.method, 'POST');
+  assert.deepEqual(JSON.parse(init.body), {
+    query: JSON.stringify(query),
+    filter: { search_types: ['private', 'external', 'public_joined'], disable_search_by_user: true },
+  });
+  assert.deepEqual(JSON.parse(tool.output.render({}, firstPage)[0].text), firstPage);
+
+  const secondPage = await tool.execute({ query: JSON.stringify(query), pageToken: firstPage.pageToken });
+  assert.deepEqual(secondPage, { items: [], hasMore: false, pageToken: '', notice: '没有更多结果' });
+  assert.equal(new URL(fetchImpl.calls[1].url).searchParams.get('page_token'), 'next_cursor');
+  assert.equal(JSON.parse(fetchImpl.calls[1].init.body).query, JSON.stringify(query), 'query is not double-quoted');
+}
+
+{
+  const auth = fakeAuth();
+  const fetchImpl = fakeFetch(() => ({ code: 0, data: { items: [], has_more: true, page_token: 'repeat' } }));
+  const tool = createChatsTool({ auth, fetchImpl });
+  await assert.rejects(() => tool.execute({ query: '项目', pageToken: 'repeat' }), /分页游标缺失或未前进/);
+  assert.equal(JSON.parse(fetchImpl.calls[0].init.body).query, '项目');
+}
+
+{
   const auth = fakeAuth();
   const fetchImpl = fakeFetch(() => ({
     code: 0,
@@ -70,7 +130,7 @@ function fakeFetch(handler) {
     },
   }));
   const tool = createMessagesTool({ auth, fetchImpl });
-  const value = await tool.execute({ chatId: 'oc_chat', keyword: '0.4.1' }, {});
+  const value = await tool.execute({ chatId: 'oc_chat', query: '0.4.1' }, {});
   assert.equal(value.total, 1);
   assert.equal(value.items[0].senderName, '李四');
   const url = new URL(fetchImpl.calls[0].url);
@@ -177,7 +237,7 @@ function fakeFetch(handler) {
   await assert.rejects(() => send.execute({ email: 'not-an-email', text: 'x' }, {}), /邮箱/);
   await assert.rejects(() => send.execute({ chatId: 'oc_chat', title: 'x'.repeat(101), text: 'x' }, {}), /title/);
   await assert.rejects(() => send.execute({ chatId: 'oc_chat', color: 'green', text: 'x' }, {}), /color/);
-  await assert.rejects(() => send.execute({ chatId: 'oc_chat', text: '' }, {}), /text 不能为空/);
+  await assert.rejects(() => send.execute({ chatId: 'oc_chat', text: '' }, {}), /text 和 path/);
   await assert.rejects(() => send.execute({ chatId: 'oc_chat', text: 'x'.repeat(8_001) }, {}), /过长/);
 }
 
@@ -229,14 +289,16 @@ console.log('im-feishu user identity tool output: 6 assertions passed');
       return {
         ok: true,
         status: 200,
-        json: async () => ({ code: 0, data: { message_id: 'om_reply', chat_id: 'oc_x', create_time: '1794393900323', msg_type: 'interactive' } }),
+        json: async () => ({ code: 0, data: init.method === 'GET'
+          ? { items: [{ message_id: 'om_origin', chat_id: 'oc_chat' }] }
+          : { message_id: 'om_reply', chat_id: 'oc_chat', create_time: '1794393900323', msg_type: 'interactive' } }),
       };
     },
   });
-  const value = await tool.execute({ chatId: 'oc_x', text: '收到', replyToMessageId: 'om_origin' });
+  const value = await tool.execute({ chatId: 'oc_chat', text: '收到', replyToMessageId: 'om_origin' });
   assert.equal(value.messageId, 'om_reply');
-  assert.match(calls[0].url, /\/messages\/om_origin\/reply$/, 'reply uses the reply endpoint');
-  assert.equal(JSON.parse(calls[0].body).msg_type, 'interactive', 'reply stays a card');
+  assert.match(calls[1].url, /\/messages\/om_origin\/reply$/, 'reply uses the reply endpoint after checking its chat');
+  assert.equal(JSON.parse(calls[1].body).msg_type, 'interactive', 'reply stays a card');
   await assert.rejects(() => tool.execute({ chatId: 'oc_x', path: '/tmp/a.txt', replyToMessageId: 'om_1' }), /仅支持文本卡片/);
   await assert.rejects(() => tool.execute({ openId: 'ou_x', text: 'hi', replyToMessageId: 'om_1' }), /需要同时提供 chatId/);
 }

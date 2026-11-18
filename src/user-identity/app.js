@@ -9,13 +9,6 @@ function clean(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : '';
 }
 
-export function maskAppId(appId) {
-  const value = clean(appId);
-  if (!value) return '';
-  if (value.length <= 12) return `${value.slice(0, 4)}****`;
-  return `${value.slice(0, 8)}****${value.slice(-4)}`;
-}
-
 /**
  * @param {{ botConfigStore: { bots: readonly object[] }, credentials: object|null, identityConfig: { botId?: string } }} input
  * @returns {Promise<{ botId: string, botName: string|null, appId: string, appSecret: string, secretRef: string }>}

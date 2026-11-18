@@ -2,7 +2,7 @@
  * 用户身份的设备授权状态机。
  *
  * begin() 拿到验证链接和 user_code 后，Host 在后台按飞书给的 interval 轮询；
- * 设置页只读 status()，不需要自己维持轮询或回调服务。
+ * 主面板只读 status()，不需要自己维持轮询或回调服务。
  */
 import { describeError } from './errors.js';
 import { beginDeviceAuthorization, pollDeviceToken } from './oauth.js';
@@ -41,21 +41,20 @@ export class UserIdentityConnect {
     return this.#state;
   }
 
-  /** 发起设备授权：返回给设置页展示的链接和验证码。 */
+  /** 发起设备授权：返回给主面板展示的链接和验证码。 */
   async begin() {
     this.#stop();
     const generation = this.#generation;
     const controller = new AbortController();
     this.#controller = controller;
-    // 先清空旧状态：解析应用或网络请求失败时，设置页不应继续显示上一次的二维码。
+    // 先清空旧状态：解析应用或网络请求失败时，主面板不应继续显示上一次的二维码。
     this.#state = IDLE;
     const app = await this.#auth.resolveApp();
     controller.signal.throwIfAborted();
-    const config = this.#auth.config;
     const authorization = await beginDeviceAuthorization({
       appId: app.appId,
       appSecret: app.appSecret,
-      scope: config.scope,
+      scope: this.#auth.config.scope,
       fetchImpl: this.#fetchImpl,
       signal: controller.signal,
     });

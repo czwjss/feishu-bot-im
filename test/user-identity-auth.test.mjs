@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { UserIdentityAuth } from '../src/user-identity/auth.js';
-import { UserIdentityConfigStore } from '../src/user-identity/config.js';
+import { DEFAULT_USER_SCOPE, UserIdentityConfigStore } from '../src/user-identity/config.js';
 import { NotAuthorizedError, NotConfiguredError } from '../src/user-identity/errors.js';
 import { TOKEN_V3_URL, USER_INFO_URL } from '../src/user-identity/oauth.js';
 import { UserTokenStore } from '../src/user-identity/token-store.js';
@@ -24,16 +24,16 @@ function botStore(bots) {
 const bots = botStore([{
   id: 'bot_1',
   appId: 'cli_app_1234567890',
-  secretRef: 'IM_FEISHU_APP_SECRET',
+  secretRef: 'IM_FEISHU_SECRET_BOT_1',
   botName: '小金刚',
 }]);
 
 const credentials = {
   async resolve(ref) {
-    return ref === 'IM_FEISHU_APP_SECRET' ? { value: 'secret-1' } : undefined;
+    return ref === 'IM_FEISHU_SECRET_BOT_1' ? { value: 'secret-1' } : undefined;
   },
   async describe(ref) {
-    return { configured: ref === 'IM_FEISHU_APP_SECRET' };
+    return { configured: ref === 'IM_FEISHU_SECRET_BOT_1' };
   },
 };
 
@@ -78,11 +78,11 @@ try {
     assert.equal(status.config.app.available, true);
     assert.equal(status.config.app.botId, 'bot_1');
     assert.equal(status.config.app.botName, '小金刚');
-    assert.match(status.config.app.appIdMasked, /^cli_app_/);
+    assert.equal(status.config.app.appId, 'cli_app_1234567890');
     assert.equal(status.authorization.authorized, false);
     await assert.rejects(() => auth.requireAccessToken(), (error) => error instanceof NotAuthorizedError);
 
-    // Host 设置页在预设创建之后写入 token，工具侧应重新读取磁盘。
+    // Host 主面板在预设创建之后写入 token，工具侧应重新读取磁盘。
     const hostStore = await new UserTokenStore({ path: tokenStore.path }).load();
     await hostStore.save(tokenDoc());
     assert.equal(await auth.requireAccessToken(), 'access-1');
@@ -92,10 +92,29 @@ try {
   {
     const { auth } = await fixture({ token: tokenDoc() });
     assert.equal(await auth.requireAccessToken(), 'access-1');
+    assert.deepEqual(await auth.requireAccessIdentity(), { accessToken: 'access-1', openId: tokenDoc().user.openId });
     const status = await auth.status();
     assert.equal(status.authorization.authorized, true);
     assert.equal(status.authorization.user.name, '陈志文');
     assert.equal(JSON.stringify(status).includes('access-1'), false);
+  }
+
+  {
+    const oldScope = DEFAULT_USER_SCOPE.split(' ').filter((scope) => !scope.startsWith('wiki:')).join(' ');
+    const { auth, configStore, tokenStore } = await fixture({ token: { ...tokenDoc(), scope: oldScope } });
+    await configStore.save({ scope: oldScope });
+    const before = (await auth.status()).authorization;
+    assert.equal(before.authorized, true);
+    assert.equal(before.scopeSatisfied, false);
+    assert.equal(before.messageScopesSatisfied, true);
+    assert.deepEqual(before.missingScopes, ['wiki:space:retrieve', 'wiki:node:retrieve', 'wiki:node:create', 'wiki:node:move']);
+    assert.equal(await auth.requireAccessToken(), 'access-1');
+
+    await tokenStore.save({ scope: DEFAULT_USER_SCOPE });
+    const after = (await auth.status()).authorization;
+    assert.equal(after.scopeSatisfied, true);
+    assert.equal(after.messageScopesSatisfied, true);
+    assert.deepEqual(after.missingScopes, []);
   }
 
   {

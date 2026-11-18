@@ -3,7 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { UserIdentityConfigStore } from '../src/user-identity/config.js';
+import { DEFAULT_USER_SCOPE, UserIdentityConfigStore } from '../src/user-identity/config.js';
+import { UserIdentityConnect } from '../src/user-identity/connect.js';
 import { UserIdentityManager } from '../src/user-identity/manager.js';
 
 const dir = await mkdtemp(join(tmpdir(), 'im-feishu-user-manager-'));
@@ -48,7 +49,38 @@ try {
   assert.equal(configStore.config.botId, 'bot_1');
   assert.match(configStore.config.scope, /im:message.send_as_user/, 'connect fills core IM scopes');
   assert.match(configStore.config.scope, /docx:document:readonly/, 'connect includes doc scopes');
-  assert.doesNotMatch(configStore.config.scope, /wiki:node|sheets:spreadsheet|base:app|calendar:calendar|task:task|approval:/, 'connect does not request excluded scopes');
+  assert.match(configStore.config.scope, /wiki:node:retrieve/, 'connect includes Wiki node read scope');
+  assert.match(configStore.config.scope, /wiki:node:create/, 'connect includes Wiki node creation and deletion scope');
+  assert.match(configStore.config.scope, /wiki:node:move/, 'connect includes Wiki node move scope');
+  assert.doesNotMatch(configStore.config.scope, /wiki:node:write_only|sheets:spreadsheet|base:app|calendar:calendar|task:task|approval:/, 'connect does not request excluded scopes');
+
+  {
+    const requestedScopes = [];
+    const deviceConnect = new UserIdentityConnect({
+      auth: { get config() { return configStore.config; }, async resolveApp() { return bots[0]; } },
+      async fetchImpl(_url, request) {
+        requestedScopes.push(new URLSearchParams(request.body).get('scope'));
+        return {
+          ok: true, status: 200, json: async () => ({
+            device_code: 'dc_example', user_code: 'ABCD',
+            verification_uri_complete: 'https://accounts.feishu.cn/verify?code=ABCD',
+            expires_in: 60, interval: 5,
+          }),
+        };
+      },
+    });
+    const cloudManager = new UserIdentityManager({ configStore, botConfigStore, auth, connect: deviceConnect });
+    try {
+      // An existing installation may have Wiki scopes without the new move scope.
+      await configStore.save({ scope: DEFAULT_USER_SCOPE.split(' ').filter((scope) => scope !== 'wiki:node:move').join(' ') });
+      await cloudManager.connectBegin({ botId: 'bot_1' });
+      await cloudManager.connectBegin({ botId: 'bot_1' });
+      assert.deepEqual(requestedScopes, [DEFAULT_USER_SCOPE, DEFAULT_USER_SCOPE]);
+      assert.equal(configStore.config.scope, DEFAULT_USER_SCOPE);
+    } finally {
+      cloudManager.dispose();
+    }
+  }
 
   {
     let refreshed = 0;

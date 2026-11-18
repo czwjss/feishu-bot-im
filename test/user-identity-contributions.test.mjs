@@ -20,24 +20,30 @@ const ctx = {
   },
 };
 
-// 没有监听时只挂三个工具。
+// 分身工具不依赖监听状态。
 installUserIdentityContributions(ctx, {});
 // 分身只贡献工具，不再单独注册 policy section（规则统一在 Host 的 FEISHU_POLICY）。
 assert.equal(sections.length, 0, 'no extra policy section is registered');
 assert.deepEqual(tools.map((tool) => tool.name), [
   'feishu_avatar_me',
+  'feishu_avatar_chats',
   'feishu_avatar_messages',
   'feishu_avatar_send',
+  'feishu_avatar_cloud',
+  'feishu_avatar_wiki',
 ]);
 
-// 有监听时也只注册同样的三个工具；草稿与决策工具都已删除。
+// 再次注册得到相同的分身工具集合。
 tools.length = 0;
 sections.length = 0;
 installUserIdentityContributions(ctx, {});
 assert.deepEqual(tools.map((tool) => tool.name), [
   'feishu_avatar_me',
+  'feishu_avatar_chats',
   'feishu_avatar_messages',
   'feishu_avatar_send',
+  'feishu_avatar_cloud',
+  'feishu_avatar_wiki',
 ]);
 assert.equal(sections.length, 0, 'no extra prompt section is registered');
 console.log('user identity contributions: 16 assertions passed');

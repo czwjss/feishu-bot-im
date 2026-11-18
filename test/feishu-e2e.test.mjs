@@ -112,7 +112,7 @@ const harness = {
 
 const config = {
   appId: 'cli_test', botOpenId: 'ou_bot', workspace: '/tmp/ws', model: null,
-  busyMode: 'queue',
+  busyMode: { direct: 'queue', group: 'queue' },
   contextEnhancement: { group: { enabled: false, fields: [], guidance: '' }, direct: { enabled: false, fields: [], guidance: '' } },
   access: { group: 'all', allowOpenIds: [] },
 };

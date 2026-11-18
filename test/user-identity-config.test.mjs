@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, stat, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, stat, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,11 +14,14 @@ import { UserTokenStore, EXPIRY_MARGIN_MS } from '../src/user-identity/token-sto
 const dir = await mkdtemp(join(tmpdir(), 'im-feishu-user-config-'));
 try {
   assert.equal(normalizeUserScope(undefined), DEFAULT_USER_SCOPE);
-  assert.equal(DEFAULT_USER_SCOPE.split(' ').length, 23);
+  assert.equal(DEFAULT_USER_SCOPE.split(' ').length, 31);
   assert.match(DEFAULT_USER_SCOPE, /im:resource/);
   assert.doesNotMatch(DEFAULT_USER_SCOPE, /im:resource:upload/);
   assert.match(DEFAULT_USER_SCOPE, /docx:document:readonly/);
-  assert.doesNotMatch(DEFAULT_USER_SCOPE, /wiki:node|sheets:spreadsheet|base:app|calendar:calendar|task:task|approval:/);
+  for (const scope of ['space:document:retrieve', 'space:folder:create', 'space:document:move', 'space:document:delete', 'wiki:space:retrieve', 'wiki:node:retrieve', 'wiki:node:create', 'wiki:node:move']) {
+    assert.ok(DEFAULT_USER_SCOPE.split(' ').includes(scope), `ordinary authorization includes ${scope}`);
+  }
+  assert.doesNotMatch(DEFAULT_USER_SCOPE, /wiki:[^ ]+:write_only|sheets:spreadsheet|base:app|calendar:calendar|task:task|approval:/);
   assert.equal(normalizeUserScope(''), '');
   assert.equal(normalizeUserScope('offline_access  im:message offline_access'), 'offline_access im:message');
 
@@ -63,18 +66,12 @@ try {
 
   const raw = JSON.parse(await readFile(configPath, 'utf8'));
   assert.equal(raw.version, 1);
-  assert.equal(raw.scopeVersion, 4);
+  const beforeReload = await readFile(configPath, 'utf8');
+  const restored = await new UserIdentityConfigStore({ path: configPath }).load();
+  assert.deepEqual(restored.config, configStore.config, 'reload retains the configured scopes and bot');
+  assert.equal(await readFile(configPath, 'utf8'), beforeReload, 'loading does not rewrite configuration');
 
-  const legacyPath = join(dir, 'legacy-identity.json');
-  await writeFile(legacyPath, JSON.stringify({
-    version: 1,
-    botId: 'legacy',
-    scope: 'offline_access im:resource docx:document:readonly',
-  }));
-  const legacy = await new UserIdentityConfigStore({ path: legacyPath }).load();
-  assert.equal(legacy.config.scope, DEFAULT_USER_SCOPE, 'legacy full scope is migrated to the minimal set');
-
-  console.log('im-feishu user identity config: 27 assertions passed');
+  console.log('im-feishu user identity config: assertions passed');
 } finally {
   await rm(dir, { recursive: true, force: true });
 }

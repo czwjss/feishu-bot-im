@@ -60,7 +60,7 @@ function joinPlaceholders(text, { images = 0, file = null } = {}) {
  * One inbound message → the line kept in the eavesdrop buffer. Attachments
  * become placeholders only; the bytes are intentionally not fetched.
  */
-export function describeMessageForEavesdrop(message) {
+export function describeMessageForEavesdrop(message, { maxLength = 2_000 } = {}) {
   const content = messageContentOf(message);
   const type = messageTypeOf(message);
   let text = '';
@@ -87,7 +87,7 @@ export function describeMessageForEavesdrop(message) {
   } else if (type === 'sticker') {
     text = '[表情]';
   } else if (type === 'interactive') {
-    text = interactiveTextOfContent(content) || '[卡片]';
+    text = interactiveTextOfContent(content, { maxLength }) || '[卡片]';
   } else if (type === 'share_chat') {
     text = '[群名片]';
   } else if (type === 'share_user') {

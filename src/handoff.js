@@ -13,9 +13,6 @@ export const DEFAULT_HANDOFF_KEYWORDS = Object.freeze([
   '我要投诉',
 ]);
 
-/** 兼容旧名：默认关键词。 */
-export const HANDOFF_KEYWORDS = DEFAULT_HANDOFF_KEYWORDS;
-
 /**
  * 文本里是否要求人工。
  * @param {unknown} text

@@ -12,6 +12,7 @@ const allowed = new Set([
   '--dsw-alias-border-l2',
   '--dsw-alias-brand-primary',
   '--dsw-alias-button-primary-fill',
+  '--dsw-alias-button-primary-hover',
   '--dsw-alias-label-primary-foreground',
   '--dsw-alias-label-primary',
   '--dsw-alias-label-secondary',

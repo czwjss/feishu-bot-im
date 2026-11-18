@@ -1,16 +1,11 @@
 import assert from 'node:assert/strict';
 
-import { chatIdOfKey, interactiveTextOfContent, scopedValue, textOfContentOrPost } from '../src/message-text.js';
+import { chatIdOfKey, interactiveTextOfContent, textOfContentOrPost } from '../src/message-text.js';
 
 // 1) 绑定键 → 飞书 chat id
 assert.equal(chatIdOfKey('chat:oc_123'), 'oc_123');
 assert.equal(chatIdOfKey(''), null);
 assert.equal(chatIdOfKey(undefined), null);
-
-// 2) 旧的标量/分维度配置都能读
-assert.equal(scopedValue('queue', 'group', 'queue'), 'queue');
-assert.equal(scopedValue({ direct: 'steer', group: 'queue' }, 'direct', 'queue'), 'steer');
-assert.equal(scopedValue(undefined, 'direct', 'queue'), 'queue');
 
 // 3) 文本/富文本提取
 assert.equal(textOfContentOrPost({ message_type: 'text', content: JSON.stringify({ text: '你好' }) }), '你好');
@@ -44,12 +39,6 @@ assert.equal(textOfContentOrPost({ message_type: 'interactive', content: cardCon
 assert.equal(textOfContentOrPost({ message_type: 'interactive', content: JSON.stringify({ schema: '2.0', body: { elements: [{ tag: 'markdown', content: '只有正文' }] } }) }), '只有正文');
 assert.equal(textOfContentOrPost({ message_type: 'interactive', content: '{}' }), null);
 console.log('feishu card inbound: 5 assertions passed');
-
-// 流式卡片收尾判定：正文里带「正在处理」就是还没写完。
-const streaming = (text) => /正在处理|处理中|已收到|正在思考|思考中/.test(text);
-assert.equal(streaming('⏳ 已收到，正在处理…'), true);
-assert.equal(streaming('评审改到下午三点'), false);
-console.log('feishu streaming card settle: 2 assertions passed');
 
 // 卡片流式状态来自 JSON 2.0 的 config.streaming_mode。
 import { cardStreamingOf } from '../src/message-text.js';

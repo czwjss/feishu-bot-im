@@ -79,7 +79,7 @@ export class UserTokenStore {
     return now < doc.refreshTokenExpiresAt;
   }
 
-  /** 设置页状态：不含 token 明文。 */
+  /** 主面板状态：不含 token 明文。 */
   status(now = Date.now()) {
     const doc = this.document;
     return {

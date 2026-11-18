@@ -1,16 +1,40 @@
 /**
  * 用户身份的 token 生命周期。
  *
- * 设置页、全局工具和监听器共用：读 token、按需用 refresh_token
+ * 主面板、全局工具和监听器共用：读 token、按需用 refresh_token
  * 换新 token、原子写回。
  */
-import { getUserInfo } from './api.js';
-import { maskAppId, resolveIdentityApp } from './app.js';
-import { NotAuthorizedError, isRefreshTokenDeadError } from './errors.js';
+import { getUserInfo, requestFeishu } from './api.js';
+import { resolveIdentityApp } from './app.js';
+import { CLOUD_SPACE_USER_SCOPES, DEFAULT_USER_SCOPE } from './config.js';
+import { NotAuthorizedError, isExpiredTokenError, isRefreshTokenDeadError } from './errors.js';
 import { refreshUserAccessToken, tokenDocument } from './oauth.js';
 
 /** 同一进程内不同入口可能同时刷新同一份 token。 */
 const refreshFlights = new Map();
+
+/** 用户身份工具共用：凭证被飞书判定为失效时，刷新并重试一次。 */
+export async function withAccessToken(auth, operation, signal) {
+  signal?.throwIfAborted();
+  const accessToken = await auth.requireAccessToken();
+  signal?.throwIfAborted();
+  try {
+    return await operation(accessToken);
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (!isExpiredTokenError(error)) throw error;
+    const refreshedToken = await auth.requireAccessToken({ force: true });
+    signal?.throwIfAborted();
+    return operation(refreshedToken);
+  }
+}
+
+/** A token refresh retries the rejected request, never the whole operation. */
+export function createUserFeishuRequest({ auth, fetchImpl, signal }) {
+  return (options) => withAccessToken(auth, (accessToken) => requestFeishu({
+    ...options, accessToken, fetchImpl, signal,
+  }), signal);
+}
 
 export class UserIdentityAuth {
   #configStore;
@@ -46,7 +70,7 @@ export class UserIdentityAuth {
     return this.#configStore.config;
   }
 
-  /** 重新读取磁盘上的配置和 token；设置页、工具和监听器共用文件。 */
+  /** 重新读取磁盘上的配置和 token；主面板、工具和监听器共用文件。 */
   async reload() {
     await this.#configStore.load();
     await this.#tokenStore.load();
@@ -66,7 +90,7 @@ export class UserIdentityAuth {
     return Boolean(doc?.appId) && doc.appId === app?.appId;
   }
 
-  /** 设置页状态：不返回任何 token 明文。 */
+  /** 主面板状态：不返回任何 token 明文。 */
   async status() {
     await this.reload();
     const tokens = this.#tokenStore.status(this.#now());
@@ -79,21 +103,24 @@ export class UserIdentityAuth {
         botId: resolved.botId,
         botName: resolved.botName,
         appId: resolved.appId,
-        appIdMasked: maskAppId(resolved.appId),
       };
     } catch (error) {
       appError = error?.message ?? String(error);
-      app = { available: false, botId: this.config.botId || null, appId: '', appIdMasked: '' };
+      app = { available: false, botId: this.config.botId || null, appId: '' };
     }
     const appMismatch = Boolean(tokens.present && tokens.appId && app.appId && tokens.appId !== app.appId);
-    const requiredScopes = String(this.config.scope ?? '').split(/\s+/).filter(Boolean);
+    // Compare against the next authorization request, even if the stored
+    // configuration still contains a scope list from an earlier version.
+    const requiredScopes = DEFAULT_USER_SCOPE.split(' ');
     const grantedScopes = new Set(String(tokens.scope ?? '').split(/\s+/).filter(Boolean));
     const missingScopes = requiredScopes.filter((scope) => !grantedScopes.has(scope));
     const scopeSatisfied = Boolean(tokens.present) && missingScopes.length === 0;
+    const messageScopesSatisfied = Boolean(tokens.present)
+      && missingScopes.every((scope) => CLOUD_SPACE_USER_SCOPES.includes(scope));
     return Object.freeze({
       config: Object.freeze({
         botId: this.config.botId,
-        scope: this.config.scope,
+        scope: DEFAULT_USER_SCOPE,
         app,
         appError,
       }),
@@ -108,13 +135,19 @@ export class UserIdentityAuth {
         accessTokenValid: tokens.accessTokenValid,
         refreshable: tokens.refreshable,
         scopeSatisfied,
+        messageScopesSatisfied,
         missingScopes,
       }),
     });
   }
 
   /** 工具入口：返回可用的 user_access_token。 */
-  async requireAccessToken({ force = false } = {}) {
+  async requireAccessToken(options) {
+    return (await this.requireAccessIdentity(options)).accessToken;
+  }
+
+  /** 同一个凭据快照中的 token 与用户身份，供私聊监听核对账号。 */
+  async requireAccessIdentity({ force = false } = {}) {
     await this.reload();
     const app = await this.resolveApp();
     const doc = this.#tokenStore.document;
@@ -122,9 +155,8 @@ export class UserIdentityAuth {
     if (!this.#appMatches(doc, app)) {
       throw new NotAuthorizedError('用户身份使用的飞书应用已变化，请重新授权');
     }
-    if (!force && this.#tokenStore.accessTokenUsable(this.#now())) return doc.accessToken;
-    const refreshed = await this.refresh();
-    return refreshed.accessToken;
+    const current = !force && this.#tokenStore.accessTokenUsable(this.#now()) ? doc : await this.refresh();
+    return { accessToken: current.accessToken, openId: current.user.openId };
   }
 
   /** 用 refresh_token 刷新；同一路径共享一次进行中的请求。 */

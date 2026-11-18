@@ -6,7 +6,9 @@
  * 收到的消息会自动攒批交给 Worker 会话处理。
  * 回复由 Worker 调用 `feishu_avatar_send`（用户本人身份）发出，监听本身不写飞书。
  */
+import { randomUUID } from 'node:crypto';
 import { CARD_STUCK_MS } from '../message-text.js';
+import { KeyedQueue } from '../queue.js';
 import { chatMemberNames, getMessage, listChats, listMessages } from './api.js';
 import { AutoReplyEngine } from './auto-reply.js';
 import { DEFAULT_REPLY_RULES, normalizeReplyRules } from './worker-context.js';
@@ -43,6 +45,8 @@ export class UserMonitorManager {
   #disposed = false;
   #listMessages;
   #listChats;
+  #directChanges = new KeyedQueue();
+  #directError = null;
   #chatMemberNames;
   #getMessage;
   #defaultWorkspaceId;
@@ -81,6 +85,7 @@ export class UserMonitorManager {
           harness,
           sessionGuard,
           defaultWorkspaceId,
+          authorizeDirect: async () => this.#syncDirectOwner(await this.#auth.status().catch(() => null)),
           logger,
           now,
           setTimeout: setTimeoutImpl,
@@ -134,19 +139,27 @@ export class UserMonitorManager {
   /** 监听状态 + 每会话最近消息（受上限约束）。 */
   async status() {
     const auth = await this.#auth.status().catch(() => null);
+    this.#syncDirectOwner(auth);
     const config = this.#store.config;
     const state = this.#store.state;
-    const chats = config.chats.map((chat) => {
+    const chats = this.#store.monitoredChats.map(({ activationId: _activationId, ownerOpenId: _owner, ...chat }) => {
       const entry = state.chats[chat.chatId] ?? {};
       return {
         ...chat,
         pendingBatch: entry.batch?.messageIds?.length ?? 0,
+        sessionId: entry.sessionId ?? null,
+        batchStartedAt: entry.batch?.firstAt ?? null,
+        lastDispatchAt: entry.lastDispatchAt ?? null,
+        pendingCards: state.pendingCards.filter((card) => card.chatId === chat.chatId).length,
+        ...(this.#autoReply?.status?.(chat.chatId) ?? { dispatching: false, scheduledAt: null }),
         lastPollAt: entry.lastPollAt ?? null,
         lastError: entry.lastError ?? null,
       };
     });
     return {
       enabled: config.enabled,
+      directEnabled: Boolean(this.#store.activeDirectActivation),
+      directError: this.#store.activeDirectActivation ? this.#directError : null,
       pollIntervalMs: config.pollIntervalMs,
       worker: config.worker,
       replyRules: config.replyRules,
@@ -162,7 +175,31 @@ export class UserMonitorManager {
     };
   }
 
-  /** 候选会话：群聊 + 最近私聊。 */
+  /** On-demand local snapshot; reading it never polls Feishu or dispatches a batch. */
+  chatDetail(chatId) {
+    const chat = this.#store.monitoredChat(chatId);
+    if (!chat) throw new Error('监听会话不存在');
+    const state = this.#store.state;
+    const entry = state.chats[chatId] ?? {};
+    const pending = new Set(entry.batch?.messageIds ?? []);
+    return {
+      chatId,
+      sessionId: entry.sessionId ?? null,
+      lastDispatchAt: entry.lastDispatchAt ?? null,
+      messages: (entry.messages ?? []).map((message) => ({
+        ...message,
+        category: chat.replyToBots !== true && message.senderType === 'app' ? 'excluded'
+          : pending.has(message.messageId) ? 'pending' : 'background',
+      })),
+      pendingCards: state.pendingCards.filter((card) => card.chatId === chatId).map((card) => ({
+        messageId: card.messageId, createTime: card.createTime,
+      })),
+      workers: Object.entries(state.workerSessions).filter(([, binding]) => binding.chatId === chatId)
+        .map(([sessionId]) => ({ sessionId, current: sessionId === entry.sessionId })),
+    };
+  }
+
+  /** 手动选择监听的群聊。 */
   async discoverChats() {
     const accessToken = await this.#auth.requireAccessToken();
     const merged = new Map();
@@ -170,12 +207,12 @@ export class UserMonitorManager {
     for (let page = 0; page < MAX_DISCOVER_PAGES; page += 1) {
       const result = await this.#listChats({
         accessToken,
-        types: 'p2p,group',
+        types: 'group',
         pageSize: 100,
         pageToken,
       });
       for (const chat of result.items) {
-        if (merged.has(chat.chatId)) continue;
+        if (chat.chatMode !== 'group' || merged.has(chat.chatId)) continue;
         merged.set(chat.chatId, {
           chatId: chat.chatId,
           name: chat.name || chat.chatId,
@@ -192,15 +229,18 @@ export class UserMonitorManager {
   async addChat(input = {}) {
     const chatId = stringOf(input.chatId).trim();
     if (!/^oc_[A-Za-z0-9_-]{4,}$/.test(chatId)) throw new Error('chatId 需要是 oc_ 开头的会话 ID');
+    if (input.chatMode === 'p2p' || this.#store.state.chats[chatId]?.direct) {
+      throw new Error('私聊请使用「监听所有私聊」开关');
+    }
     const chat = {
       chatId,
       name: stringOf(input.name).trim() || chatId,
-      chatMode: input.chatMode === 'p2p' ? 'p2p' : 'group',
+      chatMode: 'group',
       external: input.external === true,
     };
     await this.#store.saveConfig((config) => {
       if (config.chats.some((item) => item.chatId === chatId)) throw new Error('这个会话已经在监听列表里');
-      if (config.chats.length >= MAX_MONITOR_CHATS) throw new Error(`最多监听 ${MAX_MONITOR_CHATS} 个会话`);
+      if (config.chats.length >= MAX_MONITOR_CHATS) throw new Error(`最多添加 ${MAX_MONITOR_CHATS} 个群聊`);
       return { chats: [...config.chats, chat] };
     });
     // 新增监听从当前时间开始，不回补历史。
@@ -218,6 +258,7 @@ export class UserMonitorManager {
 
   async removeChat(chatId) {
     const id = stringOf(chatId).trim();
+    if (this.#store.state.chats[id]?.direct) throw new Error('私聊请使用「监听所有私聊」开关');
     this.#autoReply?.cancel?.(id);
     await this.#store.saveConfig((config) => ({ chats: config.chats.filter((chat) => chat.chatId !== id) }));
     await this.#store.saveState((state) => {
@@ -263,9 +304,11 @@ export class UserMonitorManager {
   }
 
   /** 手动触发：把各会话积压的待处理批次立刻交给 Worker。 */
-  async flushPending() {
+  async flushPending({ chatId = null } = {}) {
+    if (chatId && !this.#store.monitoredChat(chatId)) throw new Error('监听会话不存在');
     let dispatched = 0;
-    for (const chat of this.#store.config.chats) {
+    for (const chat of this.#store.monitoredChats) {
+      if (chatId && chat.chatId !== chatId) continue;
       if (!this.#autoReply) continue;
       const entry = this.#store.state.chats[chat.chatId] ?? {};
       if ((entry.batch?.messageIds ?? []).length === 0) continue;
@@ -286,25 +329,105 @@ export class UserMonitorManager {
     return this.status();
   }
 
+  async setDirectEnabled(enabled) {
+    return this.#directChanges.run('direct', async () => {
+      const previous = this.#store.config.directActivation;
+      const owner = enabled === true ? this.#syncDirectOwner(await this.#auth.status()) : '';
+      if (enabled === true && !owner) throw new Error('请先完成分身授权再开启私聊监听');
+      if (owner ? previous?.ownerOpenId === owner : !previous) return this.status();
+      const directActivation = owner ? { id: randomUUID(), sinceMs: this.#now(), ownerOpenId: owner } : null;
+      const stopping = previous ? this.#store.monitoredChats.filter((chat) => chat.activationId === previous.id) : [];
+      await this.#store.saveConfig({ directActivation });
+      this.#directError = null;
+      if (previous) {
+        for (const chat of stopping) this.#autoReply?.cancel?.(chat.chatId);
+        await this.#store.clearDirectBacklog(previous.id);
+      }
+      if (directActivation && this.#store.config.enabled) void this.pollOnce();
+      return this.status();
+    });
+  }
+
+  #syncDirectOwner(auth) {
+    const openId = auth?.authorization?.authorized ? auth.authorization.user?.openId ?? '' : '';
+    const previous = this.#store.activeDirectActivation;
+    if (previous && previous.ownerOpenId !== openId) {
+      for (const chat of this.#store.monitoredChats) {
+        if (chat.activationId === previous.id) this.#autoReply?.cancel?.(chat.chatId);
+      }
+      this.#directError = null;
+    }
+    this.#store.setDirectOwner(openId);
+    return openId;
+  }
+
+  #currentChat(chat) {
+    if (this.#disposed || !this.#store.config.enabled) return null;
+    const current = this.#store.monitoredChat(chat.chatId);
+    return current && current.activationId === chat.activationId ? current : null;
+  }
+
+  async #refreshDirectChats(activation, accessToken) {
+    const found = new Map();
+    const tokens = new Set();
+    let pageToken;
+    for (;;) {
+      if (this.#disposed || !this.#store.config.enabled || this.#store.activeDirectActivation?.id !== activation.id) return;
+      const result = await this.#listChats({ accessToken, types: 'p2p', pageSize: 100, pageToken });
+      for (const chat of result.items) {
+        if (chat.chatMode === 'p2p' && !found.has(chat.chatId)) found.set(chat.chatId, chat);
+      }
+      if (!result.hasMore) break;
+      pageToken = result.pageToken;
+      if (!pageToken || tokens.has(pageToken)) throw new Error('飞书私聊目录分页游标未推进');
+      tokens.add(pageToken);
+    }
+    if (!this.#disposed) await this.#store.recordDirectChats(activation, found.values());
+  }
+
   /** 单轮轮询：串行处理会话，避免同一 token 并发打多个请求。 */
   async pollOnce() {
     if (this.#disposed || this.#polling || !this.#store.config.enabled) return;
-    if (this.#store.config.chats.length === 0) return;
+    if (this.#store.config.chats.length === 0 && !this.#store.config.directActivation) return;
     this.#polling = true;
     try {
       let accessToken;
+      let tokenOpenId;
       try {
-        accessToken = await this.#auth.requireAccessToken();
+        if (typeof this.#auth.requireAccessIdentity === 'function') {
+          ({ accessToken, openId: tokenOpenId } = await this.#auth.requireAccessIdentity());
+        } else {
+          accessToken = await this.#auth.requireAccessToken();
+        }
       } catch (error) {
+        this.#syncDirectOwner(null);
         this.#logger?.warn?.('[im-feishu] 消息监听暂停：用户身份未授权', error?.message ?? error);
         return;
       }
       const auth = await this.#auth.status().catch(() => null);
+      this.#syncDirectOwner(auth);
       const selfOpenId = auth?.authorization?.user?.openId ?? '';
       for (const chat of this.#store.config.chats) {
         if (this.#disposed || !this.#store.config.enabled) break;
-        if (!this.#store.config.chats.some((item) => item.chatId === chat.chatId)) continue;
-        await this.#pollChat(chat, accessToken, selfOpenId);
+        const current = this.#currentChat(chat);
+        if (current) await this.#pollChat(current, accessToken, selfOpenId);
+      }
+      const activation = this.#store.activeDirectActivation;
+      if (this.#disposed || !this.#store.config.enabled || !activation) return;
+      if (tokenOpenId !== undefined && tokenOpenId !== activation.ownerOpenId) return;
+      try {
+        await this.#refreshDirectChats(activation, accessToken);
+        if (this.#store.activeDirectActivation?.id === activation.id) this.#directError = null;
+      } catch (error) {
+        if (this.#store.activeDirectActivation?.id === activation.id) {
+          this.#directError = error?.message ?? String(error);
+          this.#logger?.warn?.('[im-feishu] 私聊发现失败', this.#directError);
+        }
+      }
+      for (const chat of this.#store.monitoredChats) {
+        if (chat.activationId !== activation.id) continue;
+        const current = this.#currentChat(chat);
+        if (current) await this.#pollChat(current, accessToken, selfOpenId);
       }
     } finally {
       this.#polling = false;
@@ -314,6 +437,7 @@ export class UserMonitorManager {
   /** 更新单个会话的触发规则。 */
   async setChat(chatId, patch = {}) {
     const id = stringOf(chatId).trim();
+    if (this.#store.state.chats[id]?.direct) throw new Error('私聊使用统一监听规则');
     await this.#store.saveConfig((config) => {
       if (!config.chats.some((chat) => chat.chatId === id)) throw new Error('这个会话不在监听列表里');
       const chats = config.chats.map((chat) => {
@@ -331,30 +455,27 @@ export class UserMonitorManager {
   }
 
   /** 把流式卡片挂到待收尾列表（不进入消息列表）。 */
-  async #trackPendingCard(chatId, item, time, context) {
+  async #trackPendingCard(chat, item, time, context) {
     await this.#store.saveState((state) => {
-      if (!this.#store.config.chats.some((chat) => chat.chatId === chatId)) return state;
+      if (!this.#currentChat(chat)) return state;
       const pending = state.pendingCards.filter((card) => card.messageId !== item.messageId);
       if (pending.length >= MAX_PENDING_CARDS) throw new Error('等待收尾的卡片已满，将在下轮继续读取');
       return { ...state, pendingCards: [
         ...pending,
-        { messageId: item.messageId, chatId, createTime: item.createTime ?? new Date(time).toISOString(), lastText: item.text ?? '', ...context },
+        { messageId: item.messageId, chatId: chat.chatId, createTime: item.createTime ?? new Date(time).toISOString(), lastText: item.text ?? '', ...context },
       ] };
     });
   }
 
   /** 检查待收尾卡片：收尾了就补进消息列表，超时就彻底丢掉。 */
   async #settlePendingCards(chat, accessToken, selfOpenId) {
-    const pending = this.#store.state.pendingCards ?? [];
+    const pending = this.#store.state.pendingCards.filter((card) => card.chatId === chat.chatId);
     if (pending.length === 0) return 0;
     let changed = false;
     const kept = [];
     const revived = [];
     for (const card of pending) {
-      if (card.chatId !== chat.chatId) {
-        kept.push(card);
-        continue;
-      }
+      if (!this.#currentChat(chat)) return 0;
       // 平台会在 10 分钟后自动关闭流式模式；超过仍没收尾就当作异常中断。
       const age = this.#now() - (Date.parse(card.createTime) || this.#now());
       if (age > CARD_STUCK_MS) {
@@ -375,21 +496,23 @@ export class UserMonitorManager {
     }
     // Keep pending cards retryable if persisting their settled bodies fails.
     if (revived.length > 0 && await this.#reviveCards(chat, revived, accessToken, selfOpenId) === false) return 0;
-    if (changed) await this.#store.saveState((state) => ({
-      ...state,
-      pendingCards: kept.filter((card) => this.#store.config.chats.some((item) => item.chatId === card.chatId)),
-    }));
+    if (changed) await this.#store.saveState((state) => {
+      if (!this.#currentChat(chat)) return state;
+      const ids = new Set(pending.map((card) => card.messageId));
+      return { ...state, pendingCards: [...state.pendingCards.filter((card) => !ids.has(card.messageId)), ...kept] };
+    });
     return revived.length;
   }
 
   /** 收尾的卡片补进消息列表，并按需交给自动回复。 */
   async #reviveCards(chat, revived, accessToken, selfOpenId) {
-    chat = this.#store.config.chats.find((item) => item.chatId === chat.chatId);
+    chat = this.#currentChat(chat);
     if (!chat) return false;
     const entry = this.#store.state.chats[chat.chatId] ?? {};
     const messages = [...(entry.messages ?? [])];
     const fresh = [];
     const names = await this.#namesFor(chat.chatId, accessToken);
+    if (!this.#currentChat(chat)) return false;
     for (const { card, message } of revived) {
       if (message.deleted || message.msgType === 'system') continue;
       if (messages.some((item) => item.messageId === card.messageId)) continue;
@@ -410,14 +533,14 @@ export class UserMonitorManager {
     if (fresh.length > 0 && this.#autoReply) {
       return this.#autoReply.enqueue(chat, fresh, { messages });
     } else {
-      await this.#patchChat(chat.chatId, { messages });
+      await this.#patchChat(chat, { messages });
       return true;
     }
   }
 
   /** 只更新某个会话的状态字段。 */
-  async #patchChat(chatId, patch) {
-    await this.#store.updateChat(chatId, patch);
+  async #patchChat(chat, patch) {
+    if (this.#currentChat(chat)) await this.#store.updateChat(chat.chatId, patch, chat.activationId);
   }
 
   /** 父消息发送者（用于判断“回复我”），带缓存。 */
@@ -476,10 +599,11 @@ export class UserMonitorManager {
   async #pollChat(chat, accessToken, selfOpenId) {
     try {
       await this.#settlePendingCards(chat, accessToken, selfOpenId);
+      if (!this.#currentChat(chat)) return;
       const current = this.#store.state.chats[chat.chatId] ?? {};
       const messages = current.messages ?? [];
       if (!Number.isFinite(current.cursorTimeMs)) {
-        await this.#patchChat(chat.chatId, {
+        await this.#patchChat(chat, {
           cursorTimeMs: this.#now(),
           cursorMessageId: null,
           messages,
@@ -489,18 +613,21 @@ export class UserMonitorManager {
         return;
       }
 
+      const directSince = chat.activationId ? this.#store.activeDirectActivation.sinceMs : 0;
       const scan = current.scan ?? {
-        startTimeMs: Math.min(current.cursorTimeMs - 1_000, this.#now() - REFRESH_LOOKBACK_MS),
+        startTimeMs: Math.max(directSince, Math.min(current.cursorTimeMs - 1_000, this.#now() - REFRESH_LOOKBACK_MS)),
         endTimeMs: this.#now(),
         pageToken: null,
       };
       let pageToken = scan.pageToken;
       const items = [];
+      if (scan.startTimeMs >= scan.endTimeMs) return;
       for (let page = 0; page < MAX_PAGES_PER_POLL; page++) {
         const result = await this.#listMessages({
           accessToken, chatId: chat.chatId, startTime: scan.startTimeMs, endTime: scan.endTimeMs,
           pageSize: 50, sort: 'asc', pageToken,
         });
+        if (!this.#currentChat(chat)) return;
         items.push(...result.items);
         if (!result.hasMore) { pageToken = null; break; }
         if (!result.pageToken || result.pageToken === pageToken) throw new Error('飞书消息分页游标未推进');
@@ -520,7 +647,7 @@ export class UserMonitorManager {
       for (const item of items) {
         if (!item.messageId) continue;
         const time = messageTime(item);
-        if (time === null) continue;
+        if (time === null || time < directSince) continue;
         if (time >= cursorTimeMs) {
           cursorTimeMs = time;
           cursorMessageId = item.messageId;
@@ -543,7 +670,7 @@ export class UserMonitorManager {
         const contextOnly = isSelf || !(await this.#accepts(chat, item, accessToken, selfOpenId));
         // 流式卡片：先不进入消息列表，等收尾后再补进来。
         if (item.msgType === 'interactive' && item.streaming === true) {
-          await this.#trackPendingCard(chat.chatId, item, time, { isSelf, contextOnly });
+          await this.#trackPendingCard(chat, item, time, { isSelf, contextOnly });
           seen.add(item.messageId);
           continue;
         }
@@ -589,11 +716,11 @@ export class UserMonitorManager {
           .map(({ item }) => item.messageId);
         await this.#autoReply.enqueue(chat, freshIds, patch);
       } else {
-        await this.#patchChat(chat.chatId, patch);
+        await this.#patchChat(chat, patch);
       }
     } catch (error) {
       this.#logger?.warn?.('[im-feishu] 消息监听轮询失败', chat.chatId, error?.message ?? error);
-      await this.#patchChat(chat.chatId, {
+      await this.#patchChat(chat, {
         lastPollAt: this.#now(),
         lastError: error?.message ?? String(error),
       }).catch(() => undefined);

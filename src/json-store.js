@@ -43,13 +43,10 @@ export class JsonStore {
 
   get value() { return this.#value; }
 
-  load(migrate = (value) => value) {
+  load() {
     return this.#writes.run('document', async () => {
       try {
-        const raw = await readJson(this.#path);
-        const migrated = migrate(raw);
-        const next = this.#normalize(migrated);
-        if (migrated !== raw) await writePrivateJson(this.#path, next);
+        const next = this.#normalize(await readJson(this.#path));
         this.#value = next;
         this.#loadError = null;
         return next;

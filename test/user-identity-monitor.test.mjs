@@ -28,10 +28,10 @@ const config = normalizeMonitorConfig({
 });
 assert.equal(config.chats.length, 1);
 assert.equal(config.pollIntervalMs, 5_000);
-assert.equal(config.chats[0].chatMode, 'p2p');
+assert.equal(config.chats[0].chatMode, 'group');
+assert.equal(config.directActivation, null, '旧版手选私聊不会开启全量监听');
 assert.equal(normalizeMonitorConfig({}).pollIntervalMs, 30_000, 'new default polls every thirty seconds');
-assert.equal(normalizeMonitorConfig({ version: 1, pollIntervalMs: 60_000 }).pollIntervalMs, 30_000, 'old persisted default migrates');
-assert.equal(normalizeMonitorConfig({ version: 1, pollIntervalMs: 15_000 }).pollIntervalMs, 15_000, 'custom interval is preserved');
+assert.equal(normalizeMonitorConfig({ pollIntervalMs: 15_000 }).pollIntervalMs, 15_000, 'custom interval is preserved');
 assert.equal(normalizeMonitorConfig({ version: 2, pollIntervalMs: 60_000 }).pollIntervalMs, 60_000, 'explicit new configuration stays configurable');
 
 // 2) 状态规范化：消息有条数上限，seen 截断。
@@ -81,7 +81,7 @@ try {
     statePath: join(dir, 'monitor-state.json'),
   });
   await store.load();
-  await store.saveConfig({ enabled: true, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p' }] });
+  await store.saveConfig({ enabled: true, chats: [{ chatId, name: '测试群聊', chatMode: 'group', mode: 'all' }] });
   await store.saveState({ chats: { [chatId]: { cursorTimeMs: now - 60_000, seen: [], messages: [] } } });
 
   const messages = [
@@ -197,7 +197,7 @@ try {
       statePath: join(dir4, 'monitor-state.json'),
     });
     await store4.load();
-    await store4.saveConfig({ enabled: true, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p' }] });
+    await store4.saveConfig({ enabled: true, chats: [{ chatId, name: '测试群聊', chatMode: 'group', mode: 'all' }] });
     await store4.saveState({ chats: { [chatId]: { cursorTimeMs: now - 60_000, seen: [], messages: [] } } });
 
     let text = '⏳ 已收到，正在处理…';
@@ -251,7 +251,7 @@ try {
       statePath: join(dir5, 'monitor-state.json'),
     });
     await store5.load();
-    await store5.saveConfig({ enabled: true, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p' }] });
+    await store5.saveConfig({ enabled: true, chats: [{ chatId, name: '测试群聊', chatMode: 'group', mode: 'all' }] });
     await store5.saveState({
       chats: {
         [chatId]: {
@@ -294,7 +294,7 @@ console.log('user identity monitor: 27 assertions passed');
       statePath: join(dir, 'monitor-state.json'),
     });
     await store.load();
-    await store.saveConfig({ enabled: true, chats: [{ chatId, name: '测试私聊', chatMode: 'p2p', mode: 'all' }] });
+    await store.saveConfig({ enabled: true, chats: [{ chatId, name: '测试群聊', chatMode: 'group', mode: 'all' }] });
 
     let streaming = true;
     const monitor = new UserMonitorManager({

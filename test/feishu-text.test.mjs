@@ -67,7 +67,7 @@ await bot.getChatMembers('oc_group', { refresh: true });
 assert.equal(memberCalls, 4, 'refresh bypasses the cache');
 
 const groups = await bot.getChats();
-assert.deepEqual(groups, [{ chatId: 'oc_group', name: '研发群' }]);
+assert.deepEqual(groups, [{ chatId: 'oc_group', name: '研发群', chatType: 'group' }]);
 await bot.getChats();
 assert.equal(chatCalls, 1, 'group list is cached');
 await bot.getChats({ refresh: true });
@@ -92,6 +92,7 @@ assert.equal(historyRequest.start_time, String(Math.floor(start / 1000)));
 assert.equal(historyRequest.end_time, String(Math.floor(end / 1000)));
 assert.equal(historyRequest.sort_type, 'ByCreateTimeAsc');
 assert.equal(historyRequest.with_sender_name, true);
+assert.equal(historyRequest.card_msg_content_type, 'user_card_content');
 assert.equal(historyRequest.page_token, 'pt');
 assert.equal(history.items[0].message_id, 'om_history');
 assert.equal(history.hasMore, true);

@@ -11,6 +11,7 @@ const result = await build({
   format: 'cjs',
   platform: 'browser',
   target: ['es2022'],
+  loader: { '.svg': 'dataurl' },
   external: ['react'],
   legalComments: 'none',
   logLevel: 'silent',

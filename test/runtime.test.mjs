@@ -21,6 +21,7 @@ const calls = [];
 const verificationCalls = [];
 const connectionStates = new Map();
 let verificationError = null;
+let directoryUnavailable = false;
 class FakeBot {
   constructor(options) { this.options = options; }
   async startLongConnection(handlers) { handlers.onState('connected'); return 'connected'; }
@@ -30,10 +31,11 @@ class FakeBot {
   async sendCard(chatId, card) { calls.push({ kind: 'card', chatId, card }); return 'mid'; }
   async uploadFile(bytes, name) { calls.push({ kind: 'file', name }); return 'fk'; }
   async uploadImage() { calls.push({ kind: 'image' }); return 'ik'; }
-  async sendFile(chatId, key, name) { calls.push({ kind: 'file-msg', chatId, name }); }
-  async sendImage(chatId) { calls.push({ kind: 'image-msg', chatId }); }
+  async sendFile(chatId, key, name) { calls.push({ kind: 'file-msg', chatId, name }); return 'om_file'; }
+  async sendImage(chatId) { calls.push({ kind: 'image-msg', chatId }); return 'om_image'; }
   async getChatName(chatId) { return `群-${chatId}`; }
   async getChats() {
+    if (directoryUnavailable) throw new Error('directory unavailable');
     if (String(this.options?.appId).includes('bbbb')) return [{ chatId: 'oc_2', name: '群-oc_2' }];
     return [
       { chatId: 'oc_1', name: '群-oc_1' },
@@ -116,9 +118,6 @@ const s1 = states.get(first.id);
 const s2 = states.get(second.id);
 await s1.bindSession('chat:oc_1', 'sess-1');
 await s2.bindSession('chat:oc_2', 'sess-2');
-assert.equal(manager.handlesSession('sess-1'), true);
-assert.equal(manager.handlesSession('unrelated-session'), false);
-assert.equal(manager.handlesSession(undefined), false);
 assert.equal(r1.handlesSession('sess-1'), true);
 assert.equal(r1.handlesSession('sess-2'), false);
 assert.equal(r2.handlesSession('sess-2'), true);
@@ -205,6 +204,29 @@ assert.equal(calls.at(-1).kind, 'file-msg');
   const onlySecond = await manager.listChats({ bot: '二号机' });
   assert.deepEqual(onlySecond.map((chat) => chat.chatId), ['oc_2']);
   await assert.rejects(() => manager.listChats({ bot: '不存在' }), /没有这个机器人/);
+}
+
+// Management views are read-only and keep known bindings when discovery fails.
+{
+  await s1.setChatType('chat:oc_1', 'p2p');
+  await s1.setOverride('chat:oc_1', { workspace: '/tmp/chat-override' });
+  const before = JSON.stringify(s1.value);
+  const callsBefore = calls.length;
+  const snapshot = await r1.managementSnapshot();
+  const chat = snapshot.chats.find((item) => item.chatId === 'oc_1');
+  assert.equal(chat.botId, first.id);
+  assert.equal(chat.chatType, 'p2p');
+  assert.equal(chat.nextSession.workspace, '/tmp/chat-override');
+  assert.ok(chat.nextSession.overrides.includes('workspace'));
+  assert.equal(snapshot.chats.find((item) => item.chatId === 'oc_unbound').sessionId, null);
+  directoryUnavailable = true;
+  try {
+    const partial = await r1.managementSnapshot();
+    assert.equal(partial.directoryError, 'directory unavailable');
+    assert.ok(partial.chats.some((item) => item.chatId === 'oc_1'));
+  } finally { directoryUnavailable = false; }
+  assert.equal(JSON.stringify(s1.value), before);
+  assert.equal(calls.length, callsBefore, 'snapshot does not send or fetch chat history');
 }
 
 // 9d) 人物模糊查询：志文 → 陈志文，并刷新群缓存

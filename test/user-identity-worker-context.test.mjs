@@ -28,12 +28,21 @@ function contexts(store) {
   };
 }
 
-async function fixture(t) {
+async function fixture(t, { direct = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'feishu-worker-context-'));
   const options = { configPath: join(root, 'config.json'), statePath: join(root, 'state.json') };
   const store = await new MonitorStore(options).load();
-  const chat = { chatId: 'oc_context', name: '测试聊天', chatMode: 'p2p', replyToBots: true };
-  await store.saveConfig({ enabled: true, chats: [chat] });
+  const openId = 'ou_context';
+  const entry = { chatId: 'oc_context', name: '测试聊天', chatMode: direct ? 'p2p' : 'group', replyToBots: true };
+  if (direct) {
+    const activation = { id: 'direct-context', sinceMs: Date.now(), ownerOpenId: openId };
+    await store.saveConfig({ enabled: true, directActivation: activation });
+    store.setDirectOwner(openId);
+    await store.recordDirectChats(activation, [entry]);
+  } else {
+    await store.saveConfig({ enabled: true, chats: [entry] });
+  }
+  const chat = store.monitoredChat(entry.chatId);
   const ctx = contexts(store);
   let sessionCount = 0;
   const prompts = [];
@@ -48,7 +57,8 @@ async function fixture(t) {
     },
     setTimeout: () => ({ unref() {} }), clearTimeout() {},
   });
-  const monitor = new UserMonitorManager({ store, autoReply: engine, auth: { status: async () => ({}) } });
+  const auth = { status: async () => ({ authorization: { authorized: true, user: { openId } } }) };
+  const monitor = new UserMonitorManager({ store, autoReply: engine, auth });
   const enqueue = async (id, text = '你好') => engine.enqueue(chat, [id], {
     messages: [...(store.state.chats[chat.chatId]?.messages ?? []), {
       messageId: id, senderType: 'user', createTime: new Date().toISOString(), text,
@@ -68,7 +78,7 @@ test('only owned worker sessions receive the two dynamic contexts, including aft
   await f.enqueue('om_first');
   await f.engine.flush(f.chat);
   assert.deepEqual(f.store.state.chats[f.chat.chatId].batch.messageIds, []);
-  assert.match(f.ctx.chat('session-1'), /^<feishu_avatar_reply_task_chat>\n[\s\S]*测试聊天[\s\S]*oc_context[\s\S]*私聊\n<\/feishu_avatar_reply_task_chat>$/);
+  assert.match(f.ctx.chat('session-1'), /^<feishu_avatar_reply_task_chat>\n[\s\S]*测试聊天[\s\S]*oc_context[\s\S]*群聊\n<\/feishu_avatar_reply_task_chat>$/);
   assert.equal(f.ctx.rules('session-1'), `<feishu_avatar_reply_task_rules>\n${DEFAULT_REPLY_RULES}\n</feishu_avatar_reply_task_rules>`);
   assert.match(f.prompts[0].text, /om_first[\s\S]*你好/);
   assert.doesNotMatch(f.prompts[0].text, /oc_context|测试聊天|要求：|feishu_avatar_send/);
@@ -112,20 +122,31 @@ test('accepted tasks keep their chat binding across worker replacement, removal 
   assert.equal(f.store.state.chats[f.chat.chatId], undefined);
   const reloaded = contexts(await new MonitorStore(f.options).load());
   for (const id of ['session-1', 'session-2']) {
-    assert.match(reloaded.chat(id), /测试聊天[\s\S]*私聊/);
+    assert.match(reloaded.chat(id), /测试聊天[\s\S]*群聊/);
     assert.ok(reloaded.rules(id).includes(DEFAULT_REPLY_RULES));
   }
 });
 
-test('existing workers receive context after upgrade and chat names stay literal', async (t) => {
+test('worker bindings preserve literal chat names and chat type after removal', async (t) => {
   const f = await fixture(t);
-  await f.store.saveState({ chats: { [f.chat.chatId]: { sessionId: 'legacy-worker' } } });
+  await f.enqueue('om_literal');
+  await f.engine.flush(f.chat);
   await f.store.saveConfig({ chats: [{ ...f.chat, name: '名字\n{{unresolved_variable}}' }] });
-  const value = f.ctx.chat('legacy-worker');
+  const value = f.ctx.chat('session-1');
   assert.match(value, /名字\\n\{\{unresolved_variable\}\}/);
-  assert.match(value, /私聊/);
-  assert.ok(f.ctx.rules('legacy-worker').includes(DEFAULT_REPLY_RULES));
+  assert.match(value, /群聊/);
+  assert.ok(f.ctx.rules('session-1').includes(DEFAULT_REPLY_RULES));
   await f.monitor.removeChat(f.chat.chatId);
   const reloaded = contexts(await new MonitorStore(f.options).load());
-  assert.match(reloaded.chat('legacy-worker'), /私聊/, 'migrated workers retain their chat type after removal');
+  assert.match(reloaded.chat('session-1'), /群聊/, 'accepted workers retain their chat type after removal');
+});
+
+test('accepted private Worker retains its chat context after disabling automatic discovery', async (t) => {
+  const f = await fixture(t, { direct: true });
+  await f.enqueue('om_direct');
+  assert.equal(await f.engine.flush(f.chat), f.chat.chatId);
+  await f.monitor.setDirectEnabled(false);
+  assert.equal(f.store.monitoredChat(f.chat.chatId), null);
+  const reloaded = contexts(await new MonitorStore(f.options).load());
+  assert.match(reloaded.chat('session-1'), /测试聊天[\s\S]*私聊/);
 });
