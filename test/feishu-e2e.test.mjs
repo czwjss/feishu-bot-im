@@ -81,8 +81,7 @@ function assertCard(card, label) {
   assert.ok(card && typeof card === 'object', `${label}: card must be an object`);
   assert.equal(card.schema, '2.0', `${label}: schema must be 2.0`);
   assert.ok(Array.isArray(card.body?.elements), `${label}: body.elements required`);
-  // 白名单：schema 2.0 不接受 1.0 的 config.update_multi 之类字段
-  const allowedTop = new Set(['schema', 'header', 'body']);
+  const allowedTop = new Set(['schema', 'config', 'header', 'body']);
   for (const key of Object.keys(card)) {
     assert.ok(allowedTop.has(key), `${label}: unexpected top-level card field "${key}"`);
   }
@@ -157,11 +156,17 @@ function inbound(text, extra = {}) {
   });
   await bridge.onSessionEvent({ id: 'sess-1' }, { type: 'subagent/catalog', data: { turn: 1, childId: 'child-1', label: '调查' } });
   await bridge.onForeignSessionEvent({ id: 'child-1' }, { type: 'assistant/message', data: { usage: { inputTokens: 2048, outputTokens: 64, cacheReadTokens: 1024 } } });
+  const answer = [
+    '**加粗**答案',
+    '汉'.repeat(40),
+    'a'.repeat(80),
+    `[查看结果](https://example.test/${'a'.repeat(200)})`,
+  ].join('\n');
   await bridge.onSessionEvent({ id: 'sess-1' }, {
     type: 'assistant/message',
     data: {
       turn: 1, step: 1, usage: { inputTokens: 9700, outputTokens: 128, cacheReadTokens: 896, totalTokens: 10724 },
-      message: { content: [{ type: 'text', text: '**加粗**答案' }] },
+      message: { content: [{ type: 'text', text: answer }] },
     },
   });
   await bridge.onSessionEvent({ id: 'sess-1' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
@@ -169,6 +174,7 @@ function inbound(text, extra = {}) {
   const patches = client.calls.filter((c) => c.api === 'message.patch');
   assert.ok(patches.length >= 1, 'progress/final must patch the same card');
   for (const patch of patches) assertCard(JSON.parse(patch.data.content), 'patched card');
+  assert.equal(JSON.parse(patches.at(-1).data.content).config?.width_mode, undefined, 'lines at the width limit keep the default width');
   assert.match(patches.at(-1).data.content, /加粗/);
   assert.match(patches.at(-1).data.content, /collapsible_panel/, 'final card keeps the tool panel');
   assert.match(patches.at(-1).data.content, /工具调用 1/, 'collapsed panel shows the stats');
@@ -294,6 +300,7 @@ function inbound(text, extra = {}) {
   assert.ok(created, 'CardKit entity is created');
   const streamingCard = JSON.parse(created.data.data);
   assert.equal(streamingCard.config.streaming_mode, true);
+  assert.equal(streamingCard.config.width_mode, undefined, 'streaming card starts at the default width');
   assert.equal(streamingCard.body.elements[0].element_id, 'answer');
   const sent = client.calls.find((call) => call.api === 'message.create' && String(call.data.content).includes('card_id'));
   assert.ok(sent, 'CardKit entity is sent as a message');
@@ -301,31 +308,63 @@ function inbound(text, extra = {}) {
   assert.equal(sentBody.type, 'card');
   const realNow = Date.now;
   const base = Date.now();
+  const answer = '汉'.repeat(41);
   Date.now = () => base + 1_000;
   try {
     bridge.onAssistantStream({ session: { id: sessionId } }, { type: 'start', turn: 1, attemptId: 'a1' });
-    bridge.onAssistantStream({ session: { id: sessionId } }, { type: 'chunk', attemptId: 'a1', chunk: { type: 'text-delta', text: 'CardKit 回答' } });
+    bridge.onAssistantStream({ session: { id: sessionId } }, { type: 'chunk', attemptId: 'a1', chunk: { type: 'text-delta', text: answer } });
     await new Promise((resolve) => setTimeout(resolve, 40));
     const content = client.calls.find((call) => call.api === 'cardkit.cardElement.content');
     assert.ok(content, 'stream text goes through CardKit');
     assert.equal(content.path.element_id, 'answer');
+    assert.equal(content.data.content, answer);
     assert.equal(content.data.sequence, 1);
     await bridge.onSessionEvent({ id: sessionId }, {
       type: 'assistant/message',
-      data: { turn: 1, message: { content: [{ type: 'text', text: 'CardKit 回答' }] } },
+      data: { turn: 1, message: { content: [{ type: 'text', text: answer }] } },
     });
+    assert.equal(client.calls.some((call) => call.api === 'cardkit.card.update'), false, 'a long streamed line stays at the default width until turn end');
     await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
   } finally {
     Date.now = realNow;
   }
-  const final = client.calls.find((call) => call.api === 'cardkit.card.update');
-  assert.ok(final, 'final card is a full CardKit update');
+  const updates = client.calls.filter((call) => call.api === 'cardkit.card.update');
+  assert.equal(updates.length, 1, 'final card is one full CardKit update');
+  const [final] = updates;
   const finalCard = JSON.parse(final.data.card.data);
   assert.equal(finalCard.config.streaming_mode, false);
-  assert.match(JSON.stringify(finalCard), /CardKit 回答/);
+  assert.equal(finalCard.config.width_mode, 'fill', 'a wide CJK line widens the final card');
+  assert.equal(finalCard.body.elements[0].content, answer);
   assert.equal(final.data.sequence, 2);
   bridge.dispose();
 }
 
+// 9) 普通回退卡片也在终稿判断宽度
+{
+  const client = recordingClient();
+  const bot = new FeishuBot({ appId: 'cli_test', appSecret: 'x', client });
+  const bridge = new FeishuBridge({ bot, harness, config, state, version: 't', inboxDir: join(dir, 'inbox') });
+  const chatId = 'oc_raw_width';
+  await bridge.handleMessage(inbound('查询日志', { chat_id: chatId }));
+  const sessionId = state.sessionFor(`chat:${chatId}`);
+  const requestId = harness.prompts.at(-1).options.requestId;
+  await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/start', data: { turn: 1 } });
+  await bridge.onSessionEvent({ id: sessionId }, { type: 'user/message', data: { source: { kind: 'user', rpcId: requestId } } });
+  const opened = client.calls.find((call) => call.api === 'message.create');
+  assert.equal(JSON.parse(opened.data.content).config?.width_mode, undefined);
+
+  const answer = 'a'.repeat(81);
+  await bridge.onSessionEvent({ id: sessionId }, {
+    type: 'assistant/message',
+    data: { turn: 1, message: { content: [{ type: 'text', text: answer }] } },
+  });
+  await bridge.onSessionEvent({ id: sessionId }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+  const final = client.calls.filter((call) => call.api === 'message.patch').at(-1);
+  const finalCard = JSON.parse(final.data.content);
+  assert.equal(finalCard.config.width_mode, 'fill');
+  assert.equal(finalCard.body.elements[0].content, answer);
+  bridge.dispose();
+}
+
 await rm(dir, { recursive: true, force: true });
-console.log('feishu e2e (mock): 8 scenarios passed');
+console.log('feishu e2e (mock): 9 scenarios passed');

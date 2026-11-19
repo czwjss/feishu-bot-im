@@ -373,21 +373,22 @@ export class TurnRunner {
     return panel;
   }
 
-  #card(turn, text, { statusNote = null, force = false, expanded = false } = {}) {
-    const panel = this.#showTools(turn.chatKey) ? this.#toolPanel(turn, statusNote, force) : null;
-    const usage = this.#showStats(turn.chatKey) ? this.#usagePanel(turn, force) : null;
+  #card(turn, text, { statusNote = null, final = false, expanded = false } = {}) {
+    const panel = this.#showTools(turn.chatKey) ? this.#toolPanel(turn, statusNote, final) : null;
+    const usage = this.#showStats(turn.chatKey) ? this.#usagePanel(turn, final) : null;
     return turnCard(this.#mentionText(turn, text, 'card'), {
       ...(panel ?? {}),
       ...(panel ? {} : { note: statusNote }),
       ...(usage ?? {}),
       expanded,
+      final,
     });
   }
 
   /** Full final card; closes CardKit streaming and restores tool/usage panels. */
   #finalCard(turn, text, statusNote) {
     return buildFinalCard(
-      this.#card(turn, text, { statusNote, force: true, expanded: true }),
+      this.#card(turn, text, { statusNote, final: true, expanded: true }),
       text,
     );
   }
@@ -678,14 +679,10 @@ export class TurnRunner {
         if (wait > 0) await sleep(wait);
         const sequence = ++turn.cardSequence;
         const uuid = randomUUID();
+        const card = this.#finalCard(turn, chunks[0] ?? final, this.#statusNote(kind));
         turn.cardAt = Date.now();
         await this.#retryCardKit(
-          () => this.#bot.updateCard(
-            turn.cardKitId,
-            this.#finalCard(turn, chunks[0] ?? final, this.#statusNote(kind)),
-            sequence,
-            uuid,
-          ),
+          () => this.#bot.updateCard(turn.cardKitId, card, sequence, uuid),
           'final',
         );
         cardPatched = true;
@@ -696,7 +693,7 @@ export class TurnRunner {
         turn.cardAt = Date.now();
         await this.#patchCard(turn, this.#card(turn, chunks[0] ?? final, {
           statusNote: this.#statusNote(kind),
-          force: true,
+          final: true,
         }));
         cardPatched = true;
         this.#logEvent('card-final', `session=${turn.sessionId} turn=${turn.turn} id=${turn.cardMessageId}`);

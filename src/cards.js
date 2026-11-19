@@ -114,12 +114,32 @@ export function noticeCard(text, title = null, tone = null) {
   return card;
 }
 
+// Count full-width characters as two half-width characters.
+const DEFAULT_ANSWER_LINE_WIDTH = 80;
+const WIDE_ANSWER_CHARACTER = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Emoji_Presentation}\u3000-\u303f\uff01-\uff60\uffe0-\uffe6]/u;
+
+function hasWideAnswerLine(text) {
+  for (const line of text.split(/\r?\n/)) {
+    const visible = line
+      .replace(/(!?)\[([^[\]]*)\]\([^()]*\)/g, (_, image, label) => image ? '' : label)
+      .replace(/<at id=[\w-]+><\/at>/g, '@用户')
+      .trim();
+    let width = 0;
+    for (const character of visible) {
+      width += WIDE_ANSWER_CHARACTER.test(character) ? 2 : 1;
+      if (width > DEFAULT_ANSWER_LINE_WIDTH) return true;
+    }
+  }
+  return false;
+}
+
 /** Answer/progress card with a collapsible panel holding the tool calls. */
 export function turnCard(text, {
   panelTitle = null, panelBody = '', note = null,
-  usageTitle = null, usageBody = '', expanded = false,
+  usageTitle = null, usageBody = '', expanded = false, final = false,
 } = {}) {
-  const elements = [{ tag: 'markdown', content: typeof text === 'string' && text ? text : ' ' }];
+  const content = typeof text === 'string' && text ? text : ' ';
+  const elements = [{ tag: 'markdown', content }];
   if (panelTitle) {
     elements.push({ tag: 'hr' });
     elements.push({
@@ -141,7 +161,9 @@ export function turnCard(text, {
     });
   }
   if (note) elements.push({ tag: 'markdown', content: `*${note}*` });
-  return { schema: '2.0', body: { elements } };
+  const card = { schema: '2.0', body: { elements } };
+  if (final && hasWideAnswerLine(content)) card.config = { width_mode: 'fill' };
+  return card;
 }
 
 /** Live panel whose body is separately addressable for CardKit updates. */
