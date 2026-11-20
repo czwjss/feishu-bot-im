@@ -69,7 +69,7 @@ async function createDocumentWithText(request, { name, folderId, text }) {
   }
 }
 
-function operationFor(args, context) {
+function operationFor(args, context, harness) {
   const { action, pageToken, target, text, folder } = args;
   switch (action) {
     case 'search': {
@@ -120,6 +120,9 @@ function operationFor(args, context) {
       const path = requiredValue(args.path, 'path');
       const cwd = context?.agent?.session?.cwd;
       const signal = context?.signal;
+      if (action === 'download' && harness?.sandboxModeOf?.(context?.agent?.session) === 'read-only') {
+        throw new Error('当前会话处于只读沙箱模式，不允许向本地下载写入文件');
+      }
       return action === 'download'
         ? (request) => downloadCloudFile({ request, id, path, cwd, signal })
         : (request) => uploadCloudFile({ request, fileId: id, path, cwd, signal });
@@ -131,7 +134,7 @@ function operationFor(args, context) {
     }
     case 'move': {
       const resource = parseCloudTarget(target, DRIVE_MOVE_TYPES);
-      const parent = folder === 'root' ? undefined : folderId(folder);
+      const parent = typeof folder === 'string' && folder.trim() === 'root' ? undefined : folderId(folder);
       return (request) => driveMutations.run('move-delete', () => moveCloudFile({ request, ...resource, folderId: parent }));
     }
     case 'delete': {
@@ -147,7 +150,7 @@ function operationFor(args, context) {
   }
 }
 
-export function createCloudTool({ auth, fetchImpl }) {
+export function createCloudTool({ auth, fetchImpl, harness = null } = {}) {
   return defineFeishuTool({
     name: CLOUD_TOOL_NAME,
     description: '以本人身份管理飞书云空间文件、目录和文档。search 也能找到 Wiki，Wiki 结果用 feishu_avatar_wiki 打开。',
@@ -207,7 +210,7 @@ export function createCloudTool({ auth, fetchImpl }) {
       const { action } = args;
       const unexpected = Object.keys(args).find((key) => key !== 'action' && !ACTION_FIELDS[action].includes(key));
       if (unexpected) throw invalidInput(`${action} 不接受 ${unexpected}`);
-      const operation = operationFor(args, context);
+      const operation = operationFor(args, context, harness);
       const request = createUserFeishuRequest({ auth, fetchImpl, signal: context?.signal });
       return { action, ...await operation(request) };
     },

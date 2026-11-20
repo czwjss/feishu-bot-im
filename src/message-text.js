@@ -8,6 +8,19 @@ export function chatIdOfKey(key) {
   return key.replace(/^chat:/, '') || null;
 }
 
+/** Replace `@_user_1` placeholders with readable `@name` labels from a message's mentions list. */
+export function applyMentionPlaceholders(text, mentions) {
+  let output = typeof text === 'string' ? text : '';
+  if (!output) return output;
+  for (const mention of Array.isArray(mentions) ? mentions : []) {
+    const key = typeof mention?.key === 'string' ? mention.key : '';
+    const name = typeof mention?.name === 'string' ? mention.name.trim() : '';
+    if (!key || !name) continue;
+    const label = name.startsWith('@') ? name : `@${name}`;
+    output = output.replaceAll(key, label);
+  }
+  return output;
+}
 /** 兜底上限：飞书流式模式会在 10 分钟后自动关闭，超过就不再等。 */
 export const CARD_STUCK_MS = 10 * 60_000;
 
@@ -40,7 +53,7 @@ export function interactiveTextOfContent(content, { maxLength = 2_000 } = {}) {
   const seen = new Set();
   const add = (value) => {
     if (typeof value !== 'string') return;
-    const text = value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+    const text = value.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, ' ').trim();
     if (text && !seen.has(text)) {
       seen.add(text);
       values.push(text);

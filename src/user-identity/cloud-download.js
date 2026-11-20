@@ -1,21 +1,25 @@
 import { createWriteStream } from 'node:fs';
 import { link, lstat, mkdtemp, realpath, rm } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { isPathInside, isSensitivePath } from '../local-path.js';
 import { FeishuApiError } from './errors.js';
 
 const EXISTS_ERROR = '下载目标已存在，请更换本地路径';
 
 async function resolveDownloadPath(path, cwd) {
   if (typeof path !== 'string' || !path.trim() || path.includes('\0')) throw new Error('path 必须是本地文件路径');
+  if (typeof cwd !== 'string' || !cwd.trim()) throw new Error('缺少当前会话工作目录，无法保存下载文件');
   const workspace = await realpath(cwd);
   const target = resolve(cwd, path);
   const directory = await realpath(dirname(target));
-  const subdirectory = relative(workspace, directory);
-  if (isAbsolute(subdirectory) || subdirectory === '..' || subdirectory.startsWith(`..${sep}`)) {
+  if (!isPathInside(workspace, directory)) {
     throw new Error('下载路径必须位于当前会话的工作目录内');
   }
   const destination = join(directory, basename(target));
+  if (await isSensitivePath(destination)) {
+    throw new Error('禁止向系统及凭据敏感目录写入文件');
+  }
   const existing = await lstat(destination).catch((error) => {
     if (error?.code !== 'ENOENT') throw error;
   });
@@ -23,10 +27,10 @@ async function resolveDownloadPath(path, cwd) {
   return destination;
 }
 
-export async function downloadCloudFile({ request, id, path, cwd = process.cwd(), signal }) {
+export async function downloadCloudFile({ request, id, path, cwd, signal }) {
   if (typeof id !== 'string' || !/^[A-Za-z0-9_-]+$/.test(id)) throw new Error('下载需要有效的文件 ID');
   signal?.throwIfAborted();
-  const destination = await resolveDownloadPath(path, cwd || process.cwd());
+  const destination = await resolveDownloadPath(path, cwd);
   signal?.throwIfAborted();
   const response = await request({
     path: `/open-apis/drive/v1/files/${encodeURIComponent(id)}/download`,

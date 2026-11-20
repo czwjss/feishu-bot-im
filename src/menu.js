@@ -5,6 +5,7 @@ import { sendNotice } from './notify.js';
 
 const PICKERS = new Set(['session_pick', 'workspace_pick', 'model_pick', 'reasoning_pick']);
 const DRAFT_PICKERS = new Set(['ns_workspace', 'ns_model', 'ns_reasoning', 'ns_preset']);
+const QUEUED_ACTIONS = new Set(['menu_apply', 'new_session_create']);
 const ACTIONS = new Set([...PICKERS, ...DRAFT_PICKERS, 'menu_apply', 'menu_cancel',
   'new_session', 'new_session_create', 'new_session_cancel', 'compact', 'stats_toggle', 'tools_toggle', 'menu_close']);
 
@@ -29,6 +30,7 @@ export class MenuController {
   }
 
   handles(action) { return ACTIONS.has(action); }
+  needsQueue(action) { return QUEUED_ACTIONS.has(action); }
   modelFor(sessionId) { return this.#sessionModels.get(sessionId) ?? null; }
 
   async handle(action, event) {
@@ -62,6 +64,17 @@ export class MenuController {
       return projected;
     }
     return this.#sessionModels.get(sessionId) ?? null;
+  }
+
+  /** 校验工作区路径必须属于宿主已登记的工作区或机器人默认工作区。 */
+  async #isAllowedWorkspace(candidate) {
+    if (typeof candidate !== 'string' || !candidate.trim()) return false;
+    const baseline = await this.#harness.workspaceBaseline?.().catch(() => null);
+    const registered = Array.isArray(baseline?.items) ? baseline.items.map((item) => item?.path).filter(Boolean) : [];
+    const configured = this.#services().config?.()?.workspace;
+    const allowed = new Set([...registered, ...(configured ? [configured] : [])]);
+    if (allowed.size === 0) return false;
+    return allowed.has(candidate);
   }
 
   async #handle(action, event) {
@@ -145,16 +158,26 @@ export class MenuController {
       if (action === 'ns_preset') draft.preset = option;
       if (action === 'ns_model') {
         const [provider, ...rest] = option.split('/');
-        draft.model = { provider, model: rest.join('/') };
+        draft.model = {
+          ...(draft.model?.reasoningEffort ? { reasoningEffort: draft.model.reasoningEffort } : {}),
+          provider,
+          model: rest.join('/'),
+        };
       }
       if (action === 'ns_reasoning') {
-        draft.model = { ...(draft.model ?? {}), reasoningEffort: option };
+        const baseModel = draft.model?.provider && draft.model?.model
+          ? draft.model
+          : (this.#state.overrideFor?.(chatKey)?.model ?? this.#services().config().model ?? null);
+        draft.model = baseModel ? { ...baseModel, reasoningEffort: option } : null;
       }
       this.#newSessionDraft.set(chatKey, draft);
       return undefined;
     }
     if (action === 'new_session_create') {
       const draft = this.#newSessionDraft.get(chatKey) ?? {};
+      if (draft.workspace && !(await this.#isAllowedWorkspace(draft.workspace))) {
+        return { toast: { type: 'warning', content: '所选工作区不在已登记列表中' } };
+      }
       this.#newSessionDraft.delete(chatKey);
       const previous = this.#state.sessionFor(chatKey);
       await this.#state.unbindSession(chatKey);
@@ -221,8 +244,13 @@ export class MenuController {
     const sessionId = this.#state.sessionFor(chatKey);
     if (pending.action === 'session_pick') {
       const sessions = await this.#harness.listSessions().catch(() => []);
-      if (!sessions.some((item) => item.sessionId === pending.value)) {
+      const target = sessions.find((item) => item.sessionId === pending.value);
+      if (!target || target.origin === 'subagent') {
         return { ok: false, toast: { type: 'warning', content: '这个会话已不存在' } };
+      }
+      const ownerKey = this.#state.keyForSession?.(pending.value);
+      if (ownerKey && ownerKey !== chatKey) {
+        return { ok: false, toast: { type: 'warning', content: '这个会话已绑定到其他聊天' } };
       }
       const previous = this.#state.sessionFor(chatKey);
       await this.#state.bindSession(chatKey, pending.value);
@@ -232,6 +260,9 @@ export class MenuController {
       return { ok: true, detail: '后续消息进入该会话' };
     }
     if (pending.action === 'workspace_pick') {
+      if (!(await this.#isAllowedWorkspace(pending.value))) {
+        return { ok: false, toast: { type: 'warning', content: '所选工作区不在已登记列表中' } };
+      }
       await this.#state.setOverride?.(chatKey, { workspace: pending.value });
       await this.#state.unbindSession(chatKey);
       this.#forgetSession(sessionId, chatKey);

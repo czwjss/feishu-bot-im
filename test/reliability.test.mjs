@@ -180,7 +180,9 @@ test('a group menu remains restricted after restart; unknown chats fail closed',
   assert.equal((await restarted.onCardAction(f.action('ou_admin'))).toast.type, 'success');
   assert.deepEqual(f.compacted, ['session-existing']);
   await f.state.setChatType(`chat:${chatId}`, 'p2p');
-  assert.equal((await f.make(await new StateStore(f.path).load()).onCardAction(f.action('ou_user'))).toast.type, 'success');
+  const directBridge = f.make(await new StateStore(f.path).load());
+  assert.equal((await directBridge.onCardAction(f.action('ou_user'))).toast.type, 'warning');
+  assert.equal((await directBridge.onCardAction(f.action('ou_admin'))).toast.type, 'success');
 });
 
 test('simultaneous first messages share one session and keep their order', async (t) => {

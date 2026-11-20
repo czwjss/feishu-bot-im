@@ -35,6 +35,10 @@ async function readJson(response) {
   }
 }
 
+function nonEmptyString(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 /** scope 里没有 offline_access 时补上，否则拿不到 refresh_token。 */
 export function withOfflineAccess(scope) {
   const value = typeof scope === 'string' ? scope.trim() : '';
@@ -81,8 +85,8 @@ export async function beginDeviceAuthorization({
   }
   if (payload.error || response.status >= 400 || !payload.device_code) {
     const message = describeOAuthCode(payload.code)
-      ?? (typeof payload.error_description === 'string' && payload.error_description)
-      ?? (typeof payload.error === 'string' && payload.error)
+      ?? nonEmptyString(payload.error_description)
+      ?? nonEmptyString(payload.error)
       ?? `飞书设备授权失败（HTTP ${response.status}）`;
     throw new FeishuOAuthError(message, {
       feishuCode: typeof payload.code === 'number' ? payload.code : null,
@@ -165,8 +169,8 @@ export async function pollDeviceToken({
   }
 
   const message = describeOAuthCode(payload.code)
-    ?? (typeof payload.error_description === 'string' && payload.error_description)
-    ?? error
+    ?? nonEmptyString(payload.error_description)
+    ?? nonEmptyString(error)
     ?? `飞书 token 接口失败（HTTP ${response.status}）`;
   throw new FeishuOAuthError(message, {
     feishuCode: typeof payload.code === 'number' ? payload.code : null,
@@ -208,8 +212,8 @@ export async function refreshUserAccessToken({
   }
   if (payload.error || (!payload.access_token && payload.code && payload.code !== 0)) {
     const message = describeOAuthCode(payload.code)
-      ?? (typeof payload.error_description === 'string' && payload.error_description)
-      ?? (typeof payload.error === 'string' && payload.error)
+      ?? nonEmptyString(payload.error_description)
+      ?? nonEmptyString(payload.error)
       ?? `飞书刷新 token 失败（HTTP ${response.status}）`;
     throw new FeishuOAuthError(message, {
       feishuCode: typeof payload.code === 'number' ? payload.code : null,

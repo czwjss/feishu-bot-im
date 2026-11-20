@@ -259,7 +259,7 @@ function inbound(text, extra = {}) {
   const { writeFile } = await import('node:fs/promises');
   const file = join(dir, '报告.txt');
   await writeFile(file, 'hello');
-  const result = await botRuntime.sendFileToChat('oc_e2e', file);
+  const result = await botRuntime.sendFileToChat('oc_e2e', file, undefined, undefined, dir);
   assert.equal(result.fileName, '报告.txt');
   const upload = client.calls.find((c) => c.api === 'file.create');
   assert.equal(upload.name, '报告.txt');

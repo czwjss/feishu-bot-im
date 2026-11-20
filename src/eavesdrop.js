@@ -12,7 +12,7 @@ import { messageContentOf, messageTypeOf, decodePost, renderPostText } from './m
  * the bot is mentioned. The history tool can fetch images on demand.
  */
 
-import { interactiveTextOfContent } from './message-text.js';
+import { applyMentionPlaceholders, interactiveTextOfContent } from './message-text.js';
 
 export const DEFAULT_EAVESDROP_LIMIT = 20;
 
@@ -35,17 +35,6 @@ export function normalizeEavesdropConfig(value) {
   });
 }
 
-/** Replace `@_user_1` placeholders with the names carried by the event. */
-function applyMentions(text, message) {
-  let value = typeof text === 'string' ? text : '';
-  for (const mention of Array.isArray(message?.mentions) ? message.mentions : []) {
-    const key = typeof mention?.key === 'string' ? mention.key : '';
-    const name = typeof mention?.name === 'string' ? mention.name.trim() : '';
-    if (key && name) value = value.split(key).join(`@${name}`);
-  }
-  return value;
-}
-
 function joinPlaceholders(text, { images = 0, file = null } = {}) {
   const body = String(text ?? '').trim();
   const parts = [];
@@ -65,11 +54,11 @@ export function describeMessageForEavesdrop(message, { maxLength = 2_000 } = {})
   let text = '';
 
   if (type === 'text') {
-    text = applyMentions(content.text, message);
+    text = applyMentionPlaceholders(content.text, message?.mentions);
   } else if (type === 'post') {
     const post = decodePost(content);
     text = joinPlaceholders(
-      applyMentions(renderPostText(post, { separator: ' ', mediaPlaceholders: true }), message),
+      applyMentionPlaceholders(renderPostText(post, { separator: ' ', mediaPlaceholders: true }), message?.mentions),
       { images: post.imageCount },
     );
   } else if (type === 'image') {
@@ -92,7 +81,7 @@ export function describeMessageForEavesdrop(message, { maxLength = 2_000 } = {})
   } else if (type === 'share_user') {
     text = '[个人名片]';
   } else if (type === 'system') {
-    text = applyMentions(content.text, message) || '[系统消息]';
+    text = applyMentionPlaceholders(content.text, message?.mentions) || '[系统消息]';
   } else {
     text = type ? `[${type}]` : '[消息]';
   }
@@ -102,7 +91,7 @@ export function describeMessageForEavesdrop(message, { maxLength = 2_000 } = {})
 
 /** Keep a crafted message from closing the injected block early. */
 function neutralizeBlockTag(text) {
-  return String(text ?? '').replace(/<(\/?)(feishu_bot_eavesdrop)>/gi, '&lt;$1$2&gt;');
+  return String(text ?? '').replace(/<(\/?)(feishu_bot_[a-z0-9_]*)\b([^>]*)(>|$)/gi, '&lt;$1$2$3&gt;');
 }
 
 function senderLabel(entry) {

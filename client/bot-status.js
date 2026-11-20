@@ -14,6 +14,9 @@ const h = React.createElement;
 /** Status and editable settings stay grouped under the account they belong to. */
 export function BotStatus({ connection, bot, bots, identityQuery, monitorQuery, avatarReady, registerSave, active, beforeRemove, onChanged, onRefresh, refreshing }) {
   const [diagnosis, setDiagnosis] = React.useState(null);
+  React.useEffect(() => {
+    if (bot.state === 'connected' && diagnosis && !diagnosis.connected) setDiagnosis(null);
+  }, [bot.state, diagnosis]);
   const { busy, error, run } = useMutation();
   const diagnose = () => run('diagnose', () => {
     setDiagnosis(null);

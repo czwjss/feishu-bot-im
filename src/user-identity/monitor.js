@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { CARD_STUCK_MS } from '../message-text.js';
 import { KeyedQueue } from '../queue.js';
 import { chatMemberNames, getMessage, listChats, listMessages } from './api.js';
+import { createTokenSession } from './auth.js';
 import { AutoReplyEngine } from './auto-reply.js';
 import { loadBatchImages } from './batch-images.js';
 import { DEFAULT_REPLY_RULES, normalizeReplyRules } from './worker-context.js';
@@ -24,6 +25,8 @@ const MAX_PAGES_PER_POLL = 2;
 /** 往回多看一段，才能抓到卡片原地刷新的新文本。 */
 const REFRESH_LOOKBACK_MS = 120_000;
 const MAX_DISCOVER_PAGES = 5;
+const NAME_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const MAX_NAME_CACHE = 200;
 
 function stringOf(value) {
   return typeof value === 'string' ? value : '';
@@ -54,6 +57,7 @@ export class UserMonitorManager {
   #autoReply;
   #nameCache = new Map();
   #parentSender = new Map();
+  #directLastActive = new Map();
 
   constructor({
     auth,
@@ -134,6 +138,8 @@ export class UserMonitorManager {
   dispose() {
     this.#disposed = true;
     this.stop();
+    this.#nameCache.clear();
+    this.#directLastActive.clear();
     this.#autoReply?.dispose?.();
   }
 
@@ -207,16 +213,17 @@ export class UserMonitorManager {
 
   /** 手动选择监听的群聊。 */
   async discoverChats() {
-    const accessToken = await this.#auth.requireAccessToken();
+    const session = createTokenSession(this.#auth);
+    await session.init();
     const merged = new Map();
     let pageToken = null;
     for (let page = 0; page < MAX_DISCOVER_PAGES; page += 1) {
-      const result = await this.#listChats({
-        accessToken,
+      const result = await session.run((token) => this.#listChats({
+        accessToken: token,
         types: 'group',
         pageSize: 100,
         pageToken,
-      });
+      }));
       for (const chat of result.items) {
         if (chat.chatMode !== 'group' || merged.has(chat.chatId)) continue;
         merged.set(chat.chatId, {
@@ -266,6 +273,7 @@ export class UserMonitorManager {
     const id = stringOf(chatId).trim();
     if (this.#store.state.chats[id]?.direct) throw new Error('私聊请使用「监听所有私聊」开关');
     this.#autoReply?.cancel?.(id);
+    this.#nameCache.delete(id);
     await this.#store.saveConfig((config) => ({ chats: config.chats.filter((chat) => chat.chatId !== id) }));
     await this.#store.saveState((state) => {
       const chats = { ...state.chats };
@@ -282,6 +290,7 @@ export class UserMonitorManager {
         workspaceId: patch.workspaceId === undefined ? config.worker.workspaceId : patch.workspaceId,
         workspacePath: patch.workspacePath === undefined ? config.worker.workspacePath : patch.workspacePath,
         preset: patch.preset === undefined ? config.worker.preset : patch.preset,
+        permissionPreset: patch.permissionPreset === undefined ? config.worker.permissionPreset : patch.permissionPreset,
       },
     }));
     return this.status();
@@ -373,15 +382,18 @@ export class UserMonitorManager {
     return current && current.activationId === chat.activationId ? current : null;
   }
 
-  async #refreshDirectChats(activation, accessToken) {
+  async #refreshDirectChats(activation, call) {
     const found = new Map();
     const tokens = new Set();
     let pageToken;
     for (;;) {
       if (this.#disposed || !this.#store.config.enabled || this.#store.activeDirectActivation?.id !== activation.id) return;
-      const result = await this.#listChats({ accessToken, types: 'p2p', pageSize: 100, pageToken });
+      const result = await call((token) => this.#listChats({ accessToken: token, types: 'p2p', pageSize: 100, pageToken }));
       for (const chat of result.items) {
-        if (chat.chatMode === 'p2p' && !found.has(chat.chatId)) found.set(chat.chatId, chat);
+        if (chat.chatMode !== 'p2p') continue;
+        if (!found.has(chat.chatId)) found.set(chat.chatId, chat);
+        const activeAt = Number.isFinite(Date.parse(chat.lastMessageAt)) ? Date.parse(chat.lastMessageAt) : null;
+        if (activeAt !== null) this.#directLastActive.set(chat.chatId, activeAt);
       }
       if (!result.hasMore) break;
       pageToken = result.pageToken;
@@ -397,14 +409,9 @@ export class UserMonitorManager {
     if (this.#store.config.chats.length === 0 && !this.#store.config.directActivation) return;
     this.#polling = true;
     try {
-      let accessToken;
-      let tokenOpenId;
+      const session = createTokenSession(this.#auth);
       try {
-        if (typeof this.#auth.requireAccessIdentity === 'function') {
-          ({ accessToken, openId: tokenOpenId } = await this.#auth.requireAccessIdentity());
-        } else {
-          accessToken = await this.#auth.requireAccessToken();
-        }
+        await session.init();
       } catch (error) {
         this.#syncDirectOwner(null);
         this.#logger?.warn?.('[im-feishu] 消息监听暂停：用户身份未授权', error?.message ?? error);
@@ -413,16 +420,17 @@ export class UserMonitorManager {
       const auth = await this.#auth.status().catch(() => null);
       this.#syncDirectOwner(auth);
       const selfOpenId = auth?.authorization?.user?.openId ?? '';
+      const call = (operation) => session.run(operation);
       for (const chat of this.#store.config.chats) {
         if (this.#disposed || !this.#store.config.enabled) break;
         const current = this.#currentChat(chat);
-        if (current) await this.#pollChat(current, accessToken, selfOpenId);
+        if (current) await this.#pollChat(current, call, selfOpenId);
       }
       const activation = this.#store.activeDirectActivation;
       if (this.#disposed || !this.#store.config.enabled || !activation) return;
-      if (tokenOpenId !== undefined && tokenOpenId !== activation.ownerOpenId) return;
+      if (session.openId !== undefined && session.openId !== activation.ownerOpenId) return;
       try {
-        await this.#refreshDirectChats(activation, accessToken);
+        await this.#refreshDirectChats(activation, call);
         if (this.#store.activeDirectActivation?.id === activation.id) this.#directError = null;
       } catch (error) {
         if (this.#store.activeDirectActivation?.id === activation.id) {
@@ -433,11 +441,23 @@ export class UserMonitorManager {
       for (const chat of this.#store.monitoredChats) {
         if (chat.activationId !== activation.id) continue;
         const current = this.#currentChat(chat);
-        if (current) await this.#pollChat(current, accessToken, selfOpenId);
+        if (!current) continue;
+        if (this.#shouldSkipInactiveDirect(current)) continue;
+        await this.#pollChat(current, call, selfOpenId);
       }
     } finally {
       this.#polling = false;
     }
+  }
+
+  /** 沉寂私聊：已知 lastMessageAt 早于上次轮询回看窗口且无待续分页/挂起卡片时跳过空轮询。 */
+  #shouldSkipInactiveDirect(chat) {
+    const activeAt = this.#directLastActive.get(chat.chatId);
+    if (!Number.isFinite(activeAt)) return false;
+    const entry = this.#store.state.chats[chat.chatId];
+    if (!entry || !Number.isFinite(entry.lastPollAt) || entry.scan) return false;
+    if (this.#store.state.pendingCards.some((card) => card.chatId === chat.chatId)) return false;
+    return activeAt < entry.lastPollAt - REFRESH_LOOKBACK_MS;
   }
 
   /** 更新单个会话的触发规则。 */
@@ -465,7 +485,8 @@ export class UserMonitorManager {
     await this.#store.saveState((state) => {
       if (!this.#currentChat(chat)) return state;
       const pending = state.pendingCards.filter((card) => card.messageId !== item.messageId);
-      if (pending.length >= MAX_PENDING_CARDS) throw new Error('等待收尾的卡片已满，将在下轮继续读取');
+      const chatPendingCount = pending.filter((card) => card.chatId === chat.chatId).length;
+      if (chatPendingCount >= MAX_PENDING_CARDS) throw new Error('等待收尾的卡片已满，将在下轮继续读取');
       return { ...state, pendingCards: [
         ...pending,
         { messageId: item.messageId, chatId: chat.chatId, createTime: item.createTime ?? new Date(time).toISOString(), lastText: item.text ?? '', ...context },
@@ -474,7 +495,7 @@ export class UserMonitorManager {
   }
 
   /** 检查待收尾卡片：收尾了就补进消息列表，超时就彻底丢掉。 */
-  async #settlePendingCards(chat, accessToken, selfOpenId) {
+  async #settlePendingCards(chat, call, selfOpenId) {
     const pending = this.#store.state.pendingCards.filter((card) => card.chatId === chat.chatId);
     if (pending.length === 0) return 0;
     let changed = false;
@@ -489,7 +510,7 @@ export class UserMonitorManager {
         changed = true;
         continue;
       }
-      const message = await this.#getMessage({ accessToken, messageId: card.messageId }).catch(() => null);
+      const message = await call((token) => this.#getMessage({ accessToken: token, messageId: card.messageId })).catch(() => null);
       if (message && message.streaming !== true) {
         revived.push({ card, message });
         changed = true;
@@ -501,7 +522,7 @@ export class UserMonitorManager {
       kept.push(next);
     }
     // Keep pending cards retryable if persisting their settled bodies fails.
-    if (revived.length > 0 && await this.#reviveCards(chat, revived, accessToken, selfOpenId) === false) return 0;
+    if (revived.length > 0 && await this.#reviveCards(chat, revived, call, selfOpenId) === false) return 0;
     if (changed) await this.#store.saveState((state) => {
       if (!this.#currentChat(chat)) return state;
       const ids = new Set(pending.map((card) => card.messageId));
@@ -511,19 +532,19 @@ export class UserMonitorManager {
   }
 
   /** 收尾的卡片补进消息列表，并按需交给自动回复。 */
-  async #reviveCards(chat, revived, accessToken, selfOpenId) {
+  async #reviveCards(chat, revived, call, selfOpenId) {
     chat = this.#currentChat(chat);
     if (!chat) return false;
     const entry = this.#store.state.chats[chat.chatId] ?? {};
     const messages = [...(entry.messages ?? [])];
     const fresh = [];
-    const names = await this.#namesFor(chat.chatId, accessToken);
+    const names = await this.#namesFor(chat.chatId, call);
     if (!this.#currentChat(chat)) return false;
     for (const { card, message } of revived) {
       if (message.deleted || message.msgType === 'system') continue;
       if (messages.some((item) => item.messageId === card.messageId)) continue;
       const isSelf = card.isSelf || Boolean(selfOpenId && message.senderOpenId === selfOpenId);
-      const contextOnly = isSelf || !(await this.#accepts(chat, message, accessToken, selfOpenId));
+      const contextOnly = isSelf || !(await this.#accepts(chat, message, call, selfOpenId));
       messages.push({
         messageId: card.messageId,
         senderName: message.senderName || names.get(message.senderOpenId) || (message.senderType === 'app' ? '机器人' : ''),
@@ -552,11 +573,11 @@ export class UserMonitorManager {
   }
 
   /** 父消息发送者（用于判断“回复我”），带缓存。 */
-  async #parentSenderOf(messageId, accessToken) {
+  async #parentSenderOf(messageId, call) {
     if (!messageId) return null;
     const cached = this.#parentSender.get(messageId);
     if (cached !== undefined) return cached;
-    const parent = await this.#getMessage({ accessToken, messageId }).catch((error) => {
+    const parent = await call((token) => this.#getMessage({ accessToken: token, messageId })).catch((error) => {
       if (error?.status === 404) return null;
       throw error; // 查询失败不能当成“不是回复我”，保留游标供下轮重试。
     });
@@ -570,7 +591,7 @@ export class UserMonitorManager {
    * 触发判断。
    * all：全部；mention：@我 或 回复我；keyword：命中关键词、@我 或 回复我。
    */
-  async #accepts(chat, item, accessToken, selfOpenId) {
+  async #accepts(chat, item, call, selfOpenId) {
     const mode = chat.mode ?? (chat.chatMode === 'p2p' ? 'all' : 'mention');
     if (mode === 'all') return true;
     const mentioned = Boolean(selfOpenId)
@@ -581,7 +602,7 @@ export class UserMonitorManager {
       if ((chat.keywords ?? []).some((keyword) => text.includes(keyword.toLowerCase()))) return true;
     }
     if (item.parentId && selfOpenId) {
-      const parentSender = await this.#parentSenderOf(item.parentId, accessToken);
+      const parentSender = await this.#parentSenderOf(item.parentId, call);
       if (parentSender && parentSender === selfOpenId) return true;
     }
     return false;
@@ -596,17 +617,33 @@ export class UserMonitorManager {
     });
   }
 
-  /** 会话成员姓名表，每会话只取一次。 */
-  async #namesFor(chatId, accessToken) {
-    if (this.#nameCache.has(chatId)) return this.#nameCache.get(chatId);
-    const names = await this.#chatMemberNames({ accessToken, chatId }).catch(() => new Map());
-    this.#nameCache.set(chatId, names);
-    return names;
+  /** 会话成员姓名表，带 TTL 缓存，失败不缓存空表。 */
+  async #namesFor(chatId, call) {
+    const now = this.#now();
+    const cached = this.#nameCache.get(chatId);
+    if (cached && now - cached.at < NAME_CACHE_TTL_MS) return cached.names;
+    try {
+      const names = await call((token) => this.#chatMemberNames({ accessToken: token, chatId }));
+      if (this.#nameCache.size >= MAX_NAME_CACHE) {
+        this.#nameCache.delete(this.#nameCache.keys().next().value);
+      }
+      this.#nameCache.set(chatId, { names, at: now });
+      return names;
+    } catch {
+      return cached?.names ?? new Map();
+    }
   }
 
-  async #pollChat(chat, accessToken, selfOpenId) {
+  #isStaleCursorError(error) {
+    const message = String(error?.message ?? error);
+    if (/分页游标未推进|page_token|invalid.*cursor|cursor.*expired/i.test(message)) return true;
+    return Number.isFinite(error?.status) && error.status === 400;
+  }
+
+  async #pollChat(chat, call, selfOpenId) {
+    let usedSavedScan = false;
     try {
-      await this.#settlePendingCards(chat, accessToken, selfOpenId);
+      await this.#settlePendingCards(chat, call, selfOpenId);
       if (!this.#currentChat(chat)) return;
       const current = this.#store.state.chats[chat.chatId] ?? {};
       const messages = current.messages ?? [];
@@ -622,6 +659,7 @@ export class UserMonitorManager {
       }
 
       const directSince = chat.activationId ? this.#store.activeDirectActivation.sinceMs : 0;
+      usedSavedScan = Boolean(current.scan?.pageToken);
       const scan = current.scan ?? {
         startTimeMs: Math.max(directSince, Math.min(current.cursorTimeMs - 1_000, this.#now() - REFRESH_LOOKBACK_MS)),
         endTimeMs: this.#now(),
@@ -629,12 +667,12 @@ export class UserMonitorManager {
       };
       let pageToken = scan.pageToken;
       const items = [];
-      if (scan.startTimeMs >= scan.endTimeMs) return;
+      if (Math.floor(scan.startTimeMs / 1000) >= Math.floor(scan.endTimeMs / 1000)) return;
       for (let page = 0; page < MAX_PAGES_PER_POLL; page++) {
-        const result = await this.#listMessages({
-          accessToken, chatId: chat.chatId, startTime: scan.startTimeMs, endTime: scan.endTimeMs,
+        const result = await call((token) => this.#listMessages({
+          accessToken: token, chatId: chat.chatId, startTime: scan.startTimeMs, endTime: scan.endTimeMs,
           pageSize: 50, sort: 'asc', pageToken,
-        });
+        }));
         if (!this.#currentChat(chat)) return;
         items.push(...result.items);
         if (!result.hasMore) { pageToken = null; break; }
@@ -649,7 +687,7 @@ export class UserMonitorManager {
       // 成员姓名表每轮只取一次，供刷新比对和渲染共用。
       let names = null;
       const namesOf = async () => {
-        names ??= await this.#namesFor(chat.chatId, accessToken);
+        names ??= await this.#namesFor(chat.chatId, call);
         return names;
       };
       for (const item of items) {
@@ -679,7 +717,7 @@ export class UserMonitorManager {
         if (item.deleted || item.msgType === 'system') continue;
         if (time < current.cursorTimeMs) continue;
         const isSelf = Boolean(selfOpenId) && item.senderOpenId === selfOpenId;
-        const contextOnly = isSelf || !(await this.#accepts(chat, item, accessToken, selfOpenId));
+        const contextOnly = isSelf || !(await this.#accepts(chat, item, call, selfOpenId));
         // 流式卡片：先不进入消息列表，等收尾后再补进来。
         if (item.msgType === 'interactive' && item.streaming === true) {
           await this.#trackPendingCard(chat, item, time, { isSelf, contextOnly });
@@ -735,9 +773,17 @@ export class UserMonitorManager {
     } catch (error) {
       this.#logger?.warn?.('[im-feishu] 消息监听轮询失败', chat.chatId, error?.message ?? error);
       await this.#patchChat(chat, {
+        ...(usedSavedScan && this.#isStaleCursorError(error) ? { scan: null } : {}),
         lastPollAt: this.#now(),
         lastError: error?.message ?? String(error),
       }).catch(() => undefined);
     }
+  }
+
+  /** 宿主分身解绑后同步清理私聊监听内存状态，保留群配置待重新连接。 */
+  async onIdentityDetached() {
+    this.#syncDirectOwner(null);
+    this.#directError = null;
+    this.#directLastActive.clear();
   }
 }

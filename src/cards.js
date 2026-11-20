@@ -285,12 +285,8 @@ function usageSections(stats) {
   return elements;
 }
 
-/** Menu card: session and workspace dropdowns plus usage stats and actions. */
-export function menuCard({
-  sessionId, sessions = [], currentWorkspace = null, workspaces = [],
-  models = [], efforts = [], sessionWorkspace = null, stats = null, statsEnabled = false, toolsEnabled = false,
-}) {
-  const select = (name, action, items, placeholder) => ({
+function menuSelect(name, action, items, placeholder) {
+  return {
     tag: 'select_static',
     name,
     width: 'fill',
@@ -300,32 +296,30 @@ export function menuCard({
       value: item.value,
     })),
     behaviors: [{ type: 'callback', value: { action } }],
-  });
-  // 标题与下拉同一行：左列标题 + 右列选择器
-  const row = (title, control) => ({
+  };
+}
+
+// 标题与下拉同一行：左列标题 + 右列选择器
+function menuRow(title, control) {
+  return {
     tag: 'column_set',
     flex_mode: 'none',
     columns: [
-      {
-        tag: 'column',
-        width: '88px',
-        vertical_align: 'center',
-        elements: [{ tag: 'markdown', content: `**${title}**` }],
-      },
-      {
-        tag: 'column',
-        width: 'weighted',
-        weight: 1,
-        vertical_align: 'center',
-        elements: [control],
-      },
+      { tag: 'column', width: '88px', vertical_align: 'center', elements: [{ tag: 'markdown', content: `**${title}**` }] },
+      { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', elements: [control] },
     ],
-  });
+  };
+}
 
+/** Menu card: session and workspace dropdowns plus usage stats and actions. */
+export function menuCard({
+  sessionId, sessions = [], currentWorkspace = null, workspaces = [],
+  models = [], efforts = [], sessionWorkspace = null, stats = null, statsEnabled = false, toolsEnabled = false,
+}) {
   const effectiveWorkspace = sessionWorkspace ?? currentWorkspace;
   const elements = [];
   if (sessions.length > 0) {
-    elements.push(row('会话', select('session_pick', 'session_pick',
+    elements.push(menuRow('会话', menuSelect('session_pick', 'session_pick',
       sessions.map((item) => ({
         value: item.sessionId,
         label: item.label ?? item.sessionId,
@@ -334,21 +328,21 @@ export function menuCard({
       sessions.find((item) => item.sessionId === sessionId)?.label ?? '选择会话')));
   }
   if (workspaces.length > 0) {
-    elements.push(row('工作区', select('workspace_pick', 'workspace_pick',
+    elements.push(menuRow('工作区', menuSelect('workspace_pick', 'workspace_pick',
       workspaces.map((path) => ({ value: path, label: path, current: path === effectiveWorkspace })),
       effectiveWorkspace ?? '选择工作区')));
   }
   if (models.length > 0) {
-    elements.push(row('模型', select('model_pick', 'model_pick', models,
+    elements.push(menuRow('模型', menuSelect('model_pick', 'model_pick', models,
       models.find((item) => item.current)?.label ?? '选择模型')));
   }
   if (efforts.length > 0) {
-    elements.push(row('思考强度', select('reasoning_pick', 'reasoning_pick', efforts,
+    elements.push(menuRow('思考强度', menuSelect('reasoning_pick', 'reasoning_pick', efforts,
       efforts.find((item) => item.current)?.label ?? '选择强度')));
   }
   // The usage panel stays visible; these switches only control per-reply panels.
-  elements.push(row('Token 统计', button(statsEnabled ? '已开启' : '已关闭', 'stats_toggle', statsEnabled ? 'primary' : 'default')));
-  elements.push(row('工具调用', button(toolsEnabled ? '已开启' : '已关闭', 'tools_toggle', toolsEnabled ? 'primary' : 'default')));
+  elements.push(menuRow('Token 统计', button(statsEnabled ? '已开启' : '已关闭', 'stats_toggle', statsEnabled ? 'primary' : 'default')));
+  elements.push(menuRow('工具调用', button(toolsEnabled ? '已开启' : '已关闭', 'tools_toggle', toolsEnabled ? 'primary' : 'default')));
   elements.push(...usageSections(stats));
 
   // 一行四个固定宽度按钮
@@ -375,38 +369,19 @@ export function menuCard({
 
 /** Session-creation card: everything that only applies to a brand-new Session. */
 export function newSessionCard({ workspaces = [], models = [], efforts = [], presets = [], draft = {} }) {
-  const select = (name, action, items, placeholder) => ({
-    tag: 'select_static',
-    name,
-    width: 'fill',
-    placeholder: plain(placeholder),
-    options: items.slice(0, 30).map((item) => ({
-      text: plain(`${item.current ? '✓ ' : ''}${item.label}`),
-      value: item.value,
-    })),
-    behaviors: [{ type: 'callback', value: { action } }],
-  });
-  const row = (title, control) => ({
-    tag: 'column_set',
-    flex_mode: 'none',
-    columns: [
-      { tag: 'column', width: '88px', vertical_align: 'center', elements: [{ tag: 'markdown', content: `**${title}**` }] },
-      { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', elements: [control] },
-    ],
-  });
   const elements = [];
   if (workspaces.length > 0) {
-    elements.push(row('工作区', select('ns_workspace', 'ns_workspace',
+    elements.push(menuRow('工作区', menuSelect('ns_workspace', 'ns_workspace',
       workspaces.map((path) => ({ value: path, label: path, current: path === draft.workspace })),
       draft.workspace ?? '默认')));
   }
-  elements.push(row('模型', select('ns_model', 'ns_model', models,
+  elements.push(menuRow('模型', menuSelect('ns_model', 'ns_model', models,
     models.find((item) => item.current)?.label ?? '默认')));
   if (efforts.length > 0) {
-    elements.push(row('思考强度', select('ns_reasoning', 'ns_reasoning', efforts,
+    elements.push(menuRow('思考强度', menuSelect('ns_reasoning', 'ns_reasoning', efforts,
       efforts.find((item) => item.current)?.label ?? '模型默认')));
   }
-  elements.push(row('预设', select('ns_preset', 'ns_preset', presets,
+  elements.push(menuRow('预设', menuSelect('ns_preset', 'ns_preset', presets,
     presets.find((item) => item.current)?.label ?? '跟随 Host 默认')));
   elements.push({ tag: 'hr' });
   elements.push({
@@ -427,5 +402,4 @@ export function adjustCard({ items = [] }) {
   const lines = items.map((item) => `**${item.title}**\n${item.detail}`);
   return card('已调整', 'blue', [{ tag: 'markdown', content: lines.join('\n\n') || '（没有变更）' }]);
 }
-
 

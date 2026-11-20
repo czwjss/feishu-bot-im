@@ -9,8 +9,10 @@ export async function loadBatchImages({ auth, chat, messages, cachedMessages, li
     return { parts, notes };
   }
 
-  const timeout = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
-  const downloadSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const itemSignal = () => {
+    const timeout = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
+    return { timeout, signal: signal ? AbortSignal.any([signal, timeout]) : timeout };
+  };
   const ownerOpenId = chat.ownerOpenId;
   const scopedAuth = ownerOpenId ? {
     async requireAccessToken(options) {
@@ -19,30 +21,30 @@ export async function loadBatchImages({ auth, chat, messages, cachedMessages, li
       return identity.accessToken;
     },
   } : auth;
-  const request = createUserFeishuRequest({ auth: scopedAuth, fetchImpl, signal: downloadSignal });
   const stored = new Map([...cachedMessages, ...messages].map((message) => [message.messageId, message]));
   const loaded = new Map();
   const maxImages = Math.min(MAX_MESSAGE_IMAGES, limits?.maxImagesPerMessage ?? MAX_MESSAGE_IMAGES);
   const maxImageBytes = Math.min(MAX_IMAGE_BYTES, limits?.maxImageBytes ?? MAX_IMAGE_BYTES);
   let remainingBytes = limits?.maxMessageImageBytes ?? maxImages * maxImageBytes;
 
-  function failure(error) {
+  function failure(error, timeout) {
     signal?.throwIfAborted();
-    return timeout.aborted ? '本批图片读取超时' : (error?.message || '飞书图片读取失败');
+    return timeout?.aborted ? '图片读取超时' : (error?.message || '飞书图片读取失败');
   }
 
   async function loadMessage(messageId) {
     let keys = stored.get(messageId)?.imageKeys;
     if (!keys) {
+      const attempt = itemSignal();
       try {
         const message = await withAccessToken(scopedAuth, (accessToken) => getMessage({
-          accessToken, messageId, fetchImpl, signal: downloadSignal,
-        }), downloadSignal);
+          accessToken, messageId, fetchImpl, signal: attempt.signal,
+        }), attempt.signal);
         if (!message || message.deleted) throw new Error('原消息不可读取');
         if (message.chatId !== chat.chatId || message.messageId !== messageId) throw new Error('原消息不属于当前会话');
         keys = message.imageKeys ?? [];
       } catch (error) {
-        return [{ error: failure(error) }];
+        return [{ lookupFailed: true, error: failure(error, attempt.timeout) }];
       }
     }
 
@@ -53,21 +55,23 @@ export async function loadBatchImages({ auth, chat, messages, cachedMessages, li
         result.push({ imageIndex, error: '本批图片已达到加载上限' });
         continue;
       }
+      const attempt = itemSignal();
       try {
+        const request = createUserFeishuRequest({ auth: scopedAuth, fetchImpl, signal: attempt.signal });
         const data = await downloadMessageImage({
-          request, messageId, imageKey, maxBytes: Math.min(maxImageBytes, remainingBytes), signal: downloadSignal,
+          request, messageId, imageKey, maxBytes: Math.min(maxImageBytes, remainingBytes), signal: attempt.signal,
         });
         const mediaType = sniffImageType(data);
         if (!mediaType || (limits?.mediaTypes && !limits.mediaTypes.includes(mediaType))) {
           throw new Error('图片格式不受当前 DSH 支持');
         }
         const name = `feishu-${messageId}-${imageIndex}`;
-        await validateImage?.({ data, mediaType, name }, downloadSignal);
+        await validateImage?.({ data, mediaType, name }, attempt.signal);
         remainingBytes -= data.length;
         const partIndex = parts.push(imagePromptPart(data, mediaType, name));
         result.push({ imageIndex, partIndex });
       } catch (error) {
-        result.push({ imageIndex, error: failure(error) });
+        result.push({ imageIndex, error: failure(error, attempt.timeout) });
       }
     }
     return result;
@@ -75,9 +79,10 @@ export async function loadBatchImages({ auth, chat, messages, cachedMessages, li
 
   async function annotations(messageId, source) {
     if (!loaded.has(messageId)) loaded.set(messageId, await loadMessage(messageId));
-    return loaded.get(messageId).map(({ imageIndex, ...entry }) => ({
-      label: imageIndex ? `${source}的第 ${imageIndex} 张图片` : `${source}的图片附件`,
-      ...entry,
+    return loaded.get(messageId).map(({ imageIndex, lookupFailed, ...entry }) => ({
+      label: imageIndex ? `${source}的第 ${imageIndex} 张图片`
+        : (lookupFailed ? `${source}无法读取原消息，未确认是否含图片` : `${source}的图片附件`),
+      ...(lookupFailed ? { error: entry.error } : entry),
     }));
   }
 

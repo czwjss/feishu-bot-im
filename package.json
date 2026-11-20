@@ -1,6 +1,6 @@
 {
   "name": "@czwjss/feishu-bot-im",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "type": "module",
   "description": "飞书机器人IM：DeepSeek Harness 的飞书接入插件（多机器人、扫码接入、卡片回复、上下文注入、用户分身）",
   "exports": {
@@ -20,11 +20,8 @@
     "docs/tools.md",
     "docs/management-panel.md",
     "docs/user-identity-architecture.md",
-    "docs/user-identity-architecture.html",
     "docs/feishu-scopes.md",
-    "docs/user-message-monitor-design.md",
-    "docs/feishu-avatar-message-flow.svg",
-    "docs/bot-inbound-flow.html"
+    "docs/user-message-monitor-design.md"
   ],
   "dsh": {
     "bundle": {
@@ -54,8 +51,9 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "build:client": "node scripts/build-client.mjs",
-    "pretest": "npm run build:client",
-    "prepublishOnly": "npm run build:client"
+    "check:contracts": "node scripts/check-tool-contracts.mjs",
+    "pretest": "node scripts/build-client.mjs",
+    "prepublishOnly": "node scripts/build-client.mjs && node --test test/*.test.mjs"
   },
   "license": "MIT",
   "repository": {

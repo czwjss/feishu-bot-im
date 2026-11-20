@@ -100,6 +100,7 @@ export function WorkspacePage({ connection, openSession, workerView, memory: sup
   const [selected, setSelected] = React.useState(memory.botId || null);
   const [addMode, setAddMode] = React.useState(null);
   const [addOpen, setAddOpen] = React.useState(false);
+  const knownBotIdsRef = React.useRef(null);
   const addRef = React.useRef(null);
   const addButton = React.useRef(null);
   const navRef = React.useRef(null);
@@ -153,8 +154,10 @@ export function WorkspacePage({ connection, openSession, workerView, memory: sup
     query.accept(merged);
   });
   const added = async () => {
+    const before = knownBotIdsRef.current ?? new Set(snapshotRef.current.bots.map((item) => item.id));
+    knownBotIdsRef.current = null;
     const next = await changed();
-    const newBot = next?.bots.find((item) => !snapshot.bots.some((old) => old.id === item.id));
+    const newBot = next?.bots.find((item) => !before.has(item.id));
     if (newBot) await selectBot(newBot.id);
   };
   const globalWarnings = snapshot.warnings.filter((warning) => !snapshot.bots.some((item) => item.id === warning.source));
@@ -178,7 +181,14 @@ export function WorkspacePage({ connection, openSession, workerView, memory: sup
             onClick: () => setAddOpen((value) => !value) }, t('添加机器人', 'Add bot')),
           addOpen && h('div', { className: 'bxf-bot-more-panel', role: 'group', 'aria-label': t('添加方式', 'Add method') },
             [['manual', t('手动添加', 'Add manually')], ['scan', t('扫码添加', 'Add by scanning')]].map(([mode, label]) =>
-              h('button', { key: mode, type: 'button', className: 'bxf-mini', onClick: () => { setAddOpen(false); setAddMode(mode); } }, label))))),
+              h('button', {
+                key: mode, type: 'button', className: 'bxf-mini',
+                onClick: () => {
+                  knownBotIdsRef.current = new Set(snapshotRef.current.bots.map((item) => item.id));
+                  setAddOpen(false);
+                  setAddMode(mode);
+                },
+              }, label))))),
       (error || query.error) && h('div', { className: 'bxf-work-alert', role: 'alert' }, error || query.error,
         h('button', { type: 'button', className: 'bxf-mini', onClick: () => void query.refresh() }, t('重试', 'Retry'))),
       globalWarnings.map((warning, index) => h('div', { key: index, className: 'bxf-work-alert', role: 'status' }, warning.message)),

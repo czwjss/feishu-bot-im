@@ -37,17 +37,19 @@ const h = React.createElement;
         setScan(snapshot);
       });
       const cancelScan = () => {
+        if (busy === 'submit') return;
         invalidate();
         setScan(null);
         if (mode === 'scan') void rpc(connection, API.provisionCancel, {}).catch(() => undefined);
         onClose();
       };
-      const close = React.useRef(cancelScan);
-      close.current = cancelScan;
+      const dialogRef = React.useRef(null);
+      const backdropDownRef = React.useRef(false);
       React.useEffect(() => {
-        const onKey = (event) => { if (event.key === 'Escape') close.current(); };
-        window.addEventListener('keydown', onKey);
-        return () => window.removeEventListener('keydown', onKey);
+        const dialog = dialogRef.current;
+        if (!dialog || typeof dialog.showModal !== 'function') return;
+        if (!dialog.open) dialog.showModal();
+        return () => { if (dialog.open) dialog.close(); };
       }, []);
       const started = React.useRef(false);
       React.useEffect(() => {
@@ -57,9 +59,27 @@ const h = React.createElement;
         onAdded(); onClose();
       });
 
-      return h('div', { style: S.overlay, role: 'dialog', 'aria-modal': true, onClick: (event) => { if (event.target === event.currentTarget) cancelScan(); } },
-        h('div', { style: S.modal },
-          h('h3', { style: { margin: '0 0 4px', fontSize: '15px' } },
+      const titleId = `bxf-add-bot-title-${mode}`;
+      return h('dialog', {
+        ref: dialogRef,
+        className: 'bxf-modal-dialog',
+        'aria-labelledby': titleId,
+        onCancel: (event) => { event.preventDefault(); cancelScan(); },
+        onPointerDown: (event) => { backdropDownRef.current = event.target === event.currentTarget; },
+        onClick: (event) => {
+          const fromBackdrop = backdropDownRef.current;
+          backdropDownRef.current = false;
+          if (event.target === event.currentTarget && fromBackdrop) cancelScan();
+        },
+      },
+        h('form', {
+          style: S.modal,
+          onSubmit: (event) => {
+            event.preventDefault();
+            if (mode === 'manual' && !busy && form.appId && form.appSecret) void submit();
+          },
+        },
+          h('h3', { id: titleId, style: { margin: '0 0 4px', fontSize: '15px' } },
             mode === 'scan'
               ? (grant ? t('扫码补齐权限', 'Grant by scanning') : t('扫码添加机器人', 'Add by scanning'))
               : t('手动添加机器人', 'Add manually')),
@@ -71,7 +91,7 @@ const h = React.createElement;
                     padding: '10px', background: '#fff', borderRadius: '12px', lineHeight: 0,
                     border: '1px solid var(--dsw-alias-border-l1)', boxShadow: '0 2px 10px rgba(15,23,42,.08)',
                   },
-                }, h('img', { src: scan.qrCodeDataUrl, width: 200, height: 200, alt: 'QR' }))
+                }, h('img', { src: scan.qrCodeDataUrl, width: 200, height: 200, alt: t('飞书授权二维码', 'Feishu authorization QR code') }))
                 : h('div', {
                   style: {
                     width: '200px', height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -94,7 +114,10 @@ const h = React.createElement;
                   : t('请稍候…', 'Please wait…')),
               error ? h('div', { style: S.error }, error) : null,
               h('div', { style: { display: 'flex', gap: '8px' } },
-                h('button', { type: 'button', style: S.btn(), onClick: cancelScan }, t('取消扫码', 'Stop')),
+                h('button', { type: 'button', style: S.btn(), onClick: cancelScan }, t('取消扫码', 'Cancel scan')),
+                pollError && scan && !terminal
+                  ? h('button', { type: 'button', style: S.btn(), disabled: Boolean(busy), onClick: () => void poll() }, t('继续检查', 'Resume check'))
+                  : null,
                 (error || (scan && ['denied', 'expired', 'error', 'cancelled'].includes(scan.state)))
                   ? h('button', { type: 'button', style: S.btn('primary'), disabled: Boolean(busy), onClick: startScan }, t('重新生成', 'Retry'))
                   : null))
@@ -113,7 +136,7 @@ const h = React.createElement;
               ? h('button', { type: 'button', style: S.btn(), onClick: cancelScan, disabled: busy }, t('取消', 'Cancel'))
               : null,
             mode === 'manual'
-              ? h('button', { type: 'button', style: S.btn('primary'), onClick: submit, disabled: busy || !form.appId || !form.appSecret },
+              ? h('button', { type: 'submit', style: S.btn('primary'), disabled: busy || !form.appId || !form.appSecret },
                 busy ? t('正在验证…', 'Verifying…') : t('绑定并连接', 'Bind and connect'))
               : null)));
     }
@@ -122,7 +145,9 @@ const h = React.createElement;
     export function BotSettings({ connection, bot, models = [], presets = [], workspaces = [], permissionOptions = [], onChanged, registerSave }) {
       const [settingsTab, setSettingsTab] = React.useState('general');
       const [draft, setDraft] = React.useState(null);
+      const [limitText, setLimitText] = React.useState('20');
       const draftRef = React.useRef(null);
+      const baselineRef = React.useRef(null);
       const autoSave = useAutoSave();
       React.useEffect(() => registerSave?.(`bot:${bot.id}`, autoSave.flush), [registerSave, bot.id, autoSave.flush]);
 
@@ -162,16 +187,41 @@ const h = React.createElement;
         };
       }, [bot]);
 
-      // Re-seed only when the identity changes: the 15s poll must not wipe edits.
       const seedRef = React.useRef(seed);
       seedRef.current = seed;
       React.useEffect(() => {
         const initial = seedRef.current();
         draftRef.current = initial;
+        baselineRef.current = initial;
         setDraft(initial);
+        setLimitText(String(initial.eavesdrop.limit));
         setSettingsTab('general');
       }, [bot.id]);
 
+      // 15s 轮询更新时仅同步用户未修改过的字段，保留正在编辑或未保存的脏草稿。
+      React.useEffect(() => {
+        const current = draftRef.current;
+        const prevBase = baselineRef.current;
+        if (!current || !prevBase) return;
+        const nextBase = seed(bot);
+        baselineRef.current = nextBase;
+        const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+        let changed = false;
+        const merged = { ...current };
+        for (const key of Object.keys(nextBase)) {
+          if (sameJson(current[key], prevBase[key]) && !sameJson(nextBase[key], prevBase[key])) {
+            merged[key] = nextBase[key];
+            changed = true;
+          }
+        }
+        if (changed) {
+          draftRef.current = merged;
+          setDraft(merged);
+          if (sameJson(current.eavesdrop, prevBase.eavesdrop) && merged.eavesdrop.limit !== prevBase.eavesdrop.limit) {
+            setLimitText(String(merged.eavesdrop.limit));
+          }
+        }
+      }, [bot, seed]);
       const set = (patch, delay = 0) => {
         const previous = draftRef.current;
         const next = typeof patch === 'function' ? patch(previous) : { ...previous, ...patch };
@@ -242,32 +292,42 @@ const h = React.createElement;
                 'aria-selected': settingsTab === id, tabIndex: settingsTab === id ? 0 : -1,
                 onClick: () => selectSettings(id), onKeyDown: (event) => onTabKey(event, index),
               }, label))),
-            h(SaveStatus, { state: autoSave.state, onRetry: autoSave.retry })),
+            h(SaveStatus, { state: autoSave.state, onRetry: autoSave.retry, onDiscard: autoSave.discard })),
           pane('general',
             group(t('会话默认', 'Session defaults'),
               h(Field, { label: t('默认工作区', 'Default workspace'), hint: t('列表来自 DSH 已登记的工作区。', 'From the workspaces DSH already knows.') },
-                h('select', {
-                  style: S.input, value: draft.workspaceMode,
-                  title: draft.workspace || t('跟随 DSH 默认', 'Host default'),
-                  onChange: (event) => {
-                    const next = event.target.value;
-                    set({ workspaceMode: next, workspace: next === '__custom__' ? draft.workspaceCustom : next });
-                  },
-                },
-                h('option', { value: '' }, t('跟随 DSH 默认', 'Host default')),
-                workspaces.map((item) => h('option', { key: item.path, value: item.path }, item.title && item.title !== item.path ? `${item.title} — ${item.path}` : item.path)),
-                h('option', { value: '__custom__' }, t('自定义路径…', 'Custom path…'))),
-                draft.workspaceMode === '__custom__'
-                  ? h('input', {
-                    style: { ...S.input, marginTop: '8px' }, value: draft.workspaceCustom, placeholder: '/Users/you/work',
-                    'aria-label': t('自定义路径…', 'Custom path…'),
-                    onChange: (event) => set({ workspaceCustom: event.target.value, workspace: event.target.value }, 600),
-                    onBlur: () => void autoSave.flush(),
-                  })
-                  : null),
+                (() => {
+                  const knownWorkspace = workspaces.some((item) => item.path === draft.workspaceMode);
+                  const effectiveWorkspaceMode = draft.workspaceMode === ''
+                    ? ''
+                    : (draft.workspaceMode === '__custom__' || !knownWorkspace ? '__custom__' : draft.workspaceMode);
+                  return h(React.Fragment, null,
+                    h('select', {
+                      style: S.input, value: effectiveWorkspaceMode,
+                      title: draft.workspace || t('跟随 DSH 默认', 'Host default'),
+                      onChange: (event) => {
+                        const next = event.target.value;
+                        set((current) => ({ ...current, workspaceMode: next, workspace: next === '__custom__' ? current.workspaceCustom : next }));
+                      },
+                    },
+                    h('option', { value: '' }, t('跟随 DSH 默认', 'Host default')),
+                    workspaces.map((item) => h('option', { key: item.path, value: item.path }, item.title && item.title !== item.path ? `${item.title} — ${item.path}` : item.path)),
+                    h('option', { value: '__custom__' }, t('自定义路径…', 'Custom path…'))),
+                    effectiveWorkspaceMode === '__custom__'
+                      ? h('input', {
+                        style: { ...S.input, marginTop: '8px' }, value: draft.workspaceCustom, placeholder: '/Users/you/work',
+                        'aria-label': t('自定义路径…', 'Custom path…'),
+                        onChange: (event) => set({ workspaceCustom: event.target.value, workspace: event.target.value }, 600),
+                        onBlur: () => void autoSave.flush(),
+                      })
+                      : null);
+                })()),
               h(Field, { label: t('Agent 预设', 'Agent preset'), hint: t('只影响之后新建的会话，已有会话不变。', 'Applies only to Sessions created later.') },
                 h('select', { style: S.input, value: draft.preset, onChange: (event) => set({ preset: event.target.value }) },
                   h('option', { value: '' }, t('跟随 Host 默认预设', 'Host default preset')),
+                  draft.preset && !presets.some((item) => item.id === draft.preset)
+                    ? h('option', { value: draft.preset }, `${draft.preset}${t('（当前）', ' (current)')}`)
+                    : null,
                   presets.map((item) => h('option', { key: item.id, value: item.id }, item.name ?? item.id)))),
               h(Field, { label: t('新会话权限档位', 'New-session permission'), hint: t('只影响之后新建的会话，已有会话不变。', 'Applies only to Sessions created later.') },
                 h('select', {
@@ -290,6 +350,9 @@ const h = React.createElement;
                   },
                 },
                 h('option', { value: '' }, t('跟随 Host 默认', 'Host default')),
+                draft.provider && draft.model && !selectedModel
+                  ? h('option', { value: `${draft.provider}/${draft.model}` }, `${draft.provider} / ${draft.model}${t('（当前）', ' (current)')}`)
+                  : null,
                 models.map((item) => h('option', { key: `${item.provider}/${item.model}`, value: `${item.provider}/${item.model}` }, item.label)))),
               h(Field, { label: t('思考强度', 'Reasoning effort') },
                 h('select', {
@@ -333,19 +396,29 @@ const h = React.createElement;
                   h('input', {
                     type: 'checkbox',
                     checked: draft.eavesdrop.enabled,
-                    onChange: (event) => set({ eavesdrop: { ...draft.eavesdrop, enabled: event.target.checked } }),
+                    onChange: (event) => set((current) => ({ ...current, eavesdrop: { ...current.eavesdrop, enabled: event.target.checked } })),
                   }),
                   t('允许', 'Allow'))),
               draft.eavesdrop.enabled
                 ? h(Field, { label: t('滚动保留条数', 'Rolling buffer size'), hint: t('默认保留最近 20 条；超过后丢弃最旧的旁听消息，最多 500 条。', 'Keeps the latest 20 messages by default; older messages are dropped past this limit, up to 500.') },
                   h('input', {
-                    type: 'number', min: 1, max: 500, style: S.input, value: draft.eavesdrop.limit,
-                    onChange: (event) => set({
-                      eavesdrop: {
-                        ...draft.eavesdrop,
-                        limit: Math.min(500, Math.max(1, Number.parseInt(event.target.value, 10) || 20)),
-                      },
-                    }),
+                    type: 'number', min: 1, max: 500, style: S.input, value: limitText,
+                    onChange: (event) => {
+                      const raw = event.target.value;
+                      setLimitText(raw);
+                      const parsed = Number.parseInt(raw, 10);
+                      if (Number.isFinite(parsed) && parsed >= 1) {
+                        const clamped = Math.min(500, parsed);
+                        set((current) => ({ ...current, eavesdrop: { ...current.eavesdrop, limit: clamped } }), 600);
+                      }
+                    },
+                    onBlur: () => {
+                      const parsed = Number.parseInt(limitText, 10);
+                      const clamped = Number.isFinite(parsed) && parsed >= 1 ? Math.min(500, parsed) : 20;
+                      setLimitText(String(clamped));
+                      set((current) => ({ ...current, eavesdrop: { ...current.eavesdrop, limit: clamped } }));
+                      void autoSave.flush();
+                    },
                   }))
                 : null,
               h(Field, { className: 'bxf-setting-toggle', label: t('允许机器人 at 人（默认开启）', 'Let the bot mention people (on by default)'), hint: t('涉及需要某人决策、批准、确认或选择时，一律用 at 提及当事人；纯信息同步、状态汇报和闲聊不要 at；不确定具体当事人时也不要 at。插件会校验 open_id，非法或未开启时擦除。', 'When someone must decide, approve, confirm, or choose, always mention that person; do not mention for plain information sync, status updates, or chat, and do not guess when the person is unclear. The plugin validates open_ids and erases invalid or disabled mentions.') },
@@ -353,7 +426,7 @@ const h = React.createElement;
                   h('input', {
                     type: 'checkbox',
                     checked: draft.mentions.enabled,
-                    onChange: (event) => set({ mentions: { ...draft.mentions, enabled: event.target.checked } }),
+                    onChange: (event) => set((current) => ({ ...current, mentions: { ...current.mentions, enabled: event.target.checked } })),
                   }),
                   t('允许', 'Allow'))),
               draft.mentions.enabled
@@ -362,7 +435,7 @@ const h = React.createElement;
                     h('input', {
                       type: 'checkbox',
                       checked: draft.mentions.allowAll !== true,
-                      onChange: (event) => set({ mentions: { ...draft.mentions, allowAll: !event.target.checked } }),
+                      onChange: (event) => set((current) => ({ ...current, mentions: { ...current.mentions, allowAll: !event.target.checked } })),
                     }),
                     t('禁止', 'Forbid')))
                 : null),

@@ -3,7 +3,7 @@
  *
  * 由 contributions.js 在 Host 全局注册；这里只定义工具契约与执行逻辑。
  */
-import { withAccessToken } from './auth.js';
+import { createTokenSession, withAccessToken } from './auth.js';
 import { createCloudTool } from './cloud-tool.js';
 import { createWikiTool } from './wiki-tool.js';
 import { boundedInteger, defineFeishuTool, HISTORY_PARAMETERS, historyOptions, historyTimeRange, renderToolOutput, validateCardText } from '../tool-contract.js';
@@ -332,13 +332,14 @@ export function createSendTool({ auth, fetchImpl }) {
         signal: context?.signal,
       };
       if (path) {
-        const sent = await withAccessToken(auth, (accessToken) => sendMediaMessage({
+        const tokenSession = createTokenSession(auth, { signal: context?.signal });
+        const sent = await sendMediaMessage({
           ...recipient,
-          accessToken,
           path,
           name: name || undefined,
           cwd: context?.agent?.session?.cwd,
-        }), context?.signal);
+          withToken: (operation) => tokenSession.run(operation),
+        });
         return {
           messageId: sent.messageId,
           chatId: sent.chatId,
@@ -381,7 +382,7 @@ export function createUserIdentityTools({ auth, fetchImpl, harness } = {}) {
     createChatsTool({ auth, fetchImpl }),
     createMessagesTool({ auth, fetchImpl, harness }),
     createSendTool({ auth, fetchImpl }),
-    createCloudTool({ auth, fetchImpl }),
-    createWikiTool({ auth, fetchImpl }),
+    createCloudTool({ auth, fetchImpl, harness }),
+    createWikiTool({ auth, fetchImpl, harness }),
   ];
 }

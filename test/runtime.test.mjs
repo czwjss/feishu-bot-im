@@ -152,7 +152,7 @@ assert.deepEqual(calls.filter((call) => call.kind === 'text' || call.kind === 'c
 // 7) 文件回传
 const file = join(dir, 'a.txt');
 await writeFile(file, 'hi');
-const sent = await manager.send({ sessionId: 'sess-2', path: file });
+const sent = await manager.send({ sessionId: 'sess-2', path: file, cwd: dir });
 assert.equal(sent.kind, 'file');
 assert.equal(sent.fileName, 'a.txt');
 assert.equal(calls.at(-1).kind, 'file-msg');

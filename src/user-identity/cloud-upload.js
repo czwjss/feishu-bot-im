@@ -1,6 +1,6 @@
 import { openAsBlob } from 'node:fs';
-import { stat } from 'node:fs/promises';
-import { basename, resolve } from 'node:path';
+import { basename } from 'node:path';
+import { resolveReadableLocalFile } from '../local-path.js';
 import { FeishuApiError } from './errors.js';
 
 export const MAX_CLOUD_UPLOAD_BYTES = 20 * 1024 * 1024;
@@ -22,7 +22,7 @@ async function existingFileName(request, id) {
   return metadata.title;
 }
 
-export async function uploadCloudFile({ request, path, cwd, folderId, wikiParentId, fileId, name, signal }) {
+export async function uploadCloudFile({ request, path, cwd, folderId, wikiParentId, parentType, fileId, name, signal }) {
   if (typeof path !== 'string' || !path.trim()) throw new Error('path 必须是本地文件路径');
   if (folderId !== undefined && (typeof folderId !== 'string' || !tokenPattern.test(folderId))) {
     throw new Error('上传需要有效的文件夹 ID');
@@ -39,9 +39,7 @@ export async function uploadCloudFile({ request, path, cwd, folderId, wikiParent
   }
 
   signal?.throwIfAborted();
-  const absolutePath = resolve(cwd || process.cwd(), path);
-  const info = await stat(absolutePath);
-  if (!info.isFile()) throw new Error('path 必须指向普通文件');
+  const { realPath: absolutePath, info } = await resolveReadableLocalFile(path, { cwd, signal });
   if (info.size > MAX_CLOUD_UPLOAD_BYTES) throw new Error('单次上传的文件不能超过 20 MiB');
   const file = await openAsBlob(absolutePath, { type: 'application/octet-stream' });
   if (file.size > MAX_CLOUD_UPLOAD_BYTES) throw new Error('单次上传的文件不能超过 20 MiB');
@@ -54,7 +52,7 @@ export async function uploadCloudFile({ request, path, cwd, folderId, wikiParent
   signal?.throwIfAborted();
   const form = new FormData();
   form.set('file_name', fileName);
-  form.set('parent_type', wikiParentId ? 'wiki' : 'explorer');
+  form.set('parent_type', parentType || (wikiParentId ? 'wiki' : 'explorer'));
   form.set('parent_node', wikiParentId ?? folderId ?? '');
   if (fileId) form.set('file_token', fileId);
   form.set('size', String(file.size));

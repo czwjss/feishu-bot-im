@@ -31,8 +31,10 @@ export function feishuErrorCode(error) {
       return Number(value.code);
     }
   }
-  const code = Number(error?.code);
-  return Number.isFinite(code) ? code : null;
+  const raw = error?.code;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw === 'string' && /^\d+$/.test(raw.trim())) return Number(raw.trim());
+  return null;
 }
 
 export function feishuHttpStatus(error) {

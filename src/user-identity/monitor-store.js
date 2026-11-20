@@ -11,14 +11,14 @@ import { JsonStore, definedFields } from '../json-store.js';
 import { DEFAULT_HANDOFF_KEYWORDS } from '../handoff.js';
 import { normalizeReplyRules } from './worker-context.js';
 
-export const MONITOR_VERSION = 3;
+const MONITOR_VERSION = 3;
 export const MONITOR_FILE = 'monitor.json';
 export const MONITOR_STATE_FILE = 'monitor-state.json';
 export const MAX_MONITOR_CHATS = 20;
 export const MAX_SEEN_IDS = 500;
 export const MAX_MESSAGES_PER_CHAT = 50;
-export const MAX_KEYWORDS = 10;
-export const TRIGGER_MODES = Object.freeze(['all', 'mention', 'keyword']);
+const MAX_KEYWORDS = 10;
+const TRIGGER_MODES = Object.freeze(['all', 'mention', 'keyword']);
 /** 一批消息的防抖窗口：首条到达后再等这么久就把批次交给 Worker。 */
 export const BATCH_DEBOUNCE_MS = 30_000;
 /** 批次最多等这么久，避免持续刷屏时一直不处理。 */
@@ -27,14 +27,14 @@ export const BATCH_MAX_MESSAGES = 10;
 /** Backpressure stops polling before unprocessed messages would be discarded. */
 export const MAX_PENDING_MESSAGES = 500;
 export const DEFAULT_WORKER_PRESET = 'standard';
-export const MAX_WORKER_PRESET = 40;
+const MAX_WORKER_PRESET = 40;
 export const MAX_PENDING_CARDS = 20;
-export const MAX_HANDOFF_KEYWORDS = 20;
-export const MAX_HANDOFF_KEYWORD_LENGTH = 40;
+const MAX_HANDOFF_KEYWORDS = 20;
+const MAX_HANDOFF_KEYWORD_LENGTH = 40;
 /** 消息处理结果：批次已派发给 Worker，后续不再由插件跟踪。 */
-export const DEFAULT_POLL_INTERVAL_MS = 30_000;
-export const MIN_POLL_INTERVAL_MS = 5_000;
-export const MAX_POLL_INTERVAL_MS = 60_000;
+const DEFAULT_POLL_INTERVAL_MS = 30_000;
+const MIN_POLL_INTERVAL_MS = 5_000;
+const MAX_POLL_INTERVAL_MS = 60_000;
 
 function cleanString(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : '';
@@ -49,7 +49,7 @@ function chatKey(chatId) {
   return /^oc_[A-Za-z0-9_-]{4,}$/.test(chatId) ? chatId : '';
 }
 
-export function normalizeKeywords(value) {
+function normalizeKeywords(value) {
   const list = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/[,，\n]/) : [];
   const keywords = [];
   for (const item of list) {
@@ -85,12 +85,13 @@ export function normalizeMonitorChat(value) {
 }
 
 /** Worker 会话的归属：工作区（id 优先，其次路径）与预设。 */
-export function normalizeWorkerConfig(value) {
+function normalizeWorkerConfig(value) {
   const source = value && typeof value === 'object' ? value : {};
   return Object.freeze({
     workspaceId: cleanString(source.workspaceId).slice(0, 121),
     workspacePath: cleanString(source.workspacePath),
     preset: cleanString(source.preset).slice(0, MAX_WORKER_PRESET),
+    permissionPreset: cleanString(source.permissionPreset).slice(0, MAX_WORKER_PRESET),
   });
 }
 
@@ -131,7 +132,7 @@ export function normalizeMonitorConfig(value) {
   });
 }
 
-export function normalizeMonitorMessage(value) {
+function normalizeMonitorMessage(value) {
   const source = value && typeof value === 'object' ? value : {};
   const messageId = cleanString(source.messageId);
   if (!messageId) return null;
@@ -158,7 +159,7 @@ function stringOf(value) {
 }
 
 /** 还在流式输出、尚未收尾的卡片：不进入消息列表，收尾后才补进来。 */
-export function normalizePendingCard(value) {
+function normalizePendingCard(value) {
   const source = value && typeof value === 'object' ? value : {};
   const messageId = cleanString(source.messageId);
   const chatId = chatKey(cleanString(source.chatId));
@@ -234,12 +235,15 @@ export function normalizeMonitorState(value) {
   }
   const pendingCards = [];
   const pendingIds = new Set();
+  const pendingByChat = new Map();
   for (const raw of Array.isArray(source.pendingCards) ? source.pendingCards : []) {
     const card = normalizePendingCard(raw);
     if (!card || pendingIds.has(card.messageId)) continue;
+    const count = pendingByChat.get(card.chatId) ?? 0;
+    if (count >= MAX_PENDING_CARDS) continue;
     pendingIds.add(card.messageId);
+    pendingByChat.set(card.chatId, count + 1);
     pendingCards.push(card);
-    if (pendingCards.length >= MAX_PENDING_CARDS) break;
   }
   // Worker 绑定独立于监听列表和批次，已被 Host 接收的任务在取消监听后仍可读取上下文。
   const workerSessions = Object.create(null);

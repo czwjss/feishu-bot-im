@@ -160,6 +160,9 @@ export class HarnessAdapter {
 
   /** Run the host's `/permission <preset>` command for this Session. */
   async setPermission(sessionId, preset) {
+    if (typeof preset !== 'string' || !/^[A-Za-z0-9._-]+$/.test(preset)) {
+      throw new Error(`非法权限档位：${preset}`);
+    }
     return this.invoke('commands', 'execute', {
       agentId: sessionId,
       line: `/permission ${preset}`,
@@ -167,6 +170,14 @@ export class HarnessAdapter {
     });
   }
 
+  /** Resolve the current DSH sandbox mode for a Session (e.g. 'read-only' | 'workspace-write' | 'danger-full-access'). */
+  sandboxModeOf(session) {
+    try {
+      return this.#ctx.get?.('sandboxPolicy')?.resolve?.({ ...(session ? { session } : {}) })?.mode ?? null;
+    } catch {
+      return null;
+    }
+  }
   /** Run the host's `/compact` command for this Session. */
   async compact(sessionId) {
     return this.invoke('commands', 'execute', {

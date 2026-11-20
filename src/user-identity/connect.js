@@ -4,7 +4,7 @@
  * begin() 拿到验证链接和 user_code 后，Host 在后台按飞书给的 interval 轮询；
  * 主面板只读 status()，不需要自己维持轮询或回调服务。
  */
-import { describeError } from './errors.js';
+import { FeishuOAuthError, describeError } from './errors.js';
 import { beginDeviceAuthorization, pollDeviceToken } from './oauth.js';
 
 const IDLE = Object.freeze({
@@ -126,6 +126,15 @@ export class UserIdentityConnect {
       });
     } catch (error) {
       if (generation !== this.#generation) return;
+      // 永久性 OAuth 错误（客户端配置错误、权限被拒、4xx 协议错误）立即终止，不空等超时。
+      const permanent = error instanceof FeishuOAuthError
+        && ((Number.isFinite(error.status) && error.status >= 400 && error.status < 500 && error.status !== 429)
+          || error.feishuCode !== null
+          || Boolean(error.error));
+      if (permanent) {
+        this.#finish(generation, 'failed', describeError(error));
+        return;
+      }
       // 网络抖动继续轮询，直到过期或成功。
       this.#logger?.warn?.('[im-feishu] 设备授权轮询失败，稍后重试', describeError(error));
       if (this.#now() >= pending.expiresAt) {

@@ -18,12 +18,11 @@ export const CORE_USER_SCOPES = Object.freeze([
   'im:message.p2p_msg:get_as_user',
 ]);
 
-/** 群列表、群成员、全文搜索和图片/文件上传。 */
+/** 群列表、群成员和图片/文件上传。 */
 export const CHAT_MEDIA_SEARCH_USER_SCOPES = Object.freeze([
   'im:chat:read',
   'im:chat.members:read',
   'im:resource',
-  'search:message',
 ]);
 
 /** 文档读取和搜索。 */
@@ -40,9 +39,6 @@ export const DOCS_WRITE_USER_SCOPES = Object.freeze([
   'docx:document:write_only',
   'docs:doc',
   'drive:file:upload',
-  'docs:permission.member:create',
-  'docs:permission.member:retrieve',
-  'docs:permission.member:update',
 ]);
 
 export const CLOUD_SPACE_USER_SCOPES = Object.freeze([

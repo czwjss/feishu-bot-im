@@ -32,6 +32,11 @@ export function renderPostText(post, { includeTitle = true, separator = '\n', me
   const lines = post.paragraphs.map((row) => row.map((node) => {
     if (mediaPlaceholders && node.tag === 'media') return '[视频]';
     if (mediaPlaceholders && node.tag === 'emotion') return '[表情]';
+    if (node.tag === 'at') {
+      const label = typeof node.user_name === 'string' && node.user_name ? node.user_name
+        : (typeof node.user_id === 'string' && node.user_id ? node.user_id : '');
+      return label ? (label.startsWith('@') ? label : `@${label}`) : '';
+    }
     if (typeof node.text === 'string') return node.text;
     if (node.tag === 'a' && typeof node.href === 'string') return node.href;
     return '';

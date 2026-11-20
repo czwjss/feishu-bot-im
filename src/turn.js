@@ -74,6 +74,9 @@ export class TurnRunner {
 
   dispose() {
     this.#disposed = true;
+    for (const turn of this.#turns.values()) {
+      if (turn.flushTimer) clearTimeout(turn.flushTimer);
+    }
     this.#turns.clear();
     this.#childTurns.clear();
     this.#contextWindows.clear();
@@ -134,7 +137,7 @@ export class TurnRunner {
     if (event.type === 'turn/start') {
       // The turn starts silent; its user/message source decides whether (and
       // to which chat) it renders. Ordinary Web turns stay silent.
-      this.#onTurnOrigin(sessionId, 'external');
+      this.#onTurnOrigin(sessionId, 'pending');
       const key = `${sessionId}:${event.data?.turn}`;
       if (this.#turns.has(key)) return;
       const turn = {
@@ -204,7 +207,7 @@ export class TurnRunner {
       active.originKind = origin.kind;
       if (origin.chatKey) active.chatKey = origin.chatKey;
       if (origin.chatId) active.chatId = origin.chatId;
-      this.#onTurnOrigin(sessionId, origin.kind === 'feishu' ? 'feishu' : 'external');
+      this.#onTurnOrigin(sessionId, origin.kind, { chatKey: active.chatKey, chatId: active.chatId });
       if (origin.kind !== 'external' && active.silent) {
         active.silent = false;
         await this.#flushTurn(active, '⏳ 已收到，正在处理…');
@@ -340,7 +343,7 @@ export class TurnRunner {
       total.cache += entry.cache;
       total.output += entry.output;
       total.calls += entry.calls;
-      rows.push({ label: `${entry.label}（${entry.calls} 步）`, input: entry.input, cache: entry.cache });
+      rows.push({ label: `${entry.label}（${entry.calls} 步）`, input: entry.input, output: entry.output, cache: entry.cache });
     }
     return { total, rows: rows.slice(-20) };
   }
@@ -413,12 +416,43 @@ export class TurnRunner {
 
   /** Serialize flushes per turn: only one card request may be in flight. */
   async #flushTurn(turn, text) {
+    if (typeof text === 'string' && text) turn.pendingText = text;
     if (turn.flushPromise) return turn.flushPromise;
-    const run = this.#flushTurnOnce(turn, text).catch((error) => {
-      this.#log('warn', 'card flush failed', error);
+    if (turn.flushTimer) {
+      clearTimeout(turn.flushTimer);
+      turn.flushTimer = null;
+    }
+    const run = (async () => {
+      try {
+        const latest = turn.pendingText ?? text;
+        await this.#flushTurnOnce(turn, latest);
+      } catch (error) {
+        this.#log('warn', 'card flush failed', error);
+      }
+    })();
+    turn.flushPromise = run.finally(() => {
+      turn.flushPromise = null;
+      this.#scheduleTrailingFlush(turn);
     });
-    turn.flushPromise = run.finally(() => { turn.flushPromise = null; });
     return turn.flushPromise;
+  }
+
+  /** Schedule one trailing flush if newer text arrived during flight or throttle window. */
+  #scheduleTrailingFlush(turn) {
+    if (this.#disposed || turn.finished || turn.flushTimer || turn.flushPromise) return;
+    const latest = turn.pendingText;
+    if (!latest || latest === turn.rendered) return;
+    if (turn.cardKind === 'cardkit' && turn.cardKitFailed) return;
+    const cadence = turn.cardKind === 'cardkit' ? STREAM_REFRESH_MS
+      : turn.cardKind === 'raw' ? REFRESH_MS : 0;
+    const waitMs = Math.max(0, cadence - (Date.now() - (turn.cardAt ?? 0)));
+    turn.flushTimer = setTimeout(() => {
+      turn.flushTimer = null;
+      if (!this.#disposed && !turn.finished && turn.pendingText && turn.pendingText !== turn.rendered) {
+        void this.#flushTurn(turn, turn.pendingText);
+      }
+    }, waitMs);
+    turn.flushTimer.unref?.();
   }
 
   /** Patch one card, retrying when Feishu rate-limits updates to that message. */
@@ -485,7 +519,6 @@ export class TurnRunner {
         );
         if (!turn.streamPanelBodies) turn.streamPanelBodies = {};
         turn.streamPanelBodies[elementId] = body;
-        turn.cardAt = Date.now();
         this.#logEvent('cardkit-panel', `session=${turn.sessionId} turn=${turn.turn} element=${elementId} seq=${sequence}`);
       } catch (error) {
         this.#log('warn', `CardKit ${elementId} panel update failed`, error);
@@ -512,10 +545,19 @@ export class TurnRunner {
           turn.cardSendUuid ??= randomUUID();
           let messageId = null;
           if (replyTo && typeof this.#bot.replyCardRef === 'function') {
-            messageId = await this.#retryCardKit(
-              () => this.#bot.replyCardRef(replyTo, cardId, turn.cardSendUuid),
-              'send',
-            );
+            try {
+              messageId = await this.#retryCardKit(
+                () => this.#bot.replyCardRef(replyTo, cardId, turn.cardSendUuid),
+                'send',
+              );
+            } catch (replyError) {
+              // 原消息可能被撤回或不可回复；先回退无引用发送，不误伤全局 CardKit。
+              this.#log('warn', 'CardKit reply failed; retrying direct send', replyError);
+              messageId = await this.#retryCardKit(
+                () => this.#bot.sendCardRef(turn.chatId, cardId, randomUUID()),
+                'send',
+              );
+            }
           } else {
             messageId = await this.#retryCardKit(
               () => this.#bot.sendCardRef(turn.chatId, cardId, turn.cardSendUuid),
@@ -543,7 +585,12 @@ export class TurnRunner {
       }
       try {
         if (replyTo && typeof this.#bot.replyCard === 'function') {
-          turn.cardMessageId = await this.#bot.replyCard(replyTo, this.#card(turn, body), turn.chatId);
+          try {
+            turn.cardMessageId = await this.#bot.replyCard(replyTo, this.#card(turn, body), turn.chatId);
+          } catch (replyError) {
+            this.#log('warn', 'raw replyCard failed; retrying direct sendCard', replyError);
+            turn.cardMessageId = await this.#bot.sendCard(turn.chatId, this.#card(turn, body));
+          }
         } else {
           turn.cardMessageId = await this.#bot.sendCard(turn.chatId, this.#card(turn, body));
         }
@@ -647,6 +694,11 @@ export class TurnRunner {
 
   async #finishTurn(turn, reason) {
     const key = `${turn.sessionId}:${turn.turn}`;
+    turn.finished = true;
+    if (turn.flushTimer) {
+      clearTimeout(turn.flushTimer);
+      turn.flushTimer = null;
+    }
     this.#turns.delete(key);
     for (const childId of turn.childIds) this.#childTurns.delete(childId);
     const kind = reason?.kind ?? 'completed';
@@ -700,22 +752,25 @@ export class TurnRunner {
         for (const rest of chunks.slice(1)) await sendNotice(this.#bot, turn.chatId, this.#mentionText(turn, rest, 'card'));
       } else if (turn.placeholderId) {
         const chunks = splitText(final, 3_500);
-        await this.#bot.updateText(turn.placeholderId, `${this.#mentionText(turn, chunks[0] ?? final, 'text')}\n\n${this.#statusNote(kind)}`);
+        const note = this.#statusNote(kind);
+        const first = [this.#mentionText(turn, chunks[0] ?? final, 'text'), note].filter(Boolean).join('\n\n');
+        await this.#bot.updateText(turn.placeholderId, first);
         cardPatched = true;
-        for (const rest of chunks.slice(1)) await sendNotice(this.#bot, turn.chatId, this.#mentionText(turn, rest, 'card'));
+        for (const rest of chunks.slice(1)) await this.#bot.sendText(turn.chatId, this.#mentionText(turn, rest, 'text'));
       } else {
-        await this.#bot.sendText(turn.chatId, this.#mentionText(turn, final, 'text'));
+        await this.#sendFinalText(turn, final, kind);
         cardPatched = true;
       }
     } catch (error) {
       // The card may be rate-limited or otherwise unavailable; still deliver the answer.
       this.#log('warn', 'final answer card failed', error);
-      if (cardPatched) return;
-      try {
-        await this.#sendFinalText(turn, final, kind);
-      } catch (fallbackError) {
-        this.#log('error', 'final answer failed', fallbackError);
-        await sendNotice(this.#bot, turn.chatId, `回复发送失败：${fallbackError.message}`, '发送失败');
+      if (!cardPatched) {
+        try {
+          await this.#sendFinalText(turn, final, kind);
+        } catch (fallbackError) {
+          this.#log('error', 'final answer failed', fallbackError);
+          await sendNotice(this.#bot, turn.chatId, `回复发送失败：${fallbackError.message}`, '发送失败');
+        }
       }
     }
     if (snapshot.total.calls > 0) {

@@ -1,11 +1,11 @@
 export const WORKSPACE_CSS = `
 .bxf-work { height: 100%; min-height: 0; min-width: 0; overflow: hidden; container: feishu / inline-size;
   background: var(--dsw-alias-bg-base, #f8f9fb); color: var(--dsw-alias-label-primary, #1c1c1e); font-size: 13px; line-height: 1.5; }
-.bxf-work *, .bxf-work *::before, .bxf-work *::after { box-sizing: border-box; }
+.bxf-work :not(.bxf-worker-native *), .bxf-work :not(.bxf-worker-native *)::before, .bxf-work :not(.bxf-worker-native *)::after { box-sizing: border-box; }
 .bxf-work :is(button, input, select):not(.bxf-worker-native *) { font: inherit; }
-.bxf-work button { cursor: pointer; }
-.bxf-work button:disabled { opacity: .45; cursor: not-allowed; }
-.bxf-work button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 3px; }
+.bxf-work button:not(.bxf-worker-native *) { cursor: pointer; }
+.bxf-work button:not(.bxf-worker-native *):disabled { opacity: .45; cursor: not-allowed; }
+.bxf-work button:not(.bxf-worker-native *):focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 3px; }
 .bxf-work [hidden] { display: none !important; }
 .bxf-work-shell { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
 .bxf-work-header, .bxf-work-toolbar, .bxf-work-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
@@ -175,5 +175,7 @@ export const WORKSPACE_CSS = `
 .bxf-work-diagnosis { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 0; }
 .bxf-action-tip { position: relative; display: inline-flex; }
 .bxf-action-tip-body { position: absolute; top: calc(100% + 8px); z-index: 20; width: min(280px, calc(100vw - 24px)); padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l1, #e5e7eb); border-radius: 8px; background: var(--dsw-alias-bg-overlay, #fff); color: var(--dsw-alias-label-primary, #1c1c1e); font-size: 12px; line-height: 1.6; white-space: normal; box-shadow: 0 6px 18px rgba(15,23,42,.12); }
+.bxf-modal-dialog { padding: 0; border: 0; background: transparent; max-width: calc(100vw - 40px); overflow: visible; }
+.bxf-modal-dialog::backdrop { background: rgba(15,23,42,.35); }
 
 `;

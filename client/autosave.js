@@ -41,6 +41,12 @@ export function createAutoSave() {
       if (job.ready) void pump();
     },
     cancel(key) { clearTimeout(pending.get(key)?.timer); pending.delete(key); publish(); },
+    discard() {
+      composing = false;
+      for (const job of pending.values()) clearTimeout(job.timer);
+      pending.clear();
+      publish();
+    },
     pauseText() {
       composing = true;
       for (const job of pending.values()) if (job.delay > 0) { clearTimeout(job.timer); job.ready = false; }
@@ -53,6 +59,7 @@ export function createAutoSave() {
       }
     },
     async flush(retry = false) {
+      composing = false;
       // New edits may arrive while a write is in flight; drain those too before closing.
       do {
         for (const job of pending.values()) {

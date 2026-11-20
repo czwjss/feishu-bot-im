@@ -42,207 +42,6 @@ var import_react19 = __toESM(require("react"), 1);
 // client/shared.js
 var import_react = __toESM(require("react"), 1);
 
-// client/locale.js
-var NS = "imFeishu";
-var MESSAGES = Object.freeze({
-  "\u7ED1\u5B9A DSH \u4F1A\u8BDD": "Bind a DSH session",
-  "\u9009\u62E9 DSH \u4F1A\u8BDD": "Choose a DSH session",
-  "\u5237\u65B0\u5217\u8868": "Refresh list",
-  "\u540E\u7EED\u89E6\u53D1\u6D88\u606F\u5C06\u8FDB\u5165\u6240\u9009\u4F1A\u8BDD\uFF0C\u4FDD\u7559\u5176\u5386\u53F2\u3001\u6A21\u578B\u548C\u5DE5\u4F5C\u533A\u3002": "Future triggering messages use the selected session, keeping its history, model and workspace.",
-  "\u641C\u7D22\u540D\u79F0\u3001Session ID \u6216\u5DE5\u4F5C\u533A": "Search name, Session ID or workspace",
-  "\u641C\u7D22 DSH \u4F1A\u8BDD": "Search DSH sessions",
-  "\u5F53\u524D\u7ED1\u5B9A\u5DF2\u53D8\u5316\uFF0C\u8BF7\u5237\u65B0\u5217\u8868\u540E\u91CD\u65B0\u9009\u62E9\u3002": "The current binding changed. Refresh the list and select again.",
-  "\u6B63\u5728\u8BFB\u53D6\u4F1A\u8BDD\u2026": "Loading sessions\u2026",
-  "DSH \u4F1A\u8BDD\u5217\u8868": "DSH sessions",
-  "\u6CA1\u6709\u5339\u914D\u7684 DSH \u4F1A\u8BDD": "No matching DSH sessions",
-  "\u672A\u6307\u5B9A\u5DE5\u4F5C\u533A": "No workspace",
-  "\u5F53\u524D\u7ED1\u5B9A": "Current binding",
-  "\u663E\u793A\u66F4\u591A": "Show more",
-  "\u7ED1\u5B9A\u4E2D\u2026": "Binding\u2026",
-  "\u786E\u8BA4\u7ED1\u5B9A": "Bind session",
-  "\u7ED1\u5B9A\u4F1A\u8BDD": "Bind session",
-  "\u66F4\u6362\u7ED1\u5B9A": "Change binding",
-  "\u9009\u62E9\u5DF2\u6709 DSH \u4F1A\u8BDD\u627F\u63A5\u540E\u7EED\u6D88\u606F\uFF0C\u4FDD\u7559\u8BE5\u4F1A\u8BDD\u7684\u5386\u53F2\u4E0E\u914D\u7F6E\u3002": "Select an existing DSH session for future messages, keeping its history and settings.",
-  "\u4F1A\u8BDD\u5DF2\u7ED1\u5B9A\uFF0C\u540E\u7EED\u89E6\u53D1\u6D88\u606F\u5C06\u8FDB\u5165\u8BE5\u4F1A\u8BDD\u3002": "Session bound. Future triggering messages will use this session.",
-  "\u98DE\u4E66\u673A\u5668\u4EBAIM": "Feishu Bot IM",
-  "\u8FD9\u91CC\u51FA\u9519\u4E86": "Something broke",
-  "\u8BF7\u6C42\u5931\u8D25": "Request failed",
-  "\u8FD0\u884C\u6B63\u5E38": "Connected",
-  "\u6B63\u5728\u8FDE\u63A5": "Connecting",
-  "\u6B63\u5728\u91CD\u8FDE": "Reconnecting",
-  "\u8FDE\u63A5\u5F02\u5E38": "Error",
-  "\u672A\u8FDE\u63A5": "Idle",
-  "\u626B\u7801\u8865\u9F50\u6743\u9650": "Grant by scanning",
-  "\u626B\u7801\u6DFB\u52A0\u673A\u5668\u4EBA": "Add by scanning",
-  "\u624B\u52A8\u6DFB\u52A0\u673A\u5668\u4EBA": "Add manually",
-  "\u6B63\u5728\u751F\u6210\u4E8C\u7EF4\u7801\u2026": "Preparing QR\u2026",
-  "\u7B49\u5F85\u626B\u7801\u786E\u8BA4": "Waiting for scan",
-  "\u8BF7\u5728\u98DE\u4E66\u91CC\u786E\u8BA4": "Confirm in Feishu",
-  "\u5DF2\u5728\u98DE\u4E66\u91CC\u53D6\u6D88": "Cancelled in Feishu",
-  "\u5DF2\u8FC7\u671F": "Expired",
-  "\u5DF2\u751F\u6548": "Applied",
-  "\u8BF7\u7A0D\u5019\u2026": "Please wait\u2026",
-  "\u53D6\u6D88\u626B\u7801": "Stop",
-  "\u91CD\u65B0\u751F\u6210": "Retry",
-  "\u98DE\u4E66\u5F00\u653E\u5E73\u53F0 \u2192 \u81EA\u5EFA\u5E94\u7528 \u2192 \u51ED\u8BC1\u4E0E\u57FA\u7840\u4FE1\u606F\uFF0C\u590D\u5236 App ID \u4E0E App Secret\u3002": "Feishu console \u2192 custom app \u2192 credentials.",
-  "\u53EA\u63D0\u4EA4\u7ED9\u672C\u673A Host\uFF0C\u5199\u5165 DSH \u51ED\u636E\u5E93\uFF0C\u4E0D\u4F1A\u56DE\u4F20\u6D4F\u89C8\u5668\u3002": "Stored by the local Host credential service; never returned.",
-  "\u53D6\u6D88": "Cancel",
-  "\u6B63\u5728\u9A8C\u8BC1\u2026": "Verifying\u2026",
-  "\u7ED1\u5B9A\u5E76\u8FDE\u63A5": "Bind and connect",
-  "\u4FDD\u5B58\u4E2D\u2026": "Saving\u2026",
-  "\u72B6\u6001": "State",
-  "\u5E94\u7528 ID": "App ID",
-  "\u673A\u5668\u4EBA": "Bot",
-  "\u673A\u5668\u4EBA Open ID": "Bot Open ID",
-  "\u5DF2\u7ED1\u5B9A\u4F1A\u8BDD": "Bound chats",
-  "\u5DE5\u4F5C\u533A": "Workspace",
-  "\u9ED8\u8BA4\u6A21\u578B": "Model",
-  "Agent \u9884\u8BBE": "Agent preset",
-  "\u8FDE\u63A5\u65F6\u95F4": "Connected at",
-  "\u6700\u8FD1\u9519\u8BEF": "Last error",
-  "\u5E94\u7528\u4FE1\u606F": "Application",
-  "\u51ED\u8BC1\u6709\u6548\uFF0C\u957F\u8FDE\u63A5\u6B63\u5E38": "Credentials verified; connection is active",
-  "\u51ED\u8BC1\u6709\u6548\uFF0C\u957F\u8FDE\u63A5\u672A\u5C31\u7EEA\uFF0C\u53EF\u70B9\u51FB\u91CD\u8FDE": "Credentials verified; connection is not ready. Reconnect to retry.",
-  "\u8865\u9F50\u6743\u9650": "Grant permissions",
-  "\u5DF2\u4FDD\u5B58": "Saved",
-  "\u7B49\u5F85\u4FDD\u5B58\u2026": "Waiting to save\u2026",
-  "\u4FDD\u5B58\u5931\u8D25\uFF1A": "Save failed: ",
-  "\u6CE8\u5165\u54EA\u4E9B\u6765\u6E90\u5B57\u6BB5\uFF1A\u53EA\u52FE\u9009\u6A21\u578B\u65E0\u6CD5\u81EA\u884C\u63A8\u65AD\u7684\u6D88\u606F\u5143\u4FE1\u606F\u3002": "Which source fields to inject.",
-  "\u589E\u5F3A\u63D0\u793A\u8BCD\uFF08\u53EF\u9009\uFF09": "Guidance (optional)",
-  "\u4F1A\u8BDD": "chats",
-  "\u7C7B\u578B\u672A\u77E5": "Unknown type",
-  "\u7B5B\u9009\u4F1A\u8BDD\u7C7B\u578B": "Filter chat type",
-  "\u5168\u90E8\u7C7B\u578B": "All types",
-  "\u89E3\u7ED1": "Unbind",
-  "\u89E3\u7ED1\u4E2D\u2026": "Unbinding\u2026",
-  "\u89E3\u9664\u4E0E DSH \u4F1A\u8BDD\u7684\u7ED1\u5B9A\uFF0C\u4FDD\u7559\u539F\u4F1A\u8BDD\u548C\u5386\u53F2\uFF1B\u4E0B\u6B21\u89E6\u53D1\u6D88\u606F\u4F1A\u521B\u5EFA\u65B0\u4F1A\u8BDD\u3002": "Detach the DSH session and keep its history. The next triggering message creates a new session.",
-  "\u91CD\u8FDE": "Reconnect",
-  "\u901A\u7528": "General",
-  "\u673A\u5668\u4EBA\u8BBE\u7F6E": "Bot settings",
-  "\u4F1A\u8BDD\u9ED8\u8BA4": "Session defaults",
-  "\u6A21\u578B\u4E0E\u8F93\u51FA": "Model and output",
-  "\u6D88\u606F\u5904\u7406": "Message handling",
-  "\u8BBF\u95EE\u6743\u9650": "Access control",
-  "\u79C1\u804A\u6D88\u606F\u5904\u7406": "Private-chat message handling",
-  "\u7FA4\u804A\u6D88\u606F\u5904\u7406": "Group-chat message handling",
-  "\u9ED8\u8BA4\u5DE5\u4F5C\u533A": "Default workspace",
-  "\u5217\u8868\u6765\u81EA DSH \u5DF2\u767B\u8BB0\u7684\u5DE5\u4F5C\u533A\u3002": "From the workspaces DSH already knows.",
-  "\u8DDF\u968F DSH \u9ED8\u8BA4": "Host default",
-  "\u81EA\u5B9A\u4E49\u8DEF\u5F84\u2026": "Custom path\u2026",
-  "\u8DDF\u968F Host \u9ED8\u8BA4": "Host default",
-  "\u601D\u8003\u5F3A\u5EA6": "Reasoning effort",
-  "\u8DDF\u968F\u6A21\u578B\u9ED8\u8BA4": "Model default",
-  "\u8FC7\u7A0B\u8BE6\u7EC6\u5EA6": "Progress detail",
-  "\u8BE6\u7EC6\uFF1A\u663E\u793A\u6BCF\u4E2A\u5DE5\u5177\u7684\u540D\u79F0\u4E0E\u53C2\u6570\uFF1B\u7B80\u8981\uFF1A\u53EA\u663E\u793A\u5DE5\u5177\u540D\u4E0E\u6C47\u603B\u3002": "Detailed shows tool arguments; brief keeps names and the summary.",
-  "\u8BE6\u7EC6": "Detailed",
-  "\u7B80\u8981": "Brief",
-  "\u65B0\u4F1A\u8BDD\u6743\u9650\u6863\u4F4D": "New-session permission",
-  "\u53EA\u5F71\u54CD\u4E4B\u540E\u65B0\u5EFA\u7684\u4F1A\u8BDD\uFF0C\u5DF2\u6709\u4F1A\u8BDD\u4E0D\u53D8\u3002": "Applies only to Sessions created later.",
-  "\uFF08\u5F53\u524D\uFF09": " (current)",
-  "\u8DDF\u968F Host \u9ED8\u8BA4\u9884\u8BBE": "Host default preset",
-  "\u79C1\u804A": "Private chat",
-  "\u8FD0\u884C\u4E2D\u6536\u5230\u666E\u901A\u6D88\u606F": "While a turn runs",
-  "\u6392\u961F\u7B49\u5F85": "Queue",
-  "\u63D2\u5165\u4E3A\u8865\u5145\u6307\u4EE4": "Steer",
-  "\u79C1\u804A\u4E0A\u4E0B\u6587\u6CE8\u5165": "Private-chat context",
-  "\u7FA4\u804A": "Group chat",
-  "\u5141\u8BB8": "Allow",
-  "\u54CD\u5E94\u5176\u5B83\u673A\u5668\u4EBA\u7684\u6D88\u606F": "Reply to other bots",
-  "\u5F00\u542F\u540E\uFF0C\u5176\u5B83\u673A\u5668\u4EBA\uFF08\u5E94\u7528\uFF09\u5728\u7FA4\u91CC\u7684\u53D1\u8A00\u4E5F\u4F1A\u89E6\u53D1\u672C\u673A\u5668\u4EBA\u3002": "When on, messages from other bots also trigger this bot.",
-  "\u65C1\u542C\u7FA4\u6D88\u606F\uFF08\u9ED8\u8BA4\u5F00\u542F\uFF09": "Eavesdrop group messages (on by default)",
-  "\u53EA\u628A\u6CA1\u6709 at \u4F60\u7684\u6D88\u606F\u8BB0\u4E3A\u4E0A\u4E0B\u6587\uFF0C\u4E0D\u4F1A\u89E6\u53D1\u56DE\u590D\uFF1B\u56FE\u7247/\u6587\u4EF6\u53EA\u8BB0\u5360\u4F4D\u4FE1\u606F\uFF0C\u6A21\u578B\u9700\u8981\u65F6\u4F1A\u8BF7\u4F60 at \u5B83\u91CD\u53D1\u3002\u9700\u8981 im:message.group_msg \u6743\u9650\uFF1B\u53EF\u7528\u300C\u8865\u9F50\u6743\u9650\u300D\u626B\u7801\u6388\u6743\u3002": 'Only messages that do not mention the bot are kept as context; never triggers a reply; images/files become placeholders and the model asks you to mention it and resend them when needed. Requires im:message.group_msg; use "Grant permissions" to authorize.',
-  "\u6EDA\u52A8\u4FDD\u7559\u6761\u6570": "Rolling buffer size",
-  "\u9ED8\u8BA4\u4FDD\u7559\u6700\u8FD1 20 \u6761\uFF1B\u8D85\u8FC7\u540E\u4E22\u5F03\u6700\u65E7\u7684\u65C1\u542C\u6D88\u606F\uFF0C\u6700\u591A 500 \u6761\u3002": "Keeps the latest 20 messages by default; older messages are dropped past this limit, up to 500.",
-  "\u5141\u8BB8\u673A\u5668\u4EBA at \u4EBA\uFF08\u9ED8\u8BA4\u5F00\u542F\uFF09": "Let the bot mention people (on by default)",
-  "\u6D89\u53CA\u9700\u8981\u67D0\u4EBA\u51B3\u7B56\u3001\u6279\u51C6\u3001\u786E\u8BA4\u6216\u9009\u62E9\u65F6\uFF0C\u4E00\u5F8B\u7528 at \u63D0\u53CA\u5F53\u4E8B\u4EBA\uFF1B\u7EAF\u4FE1\u606F\u540C\u6B65\u3001\u72B6\u6001\u6C47\u62A5\u548C\u95F2\u804A\u4E0D\u8981 at\uFF1B\u4E0D\u786E\u5B9A\u5177\u4F53\u5F53\u4E8B\u4EBA\u65F6\u4E5F\u4E0D\u8981 at\u3002\u63D2\u4EF6\u4F1A\u6821\u9A8C open_id\uFF0C\u975E\u6CD5\u6216\u672A\u5F00\u542F\u65F6\u64E6\u9664\u3002": "When someone must decide, approve, confirm, or choose, always mention that person; do not mention for plain information sync, status updates, or chat, and do not guess when the person is unclear. The plugin validates open_ids and erases invalid or disabled mentions.",
-  "\u7981\u6B62 @\u6240\u6709\u4EBA\uFF08\u9ED8\u8BA4\u5F00\u542F\uFF09": "Forbid @all (on by default)",
-  "\u5173\u95ED\u540E\u6A21\u578B\u53EF\u4EE5 @\u6240\u6709\u4EBA\uFF1B\u63D2\u4EF6\u4ECD\u4F1A\u6821\u9A8C open_id\u3002": "When off, the model may mention everyone; open_ids are still validated.",
-  "\u7981\u6B62": "Forbid",
-  "\u8C01\u80FD\u4F7F\u7528\u7FA4\u804A\u4E2D\u7684\u673A\u5668\u4EBA": "Who may use the bot in groups",
-  "\u6240\u6709\u7528\u6237": "Everyone",
-  "\u4EC5\u767D\u540D\u5355": "Allowlist",
-  "\u7FA4\u804A\u767D\u540D\u5355 Open ID": "Group allowlist Open IDs",
-  "\u7BA1\u7406\u767D\u540D\u5355 Open ID\uFF08\u53EF\u6267\u884C /new\u3001\u505C\u6B62\u3001\u8C03\u6574\u4E0E\u5BA1\u6279\uFF09": "Manager allowlist (may run /new, stop, adjust and approve)",
-  "\u7559\u7A7A\u8868\u793A\u6CA1\u6709\u4EBA\u53EF\u4EE5\u5728\u7FA4\u91CC\u6267\u884C\u7BA1\u7406\u64CD\u4F5C\u3002": "Empty means nobody may manage in groups.",
-  "\u7FA4\u804A\u4E0A\u4E0B\u6587\u6CE8\u5165": "Group-chat context",
-  "\u79FB\u9664": "Remove",
-  "\u91CD\u8BD5": "Retry",
-  "\u6B63\u5728\u8BFB\u53D6\u2026": "Loading\u2026",
-  "\u624B\u52A8\u6DFB\u52A0": "Add manually",
-  "\u626B\u7801\u6DFB\u52A0": "Add by scanning",
-  "\u5DF2\u65AD\u5F00\u6388\u6743": "Disconnected",
-  "\u626B\u7801\u540E\u5728\u98DE\u4E66\u786E\u8BA4\u3002": "Confirm in Feishu after scanning.",
-  "\u5DF2\u8FDE\u63A5": "Connected",
-  "\u5F53\u524D\u6388\u6743\u7F3A\u5C11\u6743\u9650\uFF0C\u8BF7\u91CD\u65B0\u6388\u6743\uFF1A": "Authorization is missing scopes; re-authorize: ",
-  "\u91CD\u65B0\u6388\u6743": "Re-authorize",
-  "\u5237\u65B0\u4E2D\u2026": "Refreshing\u2026",
-  "\u65AD\u5F00\u6388\u6743": "Disconnect",
-  "\u6B63\u5728\u53D1\u8D77\u2026": "Starting\u2026",
-  "\u98DE\u4E66\u5206\u8EAB": "Feishu identity",
-  "\u7B49\u5F85\u626B\u7801": "Awaiting scan",
-  "\u6388\u6743\u4E0D\u5B8C\u6574": "Incomplete authorization",
-  "\u5206\u8EAB": "Identity",
-  "\u53D1\u9001\u8005 Open ID": "Sender Open ID",
-  "\u53D1\u9001\u8005\u540D\u79F0": "Sender name",
-  "\u53D1\u9001\u65F6\u95F4": "Sent at",
-  "\u7FA4\u540D\u79F0": "Group name",
-  "\u505C\u6B62\u76D1\u542C": "Stop",
-  "\u5F00\u59CB\u76D1\u542C": "Start",
-  "\u76D1\u542C\u4E2D": "Watching",
-  "\u5DF2\u6682\u505C": "Paused",
-  "\u7ACB\u5373\u68C0\u67E5": "Check now",
-  "\u6DFB\u52A0": "Add",
-  "\u5168\u90E8\u6D88\u606F": "All messages",
-  "\u5173\u952E\u8BCD": "Keywords",
-  "\u89E6\u53D1\u89C4\u5219": "Trigger",
-  "\u4EC5 @ \u4E0E\u56DE\u590D": "Mentions & replies",
-  "\u56DE\u590D\u5BF9\u8C61": "Reply to",
-  "\u4EC5\u771F\u4EBA": "People only",
-  "\u5305\u542B\u673A\u5668\u4EBA": "People & bots",
-  "\u5339\u914D\u5173\u952E\u8BCD": "Match keywords",
-  "\u5173\u952E\u8BCD\uFF0C\u9017\u53F7\u5206\u9694": "Keywords, comma separated",
-  "\u641C\u7D22\u4F1A\u8BDD": "Search chats",
-  "\u641C\u7D22\u4F1A\u8BDD\u540D\u79F0\u6216 ID": "Search chat name or ID",
-  "\u6B63\u5728\u8BFB\u53D6\u4F1A\u8BDD\u5217\u8868\u2026": "Loading chats\u2026",
-  "\u6CA1\u6709\u627E\u5230\u5339\u914D\u7684\u4F1A\u8BDD\uFF0C\u8BD5\u8BD5\u5176\u4ED6\u5173\u952E\u8BCD\u3002": "No matching chats. Try another keyword.",
-  "\u6240\u6709\u53EF\u7528\u4F1A\u8BDD\u90FD\u5DF2\u6DFB\u52A0\u3002": "All available chats have been added.",
-  "\u5DF2\u6DFB\u52A0": "Added",
-  "\u6DFB\u52A0\u4E2D\u2026": "Adding\u2026",
-  "\u6700\u8FD1\u68C0\u67E5": "Last checked",
-  "\u68C0\u67E5\u4E2D\u2026": "Checking\u2026",
-  "\u6DFB\u52A0\u4F1A\u8BDD": "Add chat",
-  "\u6D3E\u53D1\u4E2D\u2026": "Dispatching\u2026",
-  "\u91CD\u8BD5\u6D3E\u53D1": "Retry dispatch",
-  "\u81EA\u52A8\u56DE\u590D\u8BBE\u7F6E": "Auto-reply settings",
-  "\u8F6C\u4EBA\u5DE5\u5173\u952E\u8BCD": "Handoff keywords",
-  "\u8F6C\u4EBA\u5DE5\uFF0C\u4EBA\u5DE5\u5BA2\u670D": "human, agent",
-  "\u7528\u9017\u53F7\u5206\u9694\u3002\u547D\u4E2D\u65F6\u8DF3\u8FC7\u5F53\u524D\u56DE\u590D\uFF0C\u4EA4\u7531\u4EBA\u5DE5\u5904\u7406\u3002": "Separate with commas. Matching messages are left for a person.",
-  "\u5904\u7406\u4F1A\u8BDD": "Reply session",
-  "\u5206\u7EC4": "Group",
-  "\uFF08\u9ED8\u8BA4\uFF09": " (default)",
-  "\u9884\u8BBE": "Preset",
-  "\u9ED8\u8BA4": "Default",
-  "\u5206\u8EAB\u56DE\u590D\u89C4\u5219": "Avatar reply rules",
-  "\u6062\u590D\u9ED8\u8BA4\u6A21\u677F": "Restore default template",
-  "\u66F4\u6539\u540E\uFF0C\u5C06\u5728\u4E0B\u6B21\u81EA\u52A8\u56DE\u590D\u65F6\u521B\u5EFA\u65B0\u4F1A\u8BDD\u3002": "Changes create a new session on the next automatic reply.",
-  "\u51ED\u8BC1\u5DF2\u5237\u65B0": "Credentials refreshed",
-  "\u8BFB\u53D6\u72B6\u6001\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5\u3002": "Unable to load status. Please retry.",
-  "\u98DE\u4E66\u6388\u6743\u4E8C\u7EF4\u7801": "Feishu authorization QR code",
-  "\u8BBF\u95EE\u51ED\u8BC1\u5230\u671F": "Access token expires",
-  "\u6388\u6743\u5230\u671F": "Authorization expires",
-  "\u9700\u91CD\u65B0\u6388\u6743": "Re-authorization required",
-  "\u5237\u65B0\u51ED\u8BC1": "Refresh credentials"
-});
-function dictionaries() {
-  const zh = {};
-  const en = {};
-  for (const [key, value] of Object.entries(MESSAGES)) {
-    zh[key] = key;
-    en[key] = value;
-  }
-  return { zh, en };
-}
-
 // src/contracts.js
 var RPC_ENDPOINT = "im-feishu";
 var ACCESS_MODES = Object.freeze({ ALL: "all", ALLOWLIST: "allowlist" });
@@ -305,18 +104,18 @@ var API = Object.freeze({
 
 // client/shared.js
 var h = import_react.default.createElement;
-var boundTranslate = null;
 var activeLocale = "";
 function configureLocale(service) {
-  boundTranslate = service.bind(NS);
   activeLocale = service.getLocale().active;
-  return service.subscribe(() => {
+  const unsubscribe = service.subscribe(() => {
     activeLocale = service.getLocale().active;
   });
+  return () => {
+    unsubscribe?.();
+    activeLocale = "";
+  };
 }
 function t(zh, en) {
-  const translated = boundTranslate?.(zh);
-  if (translated && translated !== zh) return translated;
   const language = activeLocale || (navigator.language || "");
   return language.toLowerCase().startsWith("zh") ? zh : en;
 }
@@ -333,20 +132,21 @@ var emptyScope = () => ({ enabled: true, fields: ["senderId", "senderName", "bot
 var emptyEnhancement = () => ({ group: emptyScope(), direct: emptyScope() });
 var CSS = `
 .bxf-page { --bxf-radius: 12px; }
-.bxf-page select {
+.bxf-page select:not(.bxf-worker-native *) {
   appearance: none; -webkit-appearance: none; cursor: pointer;
   padding-right: 30px !important;
   background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") !important;
   background-repeat: no-repeat !important;
   background-position: right 10px center !important;
 }
-.bxf-page input, .bxf-page select { height: 34px; }
-.bxf-page input:focus, .bxf-page select:focus, .bxf-page textarea:focus {
+.bxf-page input:not([type="checkbox"]):not([type="radio"]):not(.bxf-worker-native *),
+.bxf-page select:not(.bxf-worker-native *) { height: 34px; }
+.bxf-page :is(input, select, textarea):not(.bxf-worker-native *):focus {
   outline: 2px solid color-mix(in srgb, var(--dsw-alias-brand-primary, #3370ff) 32%, transparent);
   outline-offset: 1px;
   border-color: var(--dsw-alias-brand-primary, #3370ff);
 }
-.bxf-page select option:checked {
+.bxf-page select:not(.bxf-worker-native *) option:checked {
   background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-label-primary, #3370ff)) !important;
   color: var(--dsw-alias-label-primary-foreground, var(--dsw-alias-bg-base, #fff)) !important;
 }
@@ -354,7 +154,7 @@ var CSS = `
 .bxf-bot-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .bxf-mini { background: transparent !important; -webkit-appearance: none; appearance: none;
   font-size: 11px; padding: 3px 8px; border-radius: 7px; cursor: pointer;
-  border: 1px solid var(--dsw-alias-border-l1, #e2e8f0); background: transparent; color: var(--dsw-alias-label-secondary); }
+  border: 1px solid var(--dsw-alias-border-l1, #e2e8f0); color: var(--dsw-alias-label-secondary); }
 .bxf-mini:hover { color: var(--dsw-alias-brand-primary, #3370ff); border-color: var(--dsw-alias-brand-primary, #3370ff); background: color-mix(in srgb, var(--dsw-alias-brand-primary, #3370ff) 10%, transparent) !important; }
 .bxf-button { appearance: none; display: inline-flex; align-items: center; justify-content: center;
   min-height: 34px; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer;
@@ -422,16 +222,6 @@ var S = {
   error: { fontSize: "12px", color: "var(--dsw-alias-state-error-primary)" },
   checkRow: { display: "flex", flexWrap: "wrap", gap: "6px 14px" },
   checkLabel: { fontSize: "12px", display: "flex", gap: "5px", alignItems: "center" },
-  overlay: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(15,23,42,.35)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 60,
-    padding: "20px"
-  },
   modal: {
     width: "min(460px, 100%)",
     background: "var(--dsw-alias-bg-layer-1, #fff)",
@@ -501,14 +291,15 @@ function Field({ label, hint, children, className = "" }) {
     children
   );
 }
-function SaveStatus({ state, onRetry }) {
+function SaveStatus({ state, onRetry, onDiscard }) {
   if (state.status === "idle") return null;
   const label = state.status === "error" ? `${t("\u4FDD\u5B58\u5931\u8D25\uFF1A", "Save failed: ")}${state.error}` : state.status === "pending" ? t("\u7B49\u5F85\u4FDD\u5B58\u2026", "Waiting to save\u2026") : state.status === "saving" ? t("\u4FDD\u5B58\u4E2D\u2026", "Saving\u2026") : t("\u5DF2\u4FDD\u5B58", "Saved");
   return h(
     "div",
     { className: "bxf-save-status", "data-state": state.status, role: "status" },
     h("span", null, label),
-    state.status === "error" ? h("button", { type: "button", className: "bxf-mini", onClick: onRetry }, t("\u91CD\u8BD5", "Retry")) : null
+    state.status === "error" ? h("button", { type: "button", className: "bxf-mini", onClick: onRetry }, t("\u91CD\u8BD5", "Retry")) : null,
+    state.status === "error" && onDiscard ? h("button", { type: "button", className: "bxf-mini", onClick: onDiscard }, t("\u653E\u5F03\u4FEE\u6539", "Discard")) : null
   );
 }
 function StatusBadge({ state }) {
@@ -521,6 +312,21 @@ function StatusBadge({ state }) {
   };
   const [label, tone] = map[state] ?? map.idle;
   return h("span", { style: S.badge(tone) }, label);
+}
+
+// client/locale.js
+var NS = "imFeishu";
+var MESSAGES = Object.freeze({
+  "\u98DE\u4E66\u673A\u5668\u4EBAIM": "Feishu Bot IM"
+});
+function dictionaries() {
+  const zh = {};
+  const en = {};
+  for (const [key, value] of Object.entries(MESSAGES)) {
+    zh[key] = key;
+    en[key] = value;
+  }
+  return { zh, en };
 }
 
 // client/workspace.js
@@ -675,6 +481,12 @@ function createAutoSave() {
       pending.delete(key);
       publish();
     },
+    discard() {
+      composing = false;
+      for (const job of pending.values()) clearTimeout(job.timer);
+      pending.clear();
+      publish();
+    },
     pauseText() {
       composing = true;
       for (const job of pending.values()) if (job.delay > 0) {
@@ -693,6 +505,7 @@ function createAutoSave() {
       }
     },
     async flush(retry = false) {
+      composing = false;
       do {
         for (const job of pending.values()) {
           clearTimeout(job.timer);
@@ -769,6 +582,7 @@ function useAutoSave() {
     state,
     flush: queue.flush,
     cancel: queue.cancel,
+    discard: queue.discard,
     retry: () => queue.flush(true),
     compositionHandlers: { onCompositionStartCapture: queue.pauseText, onCompositionEndCapture: queue.resumeText },
     schedule(key, operation, delay = 0, onSaved) {
@@ -929,19 +743,21 @@ function AddBotModal({ connection, mode = "manual", grant = null, onClose, onAdd
     setScan(snapshot);
   });
   const cancelScan = () => {
+    if (busy === "submit") return;
     invalidate();
     setScan(null);
     if (mode === "scan") void rpc(connection, API.provisionCancel, {}).catch(() => void 0);
     onClose();
   };
-  const close = import_react4.default.useRef(cancelScan);
-  close.current = cancelScan;
+  const dialogRef = import_react4.default.useRef(null);
+  const backdropDownRef = import_react4.default.useRef(false);
   import_react4.default.useEffect(() => {
-    const onKey = (event) => {
-      if (event.key === "Escape") close.current();
+    const dialog = dialogRef.current;
+    if (!dialog || typeof dialog.showModal !== "function") return;
+    if (!dialog.open) dialog.showModal();
+    return () => {
+      if (dialog.open) dialog.close();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
   }, []);
   const started = import_react4.default.useRef(false);
   import_react4.default.useEffect(() => {
@@ -954,17 +770,38 @@ function AddBotModal({ connection, mode = "manual", grant = null, onClose, onAdd
     onAdded();
     onClose();
   });
+  const titleId = `bxf-add-bot-title-${mode}`;
   return h3(
-    "div",
-    { style: S.overlay, role: "dialog", "aria-modal": true, onClick: (event) => {
-      if (event.target === event.currentTarget) cancelScan();
-    } },
+    "dialog",
+    {
+      ref: dialogRef,
+      className: "bxf-modal-dialog",
+      "aria-labelledby": titleId,
+      onCancel: (event) => {
+        event.preventDefault();
+        cancelScan();
+      },
+      onPointerDown: (event) => {
+        backdropDownRef.current = event.target === event.currentTarget;
+      },
+      onClick: (event) => {
+        const fromBackdrop = backdropDownRef.current;
+        backdropDownRef.current = false;
+        if (event.target === event.currentTarget && fromBackdrop) cancelScan();
+      }
+    },
     h3(
-      "div",
-      { style: S.modal },
+      "form",
+      {
+        style: S.modal,
+        onSubmit: (event) => {
+          event.preventDefault();
+          if (mode === "manual" && !busy && form.appId && form.appSecret) void submit();
+        }
+      },
       h3(
         "h3",
-        { style: { margin: "0 0 4px", fontSize: "15px" } },
+        { id: titleId, style: { margin: "0 0 4px", fontSize: "15px" } },
         mode === "scan" ? grant ? t("\u626B\u7801\u8865\u9F50\u6743\u9650", "Grant by scanning") : t("\u626B\u7801\u6DFB\u52A0\u673A\u5668\u4EBA", "Add by scanning") : t("\u624B\u52A8\u6DFB\u52A0\u673A\u5668\u4EBA", "Add manually")
       ),
       mode === "scan" ? h3(
@@ -979,7 +816,7 @@ function AddBotModal({ connection, mode = "manual", grant = null, onClose, onAdd
             border: "1px solid var(--dsw-alias-border-l1)",
             boxShadow: "0 2px 10px rgba(15,23,42,.08)"
           }
-        }, h3("img", { src: scan.qrCodeDataUrl, width: 200, height: 200, alt: "QR" })) : h3("div", {
+        }, h3("img", { src: scan.qrCodeDataUrl, width: 200, height: 200, alt: t("\u98DE\u4E66\u6388\u6743\u4E8C\u7EF4\u7801", "Feishu authorization QR code") })) : h3("div", {
           style: {
             width: "200px",
             height: "200px",
@@ -1001,7 +838,8 @@ function AddBotModal({ connection, mode = "manual", grant = null, onClose, onAdd
         h3(
           "div",
           { style: { display: "flex", gap: "8px" } },
-          h3("button", { type: "button", style: S.btn(), onClick: cancelScan }, t("\u53D6\u6D88\u626B\u7801", "Stop")),
+          h3("button", { type: "button", style: S.btn(), onClick: cancelScan }, t("\u53D6\u6D88\u626B\u7801", "Cancel scan")),
+          pollError && scan && !terminal ? h3("button", { type: "button", style: S.btn(), disabled: Boolean(busy), onClick: () => void poll() }, t("\u7EE7\u7EED\u68C0\u67E5", "Resume check")) : null,
           error || scan && ["denied", "expired", "error", "cancelled"].includes(scan.state) ? h3("button", { type: "button", style: S.btn("primary"), disabled: Boolean(busy), onClick: startScan }, t("\u91CD\u65B0\u751F\u6210", "Retry")) : null
         )
       ) : null,
@@ -1027,7 +865,7 @@ function AddBotModal({ connection, mode = "manual", grant = null, onClose, onAdd
         mode === "manual" ? h3("button", { type: "button", style: S.btn(), onClick: cancelScan, disabled: busy }, t("\u53D6\u6D88", "Cancel")) : null,
         mode === "manual" ? h3(
           "button",
-          { type: "button", style: S.btn("primary"), onClick: submit, disabled: busy || !form.appId || !form.appSecret },
+          { type: "submit", style: S.btn("primary"), disabled: busy || !form.appId || !form.appSecret },
           busy ? t("\u6B63\u5728\u9A8C\u8BC1\u2026", "Verifying\u2026") : t("\u7ED1\u5B9A\u5E76\u8FDE\u63A5", "Bind and connect")
         ) : null
       )
@@ -1037,7 +875,9 @@ function AddBotModal({ connection, mode = "manual", grant = null, onClose, onAdd
 function BotSettings({ connection, bot, models = [], presets = [], workspaces = [], permissionOptions = [], onChanged, registerSave }) {
   const [settingsTab, setSettingsTab] = import_react4.default.useState("general");
   const [draft, setDraft] = import_react4.default.useState(null);
+  const [limitText, setLimitText] = import_react4.default.useState("20");
   const draftRef = import_react4.default.useRef(null);
+  const baselineRef = import_react4.default.useRef(null);
   const autoSave = useAutoSave();
   import_react4.default.useEffect(() => registerSave?.(`bot:${bot.id}`, autoSave.flush), [registerSave, bot.id, autoSave.flush]);
   const seed = import_react4.default.useCallback((source = bot) => {
@@ -1079,9 +919,34 @@ function BotSettings({ connection, bot, models = [], presets = [], workspaces = 
   import_react4.default.useEffect(() => {
     const initial = seedRef.current();
     draftRef.current = initial;
+    baselineRef.current = initial;
     setDraft(initial);
+    setLimitText(String(initial.eavesdrop.limit));
     setSettingsTab("general");
   }, [bot.id]);
+  import_react4.default.useEffect(() => {
+    const current = draftRef.current;
+    const prevBase = baselineRef.current;
+    if (!current || !prevBase) return;
+    const nextBase = seed(bot);
+    baselineRef.current = nextBase;
+    const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    let changed = false;
+    const merged = { ...current };
+    for (const key of Object.keys(nextBase)) {
+      if (sameJson(current[key], prevBase[key]) && !sameJson(nextBase[key], prevBase[key])) {
+        merged[key] = nextBase[key];
+        changed = true;
+      }
+    }
+    if (changed) {
+      draftRef.current = merged;
+      setDraft(merged);
+      if (sameJson(current.eavesdrop, prevBase.eavesdrop) && merged.eavesdrop.limit !== prevBase.eavesdrop.limit) {
+        setLimitText(String(merged.eavesdrop.limit));
+      }
+    }
+  }, [bot, seed]);
   const set = (patch, delay = 0) => {
     const previous = draftRef.current;
     const next = typeof patch === "function" ? patch(previous) : { ...previous, ...patch };
@@ -1183,7 +1048,7 @@ function BotSettings({ connection, bot, models = [], presets = [], workspaces = 
             onKeyDown: (event) => onTabKey(event, index)
           }, label))
         ),
-        h3(SaveStatus, { state: autoSave.state, onRetry: autoSave.retry })
+        h3(SaveStatus, { state: autoSave.state, onRetry: autoSave.retry, onDiscard: autoSave.discard })
       ),
       pane(
         "general",
@@ -1192,29 +1057,37 @@ function BotSettings({ connection, bot, models = [], presets = [], workspaces = 
           h3(
             Field,
             { label: t("\u9ED8\u8BA4\u5DE5\u4F5C\u533A", "Default workspace"), hint: t("\u5217\u8868\u6765\u81EA DSH \u5DF2\u767B\u8BB0\u7684\u5DE5\u4F5C\u533A\u3002", "From the workspaces DSH already knows.") },
-            h3(
-              "select",
-              {
-                style: S.input,
-                value: draft.workspaceMode,
-                title: draft.workspace || t("\u8DDF\u968F DSH \u9ED8\u8BA4", "Host default"),
-                onChange: (event) => {
-                  const next = event.target.value;
-                  set({ workspaceMode: next, workspace: next === "__custom__" ? draft.workspaceCustom : next });
-                }
-              },
-              h3("option", { value: "" }, t("\u8DDF\u968F DSH \u9ED8\u8BA4", "Host default")),
-              workspaces.map((item) => h3("option", { key: item.path, value: item.path }, item.title && item.title !== item.path ? `${item.title} \u2014 ${item.path}` : item.path)),
-              h3("option", { value: "__custom__" }, t("\u81EA\u5B9A\u4E49\u8DEF\u5F84\u2026", "Custom path\u2026"))
-            ),
-            draft.workspaceMode === "__custom__" ? h3("input", {
-              style: { ...S.input, marginTop: "8px" },
-              value: draft.workspaceCustom,
-              placeholder: "/Users/you/work",
-              "aria-label": t("\u81EA\u5B9A\u4E49\u8DEF\u5F84\u2026", "Custom path\u2026"),
-              onChange: (event) => set({ workspaceCustom: event.target.value, workspace: event.target.value }, 600),
-              onBlur: () => void autoSave.flush()
-            }) : null
+            (() => {
+              const knownWorkspace = workspaces.some((item) => item.path === draft.workspaceMode);
+              const effectiveWorkspaceMode = draft.workspaceMode === "" ? "" : draft.workspaceMode === "__custom__" || !knownWorkspace ? "__custom__" : draft.workspaceMode;
+              return h3(
+                import_react4.default.Fragment,
+                null,
+                h3(
+                  "select",
+                  {
+                    style: S.input,
+                    value: effectiveWorkspaceMode,
+                    title: draft.workspace || t("\u8DDF\u968F DSH \u9ED8\u8BA4", "Host default"),
+                    onChange: (event) => {
+                      const next = event.target.value;
+                      set((current) => ({ ...current, workspaceMode: next, workspace: next === "__custom__" ? current.workspaceCustom : next }));
+                    }
+                  },
+                  h3("option", { value: "" }, t("\u8DDF\u968F DSH \u9ED8\u8BA4", "Host default")),
+                  workspaces.map((item) => h3("option", { key: item.path, value: item.path }, item.title && item.title !== item.path ? `${item.title} \u2014 ${item.path}` : item.path)),
+                  h3("option", { value: "__custom__" }, t("\u81EA\u5B9A\u4E49\u8DEF\u5F84\u2026", "Custom path\u2026"))
+                ),
+                effectiveWorkspaceMode === "__custom__" ? h3("input", {
+                  style: { ...S.input, marginTop: "8px" },
+                  value: draft.workspaceCustom,
+                  placeholder: "/Users/you/work",
+                  "aria-label": t("\u81EA\u5B9A\u4E49\u8DEF\u5F84\u2026", "Custom path\u2026"),
+                  onChange: (event) => set({ workspaceCustom: event.target.value, workspace: event.target.value }, 600),
+                  onBlur: () => void autoSave.flush()
+                }) : null
+              );
+            })()
           ),
           h3(
             Field,
@@ -1223,6 +1096,7 @@ function BotSettings({ connection, bot, models = [], presets = [], workspaces = 
               "select",
               { style: S.input, value: draft.preset, onChange: (event) => set({ preset: event.target.value }) },
               h3("option", { value: "" }, t("\u8DDF\u968F Host \u9ED8\u8BA4\u9884\u8BBE", "Host default preset")),
+              draft.preset && !presets.some((item) => item.id === draft.preset) ? h3("option", { value: draft.preset }, `${draft.preset}${t("\uFF08\u5F53\u524D\uFF09", " (current)")}`) : null,
               presets.map((item) => h3("option", { key: item.id, value: item.id }, item.name ?? item.id))
             )
           ),
@@ -1259,6 +1133,7 @@ function BotSettings({ connection, bot, models = [], presets = [], workspaces = 
                 }
               },
               h3("option", { value: "" }, t("\u8DDF\u968F Host \u9ED8\u8BA4", "Host default")),
+              draft.provider && draft.model && !selectedModel ? h3("option", { value: `${draft.provider}/${draft.model}` }, `${draft.provider} / ${draft.model}${t("\uFF08\u5F53\u524D\uFF09", " (current)")}`) : null,
               models.map((item) => h3("option", { key: `${item.provider}/${item.model}`, value: `${item.provider}/${item.model}` }, item.label))
             )
           ),
@@ -1347,7 +1222,7 @@ function BotSettings({ connection, bot, models = [], presets = [], workspaces = 
               h3("input", {
                 type: "checkbox",
                 checked: draft.eavesdrop.enabled,
-                onChange: (event) => set({ eavesdrop: { ...draft.eavesdrop, enabled: event.target.checked } })
+                onChange: (event) => set((current) => ({ ...current, eavesdrop: { ...current.eavesdrop, enabled: event.target.checked } }))
               }),
               t("\u5141\u8BB8", "Allow")
             )
@@ -1360,13 +1235,23 @@ function BotSettings({ connection, bot, models = [], presets = [], workspaces = 
               min: 1,
               max: 500,
               style: S.input,
-              value: draft.eavesdrop.limit,
-              onChange: (event) => set({
-                eavesdrop: {
-                  ...draft.eavesdrop,
-                  limit: Math.min(500, Math.max(1, Number.parseInt(event.target.value, 10) || 20))
+              value: limitText,
+              onChange: (event) => {
+                const raw = event.target.value;
+                setLimitText(raw);
+                const parsed = Number.parseInt(raw, 10);
+                if (Number.isFinite(parsed) && parsed >= 1) {
+                  const clamped = Math.min(500, parsed);
+                  set((current) => ({ ...current, eavesdrop: { ...current.eavesdrop, limit: clamped } }), 600);
                 }
-              })
+              },
+              onBlur: () => {
+                const parsed = Number.parseInt(limitText, 10);
+                const clamped = Number.isFinite(parsed) && parsed >= 1 ? Math.min(500, parsed) : 20;
+                setLimitText(String(clamped));
+                set((current) => ({ ...current, eavesdrop: { ...current.eavesdrop, limit: clamped } }));
+                void autoSave.flush();
+              }
             })
           ) : null,
           h3(
@@ -1378,7 +1263,7 @@ function BotSettings({ connection, bot, models = [], presets = [], workspaces = 
               h3("input", {
                 type: "checkbox",
                 checked: draft.mentions.enabled,
-                onChange: (event) => set({ mentions: { ...draft.mentions, enabled: event.target.checked } })
+                onChange: (event) => set((current) => ({ ...current, mentions: { ...current.mentions, enabled: event.target.checked } }))
               }),
               t("\u5141\u8BB8", "Allow")
             )
@@ -1392,7 +1277,7 @@ function BotSettings({ connection, bot, models = [], presets = [], workspaces = 
               h3("input", {
                 type: "checkbox",
                 checked: draft.mentions.allowAll !== true,
-                onChange: (event) => set({ mentions: { ...draft.mentions, allowAll: !event.target.checked } })
+                onChange: (event) => set((current) => ({ ...current, mentions: { ...current.mentions, allowAll: !event.target.checked } }))
               }),
               t("\u7981\u6B62", "Forbid")
             )
@@ -1913,6 +1798,8 @@ var import_react8 = __toESM(require("react"), 1);
 var h7 = import_react8.default.createElement;
 function Drawer({ open, title, onClose, children }) {
   const ref = import_react8.default.useRef(null);
+  const composingRef = import_react8.default.useRef(false);
+  const backdropDownRef = import_react8.default.useRef(false);
   import_react8.default.useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
@@ -1924,12 +1811,23 @@ function Drawer({ open, title, onClose, children }) {
     hidden: !open,
     className: "bxf-drawer",
     "aria-label": title,
+    onCompositionStartCapture: () => {
+      composingRef.current = true;
+    },
+    onCompositionEndCapture: () => {
+      composingRef.current = false;
+    },
     onCancel: (event) => {
       event.preventDefault();
-      if (!event.isComposing) void onClose();
+      if (!composingRef.current && !event.isComposing) void onClose();
+    },
+    onPointerDown: (event) => {
+      backdropDownRef.current = event.target === event.currentTarget;
     },
     onClick: (event) => {
-      if (event.target === event.currentTarget) void onClose();
+      const fromBackdrop = backdropDownRef.current;
+      backdropDownRef.current = false;
+      if (event.target === event.currentTarget && fromBackdrop) void onClose();
     }
   }, h7(
     "div",
@@ -2049,6 +1947,8 @@ function RetainedWorker({ sessionId, sessions, SessionProvider, renderSlot, onRe
   import_react10.default.useEffect(() => {
     let alive = true;
     let retained;
+    setReference(null);
+    setError(null);
     void (async () => {
       try {
         const known = sessions.list?.getSnapshot?.()?.byId?.[sessionId] || sessions.binding?.(sessionId);
@@ -2058,12 +1958,20 @@ function RetainedWorker({ sessionId, sessions, SessionProvider, renderSlot, onRe
         setReference(retained);
         await retained.ready;
       } catch (failure) {
-        if (alive) setError(failure?.message ?? String(failure));
+        if (alive) {
+          const current = retained;
+          retained = void 0;
+          current?.release();
+          setReference(null);
+          setError(failure?.message ?? String(failure));
+        }
       }
     })();
     return () => {
       alive = false;
-      retained?.release();
+      const current = retained;
+      retained = void 0;
+      current?.release();
     };
   }, [sessions, sessionId]);
   if (error) return h9(
@@ -2165,11 +2073,17 @@ function AvatarWorkspace({ connection, botId, saveRef, onOpenSession, workerView
     setDrawer(null);
   });
   const [chatFilter, setChatFilter] = import_react11.default.useState("");
+  const [keywordDrafts, setKeywordDrafts] = import_react11.default.useState(() => /* @__PURE__ */ new Map());
+  const writeSeqRef = import_react11.default.useRef(0);
+  const acceptMonitor = (seq, value) => {
+    if (value && seq === writeSeqRef.current) setMonitor(value);
+  };
   const act = (label, operation, onSaved) => run(label, () => {
+    const seq = ++writeSeqRef.current;
     invalidate();
-    return operation();
-  }, (value) => {
-    if (value) setMonitor(value);
+    return Promise.resolve(operation()).then((value) => ({ seq, value }));
+  }, ({ seq, value }) => {
+    acceptMonitor(seq, value);
     onSaved?.(value);
   });
   const add = (chat) => act(`add:${chat.chatId}`, () => call(API.userMonitorAdd, chat));
@@ -2182,13 +2096,25 @@ function AvatarWorkspace({ connection, botId, saveRef, onOpenSession, workerView
       setHistoricalWorker(null);
     });
   };
-  const setChat = (chat, patch) => act(`mode:${chat.chatId}`, () => call(API.userMonitorChatSet, { chatId: chat.chatId, ...patch }));
+  const setChat = (chat, patch) => {
+    if (patch.mode && patch.mode !== "keyword") {
+      autoSave.cancel(`keywords:${chat.chatId}`);
+      setKeywordDrafts((previous) => {
+        if (!previous.has(chat.chatId)) return previous;
+        const next = new Map(previous);
+        next.delete(chat.chatId);
+        return next;
+      });
+    }
+    return act(`mode:${chat.chatId}`, () => call(API.userMonitorChatSet, { chatId: chat.chatId, ...patch }));
+  };
   const scheduleSetting = (key, method, payload, delay = 600, onSaved) => {
+    const seq = ++writeSeqRef.current;
     autoSave.schedule(key, () => {
       invalidate();
       return call(method, payload);
     }, delay, (value) => {
-      setMonitor(value);
+      acceptMonitor(seq, value);
       onSaved?.(value);
     });
   };
@@ -2265,11 +2191,20 @@ function AvatarWorkspace({ connection, botId, saveRef, onOpenSession, workerView
           ...autoSave.compositionHandlers,
           style: control,
           className: "bxf-identity-control",
-          defaultValue: (chat.keywords ?? []).join("\uFF0C"),
+          value: keywordDrafts.has(chat.chatId) ? keywordDrafts.get(chat.chatId) : (chat.keywords ?? []).join("\uFF0C"),
           placeholder: t("\u5173\u952E\u8BCD\uFF0C\u9017\u53F7\u5206\u9694", "Keywords, comma separated"),
           onChange: (event) => {
-            const keywords = event.target.value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
-            scheduleSetting(`keywords:${chat.chatId}`, API.userMonitorChatSet, { chatId: chat.chatId, keywords });
+            const text2 = event.target.value;
+            setKeywordDrafts((previous) => new Map(previous).set(chat.chatId, text2));
+            const keywords = text2.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
+            scheduleSetting(`keywords:${chat.chatId}`, API.userMonitorChatSet, { chatId: chat.chatId, keywords }, 600, () => {
+              setKeywordDrafts((previous) => {
+                if (previous.get(chat.chatId) !== text2) return previous;
+                const next = new Map(previous);
+                next.delete(chat.chatId);
+                return next;
+              });
+            });
           },
           onBlur: () => void autoSave.flush()
         })
@@ -2328,7 +2263,11 @@ function AvatarWorkspace({ connection, botId, saveRef, onOpenSession, workerView
   const watching = monitor?.enabled && monitor.authorization?.authorized;
   const status = !monitor?.enabled ? t("\u5DF2\u6682\u505C", "Paused") : !monitor.authorization?.authorized ? t("\u7B49\u5F85\u6388\u6743", "Awaiting authorization") : t("\u76D1\u542C\u4E2D", "Watching");
   const titles = { chat: t("\u76D1\u542C\u8BBE\u7F6E", "Monitoring settings"), messages: t("\u6D88\u606F\u8BE6\u60C5", "Message details"), add: t("\u6DFB\u52A0\u7FA4\u804A", "Add group chat") };
-  const saveStatus = h10(SaveStatus, { state: autoSave.state, onRetry: autoSave.retry });
+  const discardChanges = () => {
+    autoSave.discard();
+    setKeywordDrafts(/* @__PURE__ */ new Map());
+  };
+  const saveStatus = h10(SaveStatus, { state: autoSave.state, onRetry: autoSave.retry, onDiscard: discardChanges });
   const chatRows = (items, empty) => {
     const visible = items.filter((chat) => `${chat.name || ""} ${chat.chatId}`.toLowerCase().includes(needle));
     if (!visible.length) {
@@ -2465,7 +2404,11 @@ function AvatarWorkspace({ connection, botId, saveRef, onOpenSession, workerView
         import_react11.default.Fragment,
         null,
         pickerSection,
-        available === null && busy !== "chats" && h10("button", { type: "button", className: "bxf-mini", onClick: () => void discover() }, t("\u91CD\u8BD5", "Retry"))
+        busy !== "chats" && h10(
+          "button",
+          { type: "button", className: "bxf-mini", onClick: () => void discover() },
+          available === null ? t("\u91CD\u8BD5", "Retry") : t("\u5237\u65B0\u5217\u8868", "Refresh list")
+        )
       )
     )
   );
@@ -2485,7 +2428,11 @@ function AvatarReplySettings({ connection, botId, query, registerSave }) {
   import_react12.default.useEffect(() => registerSave(`avatar-reply:${botId}`, autoSave.flush), [registerSave, botId, autoSave.flush]);
   const [handoffText, setHandoffText, commitHandoff] = useDraft((monitor?.handoffKeywords ?? []).join("\uFF0C"));
   const [replyRules, setReplyRules, commitReplyRules] = useDraft(monitor?.replyRules ?? "");
-  const [workerOptions, setWorkerOptions] = import_react12.default.useState({ workspaces: [], presets: [], defaultWorkspaceId: null });
+  const [workerOptions, setWorkerOptions] = import_react12.default.useState({ workspaces: [], presets: [], permissionOptions: [], defaultWorkspaceId: null });
+  const writeSeqRef = import_react12.default.useRef(0);
+  const acceptMonitor = (seq, value) => {
+    if (value && seq === writeSeqRef.current) setMonitor(value);
+  };
   import_react12.default.useEffect(() => {
     let alive = true;
     setOptionsError(null);
@@ -2494,6 +2441,7 @@ function AvatarReplySettings({ connection, botId, query, registerSave }) {
       setWorkerOptions({
         workspaces: Array.isArray(value?.workspaces) ? value.workspaces : [],
         presets: Array.isArray(value?.presets) ? value.presets : [],
+        permissionOptions: Array.isArray(value?.permissionOptions) ? value.permissionOptions : [],
         defaultWorkspaceId: typeof value?.defaultWorkspaceId === "string" ? value.defaultWorkspaceId : null
       });
     }).catch((failure) => {
@@ -2504,15 +2452,17 @@ function AvatarReplySettings({ connection, botId, query, registerSave }) {
     };
   }, [connection, botId, optionsRetry]);
   const setWorker = (patch) => run("worker", () => {
+    const seq = ++writeSeqRef.current;
     invalidate();
-    return call(API.userMonitorWorkerSet, patch);
-  }, setMonitor);
+    return call(API.userMonitorWorkerSet, patch).then((value) => ({ seq, value }));
+  }, ({ seq, value }) => acceptMonitor(seq, value));
   const scheduleSetting = (key, method, payload, delay = 600, onSaved) => {
+    const seq = ++writeSeqRef.current;
     autoSave.schedule(key, () => {
       invalidate();
       return call(method, payload);
     }, delay, (value) => {
-      setMonitor(value);
+      acceptMonitor(seq, value);
       onSaved?.(value);
     });
   };
@@ -2543,6 +2493,9 @@ function AvatarReplySettings({ connection, botId, query, registerSave }) {
     if (right.id === defaultWorkspaceId) return 1;
     return 0;
   });
+  const currentWorkspaceId = monitor?.worker?.workspaceId || defaultWorkspaceId || "";
+  const currentPreset = monitor?.worker?.preset || "";
+  const currentPermissionPreset = monitor?.worker?.permissionPreset || "";
   const control = { ...S.input, height: "36px" };
   const field = (label, props, options) => h11(
     "label",
@@ -2586,18 +2539,31 @@ function AvatarReplySettings({ connection, botId, query, registerSave }) {
           "div",
           { className: "bxf-identity-worker" },
           field(t("\u5206\u7EC4", "Group"), {
-            value: monitor.worker?.workspaceId || defaultWorkspaceId || "",
+            value: currentWorkspaceId,
             disabled: busy === "worker",
-            title: workspaces.find((item) => item.id === (monitor.worker?.workspaceId || defaultWorkspaceId))?.path || "",
+            title: workspaces.find((item) => item.id === currentWorkspaceId)?.path || "",
             onChange: (event) => void setWorker({ workspaceId: event.target.value, workspacePath: "" })
-          }, workspaces.map((item) => h11(
-            "option",
-            { key: item.id, value: item.id, title: item.path || "" },
-            `${item.title || item.path?.split("/").filter(Boolean).at(-1) || item.id}${item.id === defaultWorkspaceId ? t("\uFF08\u9ED8\u8BA4\uFF09", " (default)") : ""}`
-          ))),
-          field(t("\u9884\u8BBE", "Preset"), { value: monitor.worker?.preset || "", disabled: busy === "worker", onChange: (event) => void setWorker({ preset: event.target.value }) }, [
+          }, [
+            currentWorkspaceId && !workspaces.some((item) => item.id === currentWorkspaceId) ? h11("option", { key: currentWorkspaceId, value: currentWorkspaceId }, `${currentWorkspaceId}${t("\uFF08\u5F53\u524D\uFF09", " (current)")}`) : null,
+            ...workspaces.map((item) => h11(
+              "option",
+              { key: item.id, value: item.id, title: item.path || "" },
+              `${item.title || item.path?.split("/").filter(Boolean).at(-1) || item.id}${item.id === defaultWorkspaceId ? t("\uFF08\u9ED8\u8BA4\uFF09", " (default)") : ""}`
+            ))
+          ]),
+          field(t("\u9884\u8BBE", "Preset"), { value: currentPreset, disabled: busy === "worker", onChange: (event) => void setWorker({ preset: event.target.value }) }, [
             h11("option", { key: "", value: "" }, t("\u9ED8\u8BA4", "Default")),
+            currentPreset && !workerOptions.presets.some((item) => item.id === currentPreset) ? h11("option", { key: currentPreset, value: currentPreset }, `${currentPreset}${t("\uFF08\u5F53\u524D\uFF09", " (current)")}`) : null,
             ...workerOptions.presets.map((item) => h11("option", { key: item.id, value: item.id }, item.name || item.id))
+          ]),
+          field(t("\u65B0\u4F1A\u8BDD\u6743\u9650\u6863\u4F4D", "New-session permission"), {
+            value: currentPermissionPreset,
+            disabled: busy === "worker",
+            onChange: (event) => void setWorker({ permissionPreset: event.target.value })
+          }, [
+            h11("option", { key: "", value: "" }, t("\u8DDF\u968F Host \u9ED8\u8BA4", "Host default")),
+            currentPermissionPreset && !workerOptions.permissionOptions.some((item) => item.value === currentPermissionPreset) ? h11("option", { key: currentPermissionPreset, value: currentPermissionPreset }, `${currentPermissionPreset}${t("\uFF08\u5F53\u524D\uFF09", " (current)")}`) : null,
+            ...workerOptions.permissionOptions.map((item) => h11("option", { key: item.value, value: item.value }, item.name || item.value))
           ])
         ),
         h11("p", { className: "bxf-identity-hint" }, t("\u66F4\u6539\u540E\uFF0C\u5C06\u5728\u4E0B\u6B21\u81EA\u52A8\u56DE\u590D\u65F6\u521B\u5EFA\u65B0\u4F1A\u8BDD\u3002", "Changes create a new session on the next automatic reply."))
@@ -2643,7 +2609,7 @@ function AvatarReplySettings({ connection, botId, query, registerSave }) {
     ),
     !monitor && !loadError && h11("p", { className: "bxf-work-meta", role: "status" }, t("\u6B63\u5728\u8BFB\u53D6\u2026", "Loading\u2026")),
     settings,
-    h11(SaveStatus, { state: autoSave.state, onRetry: autoSave.retry })
+    h11(SaveStatus, { state: autoSave.state, onRetry: autoSave.retry, onDiscard: autoSave.discard })
   );
 }
 
@@ -2690,11 +2656,15 @@ function IdentityStatus({ connection, bot, bots, active, query, monitorQuery, se
       await query.refresh();
     } else query.accept(result);
   }, () => setNotice(success || null));
-  const disconnect = async () => {
+  const disconnect = () => run("disconnect", async () => {
     if (!await beforeDisconnect()) return;
     if (!window.confirm(t(`\u65AD\u5F00\u300C${name}\u300D\u7684\u5206\u8EAB\u6388\u6743\uFF1F\u5C06\u6E05\u9664\u672C\u5730\u51ED\u8BC1\uFF0C\u4FDD\u7559\u76D1\u542C\u914D\u7F6E\u548C Worker \u4F1A\u8BDD\u3002`, `Disconnect ${name}? Local credentials are cleared; monitoring settings and Worker sessions are kept.`))) return;
-    return update("disconnect", API.userDisconnect, t("\u5DF2\u65AD\u5F00\u6388\u6743", "Disconnected"));
-  };
+    setNotice(null);
+    query.invalidate();
+    const result = await rpc(connection, API.userDisconnect, { botId: bot.id });
+    query.accept(result);
+    setNotice(t("\u5DF2\u65AD\u5F00\u6388\u6743", "Disconnected"));
+  });
   const action = (id, hint, onClick, label, disabled = Boolean(busy)) => h13(ActionButton, {
     active,
     hintId: `bxf-${bot.id}-avatar-${id}-tip`,
@@ -2866,6 +2836,9 @@ function BotConfiguration({ connection, bot, onChanged, registerSave }) {
 var h15 = import_react16.default.createElement;
 function BotStatus({ connection, bot, bots, identityQuery, monitorQuery, avatarReady, registerSave, active, beforeRemove, onChanged, onRefresh, refreshing }) {
   const [diagnosis, setDiagnosis] = import_react16.default.useState(null);
+  import_react16.default.useEffect(() => {
+    if (bot.state === "connected" && diagnosis && !diagnosis.connected) setDiagnosis(null);
+  }, [bot.state, diagnosis]);
   const { busy, error, run } = useMutation();
   const diagnose = () => run("diagnose", () => {
     setDiagnosis(null);
@@ -2997,11 +2970,11 @@ var IDENTITY_CSS = `
 var WORKSPACE_CSS = `
 .bxf-work { height: 100%; min-height: 0; min-width: 0; overflow: hidden; container: feishu / inline-size;
   background: var(--dsw-alias-bg-base, #f8f9fb); color: var(--dsw-alias-label-primary, #1c1c1e); font-size: 13px; line-height: 1.5; }
-.bxf-work *, .bxf-work *::before, .bxf-work *::after { box-sizing: border-box; }
+.bxf-work :not(.bxf-worker-native *), .bxf-work :not(.bxf-worker-native *)::before, .bxf-work :not(.bxf-worker-native *)::after { box-sizing: border-box; }
 .bxf-work :is(button, input, select):not(.bxf-worker-native *) { font: inherit; }
-.bxf-work button { cursor: pointer; }
-.bxf-work button:disabled { opacity: .45; cursor: not-allowed; }
-.bxf-work button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 3px; }
+.bxf-work button:not(.bxf-worker-native *) { cursor: pointer; }
+.bxf-work button:not(.bxf-worker-native *):disabled { opacity: .45; cursor: not-allowed; }
+.bxf-work button:not(.bxf-worker-native *):focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 3px; }
 .bxf-work [hidden] { display: none !important; }
 .bxf-work-shell { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
 .bxf-work-header, .bxf-work-toolbar, .bxf-work-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
@@ -3171,6 +3144,8 @@ var WORKSPACE_CSS = `
 .bxf-work-diagnosis { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 0; }
 .bxf-action-tip { position: relative; display: inline-flex; }
 .bxf-action-tip-body { position: absolute; top: calc(100% + 8px); z-index: 20; width: min(280px, calc(100vw - 24px)); padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l1, #e5e7eb); border-radius: 8px; background: var(--dsw-alias-bg-overlay, #fff); color: var(--dsw-alias-label-primary, #1c1c1e); font-size: 12px; line-height: 1.6; white-space: normal; box-shadow: 0 6px 18px rgba(15,23,42,.12); }
+.bxf-modal-dialog { padding: 0; border: 0; background: transparent; max-width: calc(100vw - 40px); overflow: visible; }
+.bxf-modal-dialog::backdrop { background: rgba(15,23,42,.35); }
 
 `;
 
@@ -3366,6 +3341,7 @@ function WorkspacePage({ connection, openSession, workerView, memory: suppliedMe
   const [selected, setSelected] = import_react18.default.useState(memory.botId || null);
   const [addMode, setAddMode] = import_react18.default.useState(null);
   const [addOpen, setAddOpen] = import_react18.default.useState(false);
+  const knownBotIdsRef = import_react18.default.useRef(null);
   const addRef = import_react18.default.useRef(null);
   const addButton = import_react18.default.useRef(null);
   const navRef = import_react18.default.useRef(null);
@@ -3428,8 +3404,10 @@ function WorkspacePage({ connection, openSession, workerView, memory: suppliedMe
     query.accept(merged);
   });
   const added = async () => {
+    const before = knownBotIdsRef.current ?? new Set(snapshotRef.current.bots.map((item) => item.id));
+    knownBotIdsRef.current = null;
     const next = await changed();
-    const newBot = next?.bots.find((item) => !snapshot.bots.some((old) => old.id === item.id));
+    const newBot = next?.bots.find((item) => !before.has(item.id));
     if (newBot) await selectBot(newBot.id);
   };
   const globalWarnings = snapshot.warnings.filter((warning) => !snapshot.bots.some((item) => item.id === warning.source));
@@ -3479,10 +3457,16 @@ function WorkspacePage({ connection, openSession, workerView, memory: suppliedMe
           addOpen && h16(
             "div",
             { className: "bxf-bot-more-panel", role: "group", "aria-label": t("\u6DFB\u52A0\u65B9\u5F0F", "Add method") },
-            [["manual", t("\u624B\u52A8\u6DFB\u52A0", "Add manually")], ["scan", t("\u626B\u7801\u6DFB\u52A0", "Add by scanning")]].map(([mode, label]) => h16("button", { key: mode, type: "button", className: "bxf-mini", onClick: () => {
-              setAddOpen(false);
-              setAddMode(mode);
-            } }, label))
+            [["manual", t("\u624B\u52A8\u6DFB\u52A0", "Add manually")], ["scan", t("\u626B\u7801\u6DFB\u52A0", "Add by scanning")]].map(([mode, label]) => h16("button", {
+              key: mode,
+              type: "button",
+              className: "bxf-mini",
+              onClick: () => {
+                knownBotIdsRef.current = new Set(snapshotRef.current.bots.map((item) => item.id));
+                setAddOpen(false);
+                setAddMode(mode);
+              }
+            }, label))
           )
         )
       ),

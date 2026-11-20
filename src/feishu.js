@@ -93,6 +93,8 @@ export class FeishuBot {
   #appId;
   #appSecret;
   #token = null;
+  #tokenFlight = null;
+  #stopWaiters = new Set();
   #memberCache = new Map();
   #chatCache = new Map();
   #chatInfoCache = new Map();
@@ -105,10 +107,6 @@ export class FeishuBot {
     // Tests inject a recording client; production builds the real SDK client.
     this.#transport = abortableSdkTransport(httpInstance);
     this.#client = client ?? new Lark.Client({ appId, appSecret, domain: Lark.Domain.Feishu, httpInstance: this.#transport.httpInstance });
-  }
-
-  get raw() {
-    return this.#client;
   }
 
   /** Recall (delete) one message we sent; used to keep the chat clean. */
@@ -131,10 +129,10 @@ export class FeishuBot {
     if (!chatId) return null;
     const cached = this.#chatInfoCache.get(chatId);
     if (!refresh && cached) {
-      if (cached.pending && !signal) return cached.pending;
+      if (cached.pending && !cached.cancellable && !signal) return cached.pending;
       if (Date.now() < cached.expiresAt) return cached.value;
     }
-    const entry = { value: null, expiresAt: 0, pending: null };
+    const entry = { value: null, expiresAt: 0, pending: null, cancellable: Boolean(signal) };
     entry.pending = Promise.resolve().then(async () => {
       try {
         const response = assertApiSuccess('Feishu chat info', await this.#transport.run(signal,
@@ -350,8 +348,7 @@ export class FeishuBot {
 
   /** Edit an existing text message (used for the live progress bubble). */
   async updateText(messageId, text) {
-    const parts = splitText(text);
-    const body = parts.join('\n');
+    const [body = ''] = splitText(text);
     const response = assertApiSuccess('Feishu message update', await this.#client.im.v1.message.update({
       path: { message_id: messageId },
       data: { msg_type: 'text', content: JSON.stringify({ text: body }) },
@@ -362,20 +359,25 @@ export class FeishuBot {
   /** Tenant token for direct OpenAPI calls the SDK does not wrap. */
   async #tenantToken() {
     if (this.#token && this.#token.expiresAt > Date.now() + 60_000) return this.#token.value;
-    const response = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ app_id: this.#appId, app_secret: this.#appSecret }),
-    });
-    const body = await response.json();
-    if (body?.code !== 0 || typeof body.tenant_access_token !== 'string') {
-      throw new Error(`tenant token failed: ${body?.code ?? '?'} ${body?.msg ?? ''}`.trim());
-    }
-    this.#token = {
-      value: body.tenant_access_token,
-      expiresAt: Date.now() + (Number(body.expire ?? 7200) * 1000),
-    };
-    return this.#token.value;
+    if (this.#tokenFlight) return this.#tokenFlight;
+    this.#tokenFlight = (async () => {
+      const response = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ app_id: this.#appId, app_secret: this.#appSecret }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      const body = await response.json();
+      if (body?.code !== 0 || typeof body.tenant_access_token !== 'string') {
+        throw new Error(`tenant token failed: ${body?.code ?? '?'} ${body?.msg ?? ''}`.trim());
+      }
+      this.#token = {
+        value: body.tenant_access_token,
+        expiresAt: Date.now() + (Number(body.expire ?? 7200) * 1000),
+      };
+      return this.#token.value;
+    })().finally(() => { this.#tokenFlight = null; });
+    return this.#tokenFlight;
   }
 
   async #slash(path, init = {}) {
@@ -387,6 +389,7 @@ export class FeishuBot {
         'content-type': 'application/json; charset=utf-8',
         ...(init.headers ?? {}),
       },
+      signal: init.signal ?? AbortSignal.timeout(15_000),
     });
     const body = await response.json().catch(() => null);
     if (!body || typeof body !== 'object') throw new Error('slash command API returned a non-JSON response');
@@ -628,6 +631,7 @@ export class FeishuBot {
    * `im.message.receive_v1` event; `handlers.onCardAction` every card callback.
    */
   async startLongConnection({ onMessage, onCardAction, onState }) {
+    if (this.#ws) await this.stop();
     const dispatcher = new Lark.EventDispatcher({});
     const register = {};
     if (typeof onMessage === 'function') {
@@ -652,7 +656,7 @@ export class FeishuBot {
     // The SDK's start() only arms its reconnect loop and returns immediately, so
     // "started" is not "connected": wait for the first real handshake.
     const state = await this.#waitForReady(20_000);
-    onState?.(state);
+    if (state !== 'stopped') onState?.(state);
     return state;
   }
 
@@ -660,12 +664,24 @@ export class FeishuBot {
   #waitForReady(timeoutMs) {
     return new Promise((resolve) => {
       const startedAt = Date.now();
+      let timer = null;
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        this.#stopWaiters.delete(onStop);
+        resolve(value);
+      };
+      const onStop = () => finish('stopped');
+      this.#stopWaiters.add(onStop);
       const tick = () => {
+        if (!this.#ws) return finish('stopped');
         const state = this.#ws?.getConnectionStatus?.()?.state ?? 'idle';
-        if (state === 'connected') return resolve('connected');
-        if (state === 'failed') return resolve('failed');
-        if (Date.now() - startedAt > timeoutMs) return resolve(state === 'idle' ? 'timeout' : state);
-        const timer = setTimeout(tick, 250);
+        if (state === 'connected') return finish('connected');
+        if (state === 'failed') return finish('failed');
+        if (Date.now() - startedAt > timeoutMs) return finish(state === 'idle' ? 'timeout' : state);
+        timer = setTimeout(tick, 250);
         timer.unref?.();
         return undefined;
       };
@@ -681,6 +697,8 @@ export class FeishuBot {
   async stop() {
     const ws = this.#ws;
     this.#ws = undefined;
+    for (const wake of [...this.#stopWaiters]) wake();
+    this.#stopWaiters.clear();
     if (!ws) return;
     try {
       await ws.close?.({ force: true });

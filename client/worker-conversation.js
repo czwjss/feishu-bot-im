@@ -28,6 +28,8 @@ function RetainedWorker({ sessionId, sessions, SessionProvider, renderSlot, onRe
   React.useEffect(() => {
     let alive = true;
     let retained;
+    setReference(null);
+    setError(null);
     void (async () => {
       try {
         const known = sessions.list?.getSnapshot?.()?.byId?.[sessionId] || sessions.binding?.(sessionId);
@@ -38,13 +40,21 @@ function RetainedWorker({ sessionId, sessions, SessionProvider, renderSlot, onRe
         // Bind immediately so the native conversation can display its loading state.
         await retained.ready;
       } catch (failure) {
-        if (alive) setError(failure?.message ?? String(failure));
+        if (alive) {
+          const current = retained;
+          retained = undefined;
+          current?.release();
+          setReference(null);
+          setError(failure?.message ?? String(failure));
+        }
       }
     })();
     return () => {
       alive = false;
       // Releasing the UI reference never cancels or archives the Host Worker.
-      retained?.release();
+      const current = retained;
+      retained = undefined;
+      current?.release();
     };
   }, [sessions, sessionId]);
   if (error) return h('div', { className: 'bxf-work-alert', role: 'alert' }, error,

@@ -9,8 +9,16 @@ import { createUserIdentityTools } from '../src/user-identity/tools.js';
 import { FEISHU_POLICY } from '../src/policy.js';
 
 // Optional first argument: the installed @deepseek-ai/dsh package directory.
-const require = createRequire(process.argv[2] ? join(resolve(process.argv[2]), 'package.json') : import.meta.url);
-const { assertSupportedJsonSchema, projectToolSchema } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-tools')));
+const dshDir = process.argv[2] || process.env.DSH_INSTALL_DIR || '';
+const require = createRequire(dshDir ? join(resolve(dshDir), 'package.json') : import.meta.url);
+let dshToolsPath;
+try {
+  dshToolsPath = require.resolve('@deepseek-ai/dsh-tools');
+} catch {
+  console.error('用法：node scripts/check-tool-contracts.mjs <DSH安装目录> [baseline.json]');
+  process.exit(1);
+}
+const { assertSupportedJsonSchema, projectToolSchema } = await import(pathToFileURL(dshToolsPath));
 const { jsonSchemaToTs, jsonSchemaToPy, renderToolsSdk } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-tool-executor-ptc')));
 const tools = [
   bot.createSendTool({}), bot.createMessagesTool({}), bot.createChatsTool({}),
@@ -23,7 +31,11 @@ for (const tool of tools) {
   assert.notEqual(jsonSchemaToPy(tool.parameters), 'Any', `${tool.name}: Python input lost`);
 }
 const measure = (projections, outputs) => {
-  const schemas = projections.map((tool) => ({ ...tool, output: outputs.find((item) => item.name === tool.name).schema }));
+  const schemas = projections.map((tool) => {
+    const matched = outputs.find((item) => item.name === tool.name);
+    if (!matched) throw new Error(`baseline 缺少工具 ${tool.name} 的 output schema`);
+    return { ...tool, output: matched.schema };
+  });
   return {
     nativeCharacters: JSON.stringify(projections).length,
     ptcCharacters: renderToolsSdk(schemas).length - renderToolsSdk([]).length,

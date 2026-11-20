@@ -6,6 +6,8 @@ const h = React.createElement;
 /** Native modal semantics keep focus in the drawer; its owner decides when drafts can close. */
 export function Drawer({ open, title, onClose, children }) {
   const ref = React.useRef(null);
+  const composingRef = React.useRef(false);
+  const backdropDownRef = React.useRef(false);
   React.useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
@@ -14,8 +16,18 @@ export function Drawer({ open, title, onClose, children }) {
   }, [open]);
   return h('dialog', {
     ref, hidden: !open, className: 'bxf-drawer', 'aria-label': title,
-    onCancel: (event) => { event.preventDefault(); if (!event.isComposing) void onClose(); },
-    onClick: (event) => { if (event.target === event.currentTarget) void onClose(); },
+    onCompositionStartCapture: () => { composingRef.current = true; },
+    onCompositionEndCapture: () => { composingRef.current = false; },
+    onCancel: (event) => {
+      event.preventDefault();
+      if (!composingRef.current && !event.isComposing) void onClose();
+    },
+    onPointerDown: (event) => { backdropDownRef.current = event.target === event.currentTarget; },
+    onClick: (event) => {
+      const fromBackdrop = backdropDownRef.current;
+      backdropDownRef.current = false;
+      if (event.target === event.currentTarget && fromBackdrop) void onClose();
+    },
   }, h('div', { className: 'bxf-drawer-sheet' },
     h('header', { className: 'bxf-drawer-header' }, h('h2', null, title),
       h('button', { type: 'button', className: 'bxf-mini bxf-work-icon',

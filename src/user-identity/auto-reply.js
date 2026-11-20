@@ -273,15 +273,37 @@ export class AutoReplyEngine {
     const parts = images?.parts ?? [];
     const text = render();
     const options = { signal, requestId };
-    try {
-      await this.#harness.prompt(sessionId, parts.length ? [{ type: 'text', text }, ...parts] : text, options);
-    } catch (error) {
-      // The Host rejects invalid attachments before admitting the user message.
-      if (!parts.length || error?.code !== 'session/attachment-invalid') throw error;
-      if (!await this.#canDispatch(chat, signal)) return null;
-      const reason = error.details?.reason === 'MODEL_DOES_NOT_SUPPORT_IMAGES'
-        ? '当前会话模型不支持图像输入' : `DSH 无法加载图片，${error.message}`;
-      await this.#harness.prompt(sessionId, render(reason), options);
+    const submit = async (targetSessionId) => {
+      try {
+        await this.#harness.prompt(targetSessionId, parts.length ? [{ type: 'text', text }, ...parts] : text, options);
+      } catch (error) {
+        // The Host rejects invalid attachments before admitting the user message.
+        if (!parts.length || error?.code !== 'session/attachment-invalid') throw error;
+        if (!await this.#canDispatch(chat, signal)) return null;
+        const reason = error.details?.reason === 'MODEL_DOES_NOT_SUPPORT_IMAGES'
+          ? '当前会话模型不支持图像输入' : `DSH 无法加载图片，${error.message}`;
+        await this.#harness.prompt(targetSessionId, render(reason), options);
+      }
+      return true;
+    };
+    let targetSessionId = sessionId;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const sent = await submit(targetSessionId);
+        if (sent === null) return null;
+        break;
+      } catch (error) {
+        const missing = error?.code === 'session/not-found' || /not found/i.test(error?.message ?? '');
+        if (!missing || attempt > 0) throw error;
+        if (!await this.#canDispatch(chat, signal)) return null;
+        this.#logger?.warn?.(`[im-feishu] ${chat.chatId} 的 Worker 会话已不存在，重建`);
+        targetSessionId = await this.#harness.createSession(await this.#workerTarget());
+        await this.#applyPermission(targetSessionId);
+        await this.#patch(chat, { sessionId: targetSessionId, workerConfigKey: this.#workerKey(), titleName: null });
+        if (!await this.#canDispatch(chat, signal)) return null;
+        await this.#store.bindWorkerSession(chat, targetSessionId);
+        await this.#syncTitle(chat, targetSessionId, this.#store.state.chats[chat.chatId] ?? entry);
+      }
     }
     await this.#acknowledge(chat, ids, { lastDispatchAt: this.#now() });
     return chat.chatId;
@@ -297,10 +319,21 @@ export class AutoReplyEngine {
       if (unusable) this.#logger?.warn?.(`[im-feishu] ${chat.chatId} 的 Worker 会话已不可用，重建`);
       if (configStale) this.#logger?.info?.(`[im-feishu] ${chat.chatId} 的 Worker 工作区/预设变了，重建会话`);
       sessionId = await this.#harness.createSession(await this.#workerTarget());
+      await this.#applyPermission(sessionId);
       await this.#patch(chat, { sessionId, workerConfigKey: workerKey, titleName: null });
     }
     await this.#syncTitle(chat, sessionId, this.#store.state.chats[chat.chatId] ?? entry);
     return sessionId;
+  }
+
+  async #applyPermission(sessionId) {
+    const preset = this.#store.config.worker?.permissionPreset;
+    if (!preset || typeof this.#harness.setPermission !== 'function') return;
+    try {
+      await this.#harness.setPermission(sessionId, preset);
+    } catch (error) {
+      this.#logger?.warn?.(`[im-feishu] Worker 权限档位应用失败：${error?.message ?? error}`);
+    }
   }
 
   /** 会话标题跟聊天名保持一致：私聊用对方名字，群聊用群名。 */
@@ -315,10 +348,12 @@ export class AutoReplyEngine {
   /** Worker 的工作区/预设指纹：变了就换新会话。 */
   #workerKey() {
     const worker = this.#store.config.worker ?? {};
-    return JSON.stringify([
+    const key = [
       worker.workspaceId || worker.workspacePath || '',
       worker.preset || DEFAULT_WORKER_PRESET,
-    ]);
+    ];
+    if (worker.permissionPreset) key.push(worker.permissionPreset);
+    return JSON.stringify(key);
   }
 
   /** session.create 的目标：显式配置优先，否则落在默认工作区。 */

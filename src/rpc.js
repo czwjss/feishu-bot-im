@@ -18,6 +18,22 @@ function fail(code, message) {
   return { ok: false, error: { code, message, details: {} } };
 }
 
+async function validatePermissionPreset(harness, raw, { emptyValue = null } = {}) {
+  const preset = typeof raw === 'string' && raw.trim() ? raw.trim() : emptyValue;
+  if (!preset) return { ok: true, value: preset };
+  if (!/^[A-Za-z0-9._-]+$/.test(preset)) {
+    return { ok: false, error: fail('bad-request', `非法权限档位：${preset}`) };
+  }
+  const catalog = await harness.invoke('permissionPresets', 'catalog', {}).catch(() => null);
+  if (!catalog || !Array.isArray(catalog.options)) {
+    return { ok: false, error: fail('unavailable', '无法获取权限档位目录，请稍后重试') };
+  }
+  if (!catalog.options.some((item) => item.value === preset)) {
+    return { ok: false, error: fail('bad-request', `未知权限档位：${preset}`) };
+  }
+  return { ok: true, value: preset };
+}
+
 export function createRpcHandler({ manager, harness, version, userIdentity = null, userMonitor = null }) {
   const runtimeOf = (input) => manager.runtimeForBot(input.botId);
   const chatBindings = createChatBindings({ manager, harness, userMonitor });
@@ -108,16 +124,9 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
         return ok(await runtimeOf(input).status());
 
       case API.botPermissionSet: {
-        const permissionPreset = typeof input.permissionPreset === 'string' && input.permissionPreset.trim()
-          ? input.permissionPreset.trim()
-          : null;
-        if (permissionPreset) {
-          const catalog = await harness.invoke('permissionPresets', 'catalog', {}).catch(() => null);
-          if (catalog && !(catalog.options ?? []).some((item) => item.value === permissionPreset)) {
-            return fail('bad-request', `未知权限档位：${permissionPreset}`);
-          }
-        }
-        await runtimeOf(input).save({ permissionPreset });
+        const checked = await validatePermissionPreset(harness, input.permissionPreset, { emptyValue: null });
+        if (!checked.ok) return checked.error;
+        await runtimeOf(input).save({ permissionPreset: checked.value });
         return ok(await runtimeOf(input).status());
       }
 
@@ -125,12 +134,32 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
         await runtimeOf(input).save({ agentPreset: typeof input.preset === 'string' && input.preset.trim() ? input.preset.trim() : null });
         return ok(await runtimeOf(input).status());
 
-      case API.botAccessSet:
+      case API.botAccessSet: {
+        const access = input.access;
+        if (!access || typeof access !== 'object' || Array.isArray(access)) {
+          return fail('bad-request', 'access 必须是对象');
+        }
+        if (access.group !== 'all' && access.group !== 'allowlist') {
+          return fail('bad-request', 'access.group 必须是 all 或 allowlist');
+        }
+        if (access.allowOpenIds !== undefined
+          && (!Array.isArray(access.allowOpenIds) || access.allowOpenIds.some((id) => typeof id !== 'string'))) {
+          return fail('bad-request', 'access.allowOpenIds 必须是字符串数组');
+        }
+        if (access.managers !== undefined
+          && (!Array.isArray(access.managers) || access.managers.some((id) => typeof id !== 'string'))) {
+          return fail('bad-request', 'access.managers 必须是字符串数组');
+        }
         await runtimeOf(input).save({ access: input.access });
         return ok(await runtimeOf(input).status());
+      }
 
       case API.botBusyModeSet:
-        await runtimeOf(input).save({ busyMode: { ...(runtimeOf(input).config?.busyMode ?? {}), [input.scope === 'group' ? 'group' : 'direct']: input.mode === 'steer' ? 'steer' : 'queue' } });
+        await runtimeOf(input).save({
+          busyMode: {
+            [input.scope === 'group' ? 'group' : 'direct']: input.mode === 'steer' ? 'steer' : 'queue',
+          },
+        });
         return ok(await runtimeOf(input).status());
 
       case API.botProcessDetailSet:
@@ -223,16 +252,29 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
         return ok(await requireUserMonitor().setHandoffKeywords(input.keywords));
 
       case API.userMonitorWorkerSet:
+      {
+        let permissionPreset = input.permissionPreset;
+        if (permissionPreset !== undefined) {
+          const checked = await validatePermissionPreset(harness, permissionPreset, { emptyValue: '' });
+          if (!checked.ok) return checked.error;
+          permissionPreset = checked.value;
+        }
         return ok(await requireUserMonitor().setWorker({
           workspaceId: input.workspaceId,
           workspacePath: input.workspacePath,
           preset: input.preset,
+          ...(permissionPreset === undefined ? {} : { permissionPreset }),
         }));
+      }
 
       case API.userMonitorWorkerOptions: {
         const baseline = await harness.workspaceBaseline().catch(() => ({}));
         const items = Array.isArray(baseline?.items) ? baseline.items : [];
         const presets = await runtimeOf(input).listPresets().catch(() => []);
+        const permCatalog = await harness.invoke?.('permissionPresets', 'catalog', {}).catch(() => null);
+        const permissionOptions = Array.isArray(permCatalog?.options)
+          ? permCatalog.options.map((item) => ({ value: String(item.value), name: String(item.name ?? item.value) }))
+          : [];
         const monitor = requireUserMonitor();
         const defaultWorkspaceId = typeof monitor.resolveDefaultWorkspaceId === 'function'
           ? await monitor.resolveDefaultWorkspaceId().catch(() => null)
@@ -250,6 +292,7 @@ export function createRpcHandler({ manager, harness, version, userIdentity = nul
             id: String(preset?.id ?? ''),
             name: String(preset?.name ?? preset?.id ?? ''),
           })).filter((preset) => preset.id),
+          permissionOptions,
         });
       }
 

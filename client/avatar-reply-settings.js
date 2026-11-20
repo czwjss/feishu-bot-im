@@ -16,7 +16,11 @@ export function AvatarReplySettings({ connection, botId, query, registerSave }) 
   React.useEffect(() => registerSave(`avatar-reply:${botId}`, autoSave.flush), [registerSave, botId, autoSave.flush]);
   const [handoffText, setHandoffText, commitHandoff] = useDraft((monitor?.handoffKeywords ?? []).join('，'));
   const [replyRules, setReplyRules, commitReplyRules] = useDraft(monitor?.replyRules ?? '');
-  const [workerOptions, setWorkerOptions] = React.useState({ workspaces: [], presets: [], defaultWorkspaceId: null });
+  const [workerOptions, setWorkerOptions] = React.useState({ workspaces: [], presets: [], permissionOptions: [], defaultWorkspaceId: null });
+  const writeSeqRef = React.useRef(0);
+  const acceptMonitor = (seq, value) => {
+    if (value && seq === writeSeqRef.current) setMonitor(value);
+  };
 
   React.useEffect(() => {
     let alive = true;
@@ -26,17 +30,23 @@ export function AvatarReplySettings({ connection, botId, query, registerSave }) 
       setWorkerOptions({
         workspaces: Array.isArray(value?.workspaces) ? value.workspaces : [],
         presets: Array.isArray(value?.presets) ? value.presets : [],
+        permissionOptions: Array.isArray(value?.permissionOptions) ? value.permissionOptions : [],
         defaultWorkspaceId: typeof value?.defaultWorkspaceId === 'string' ? value.defaultWorkspaceId : null,
       });
     }).catch((failure) => { if (alive) setOptionsError(failure.message); });
     return () => { alive = false; };
   }, [connection, botId, optionsRetry]);
-  const setWorker = (patch) => run('worker', () => { invalidate(); return call(API.userMonitorWorkerSet, patch); }, setMonitor);
+  const setWorker = (patch) => run('worker', () => {
+    const seq = ++writeSeqRef.current;
+    invalidate();
+    return call(API.userMonitorWorkerSet, patch).then((value) => ({ seq, value }));
+  }, ({ seq, value }) => acceptMonitor(seq, value));
   const scheduleSetting = (key, method, payload, delay = 600, onSaved) => {
+    const seq = ++writeSeqRef.current;
     autoSave.schedule(key, () => {
       invalidate();
       return call(method, payload);
-    }, delay, (value) => { setMonitor(value); onSaved?.(value); });
+    }, delay, (value) => { acceptMonitor(seq, value); onSaved?.(value); });
   };
   const updateHandoff = (text) => {
     setHandoffText(text);
@@ -55,6 +65,9 @@ export function AvatarReplySettings({ connection, botId, query, registerSave }) 
     if (right.id === defaultWorkspaceId) return 1;
     return 0;
   });
+  const currentWorkspaceId = monitor?.worker?.workspaceId || defaultWorkspaceId || '';
+  const currentPreset = monitor?.worker?.preset || '';
+  const currentPermissionPreset = monitor?.worker?.permissionPreset || '';
 
   const control = { ...S.input, height: '36px' };
   const field = (label, props, options) => h('label', { className: 'bxf-identity-field' },
@@ -75,14 +88,32 @@ export function AvatarReplySettings({ connection, botId, query, registerSave }) 
         h('p', { className: 'bxf-identity-setting-title' }, t('处理会话', 'Reply session')),
         h('div', { className: 'bxf-identity-worker' },
           field(t('分组', 'Group'), {
-            value: monitor.worker?.workspaceId || defaultWorkspaceId || '', disabled: busy === 'worker',
-            title: workspaces.find((item) => item.id === (monitor.worker?.workspaceId || defaultWorkspaceId))?.path || '',
+            value: currentWorkspaceId, disabled: busy === 'worker',
+            title: workspaces.find((item) => item.id === currentWorkspaceId)?.path || '',
             onChange: (event) => void setWorker({ workspaceId: event.target.value, workspacePath: '' }),
-          }, workspaces.map((item) => h('option', { key: item.id, value: item.id, title: item.path || '' },
-            `${item.title || item.path?.split('/').filter(Boolean).at(-1) || item.id}${item.id === defaultWorkspaceId ? t('（默认）', ' (default)') : ''}`))),
-          field(t('预设', 'Preset'), { value: monitor.worker?.preset || '', disabled: busy === 'worker', onChange: (event) => void setWorker({ preset: event.target.value }) }, [
+          }, [
+            currentWorkspaceId && !workspaces.some((item) => item.id === currentWorkspaceId)
+              ? h('option', { key: currentWorkspaceId, value: currentWorkspaceId }, `${currentWorkspaceId}${t('（当前）', ' (current)')}`)
+              : null,
+            ...workspaces.map((item) => h('option', { key: item.id, value: item.id, title: item.path || '' },
+              `${item.title || item.path?.split('/').filter(Boolean).at(-1) || item.id}${item.id === defaultWorkspaceId ? t('（默认）', ' (default)') : ''}`)),
+          ]),
+          field(t('预设', 'Preset'), { value: currentPreset, disabled: busy === 'worker', onChange: (event) => void setWorker({ preset: event.target.value }) }, [
             h('option', { key: '', value: '' }, t('默认', 'Default')),
+            currentPreset && !workerOptions.presets.some((item) => item.id === currentPreset)
+              ? h('option', { key: currentPreset, value: currentPreset }, `${currentPreset}${t('（当前）', ' (current)')}`)
+              : null,
             ...workerOptions.presets.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id)),
+          ]),
+          field(t('新会话权限档位', 'New-session permission'), {
+            value: currentPermissionPreset, disabled: busy === 'worker',
+            onChange: (event) => void setWorker({ permissionPreset: event.target.value }),
+          }, [
+            h('option', { key: '', value: '' }, t('跟随 Host 默认', 'Host default')),
+            currentPermissionPreset && !workerOptions.permissionOptions.some((item) => item.value === currentPermissionPreset)
+              ? h('option', { key: currentPermissionPreset, value: currentPermissionPreset }, `${currentPermissionPreset}${t('（当前）', ' (current)')}`)
+              : null,
+            ...workerOptions.permissionOptions.map((item) => h('option', { key: item.value, value: item.value }, item.name || item.value)),
           ])),
         h('p', { className: 'bxf-identity-hint' }, t('更改后，将在下次自动回复时创建新会话。', 'Changes create a new session on the next automatic reply.')))),
     h('div', { className: 'bxf-identity-setting bxf-reply-rules-setting' },
@@ -105,5 +136,5 @@ export function AvatarReplySettings({ connection, botId, query, registerSave }) 
       } }, t('重试', 'Retry'))),
     !monitor && !loadError && h('p', { className: 'bxf-work-meta', role: 'status' }, t('正在读取…', 'Loading…')),
     settings,
-    h(SaveStatus, { state: autoSave.state, onRetry: autoSave.retry }));
+    h(SaveStatus, { state: autoSave.state, onRetry: autoSave.retry, onDiscard: autoSave.discard }));
 }

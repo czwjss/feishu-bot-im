@@ -5,8 +5,8 @@
  * saved under the plugin data directory and handed to the model as a path, which
  * keeps large binaries out of the prompt.
  */
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { messageContentOf, messageTypeOf, decodePost } from './message-content.js';
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -100,12 +100,36 @@ export class InboundContent {
   }
 
   async #save(bytes, baseName) {
-    await mkdir(this.#inboxDir, { recursive: true });
-    const target = join(this.#inboxDir, baseName);
+    const root = resolve(this.#inboxDir);
+    await mkdir(root, { recursive: true, mode: 0o700 });
+    const cleanName = safeName(baseName, 'feishu-file').replace(/\.\.+/g, '_');
+    const target = resolve(root, cleanName);
+    const rel = relative(root, target);
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+      throw new Error('非法的附件文件名');
+    }
     await writeFile(target, bytes, { mode: 0o600 });
     return target;
   }
 
+  /** 清理超过保留期的历史入站临时文件，避免 inbox 目录长期无限增长。 */
+  async cleanupExpired(maxAgeMs = 7 * 24 * 60 * 60 * 1000) {
+    if (!this.#inboxDir) return 0;
+    const entries = await readdir(this.#inboxDir, { withFileTypes: true }).catch(() => null);
+    if (!entries) return 0;
+    const cutoff = Date.now() - maxAgeMs;
+    let removed = 0;
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const target = join(this.#inboxDir, entry.name);
+      const info = await stat(target).catch(() => null);
+      if (info && info.mtimeMs < cutoff) {
+        await rm(target, { force: true }).catch(() => undefined);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
   /**
    * Download images from a quoted message or its card. The returned parts are
    * native image parts; failed downloads are reported as notes, not guessed.
@@ -120,7 +144,7 @@ export class InboundContent {
     const notes = [];
     for (const [index, key] of unique.entries()) {
       try {
-        const bytes = await this.#bot.downloadResource(messageId, key, 'image');
+        const bytes = await this.#bot.downloadResource(messageId, key, 'image', { maxBytes: MAX_IMAGE_BYTES });
         if (bytes.length > MAX_IMAGE_BYTES) {
           notes.push(`引用消息的第 ${index + 1} 张图片超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB，未加载`);
           continue;
@@ -132,6 +156,10 @@ export class InboundContent {
         }
         parts.push(imagePromptPart(bytes, mediaType, `feishu-quote-${messageId}-${index + 1}`));
       } catch (error) {
+        if (/超过当前可用大小上限/.test(error?.message ?? '')) {
+          notes.push(`引用消息的第 ${index + 1} 张图片超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB，未加载`);
+          continue;
+        }
         this.#logger?.warn?.('[im-feishu] quoted image download failed', error?.message ?? error);
         notes.push(`引用消息的第 ${index + 1} 张图片下载失败`);
       }
@@ -151,20 +179,24 @@ export class InboundContent {
     const imageKeys = imageKeysOf(message).slice(0, MAX_MESSAGE_IMAGES);
     for (const [index, key] of imageKeys.entries()) {
       try {
-        const bytes = await this.#bot.downloadResource(message.message_id, key, 'image');
+        const bytes = await this.#bot.downloadResource(message.message_id, key, 'image', { maxBytes: MAX_FILE_BYTES });
         if (bytes.length > MAX_IMAGE_BYTES) {
-          const saved = await this.#save(bytes, `${message.message_id}-${index}.bin`);
+          const saved = await this.#save(bytes, `${safeName(message.message_id, 'msg')}-${index}.bin`);
           notes.push(`（第 ${index + 1} 张图片过大，已保存到 ${saved}）`);
           continue;
         }
         const mediaType = sniffImageType(bytes);
         if (!mediaType) {
-          const saved = await this.#save(bytes, `${message.message_id}-${index}.bin`);
+          const saved = await this.#save(bytes, `${safeName(message.message_id, 'msg')}-${index}.bin`);
           notes.push(`（第 ${index + 1} 张图片格式不受支持，已保存到 ${saved}）`);
           continue;
         }
         parts.push(imagePromptPart(bytes, mediaType, `feishu-${message.message_id}-${index + 1}`));
       } catch (error) {
+        if (/超过当前可用大小上限/.test(error?.message ?? '')) {
+          notes.push(`（第 ${index + 1} 张图片超过 ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB，未下载）`);
+          continue;
+        }
         this.#logger?.warn?.('[im-feishu] image download failed', error?.message ?? error);
         notes.push('（有一张图片下载失败）');
       }
@@ -174,17 +206,21 @@ export class InboundContent {
       const content = messageContentOf(message);
       if (content.file_key) {
         try {
-          const bytes = await this.#bot.downloadResource(message.message_id, content.file_key, 'file');
+          const bytes = await this.#bot.downloadResource(message.message_id, content.file_key, 'file', { maxBytes: MAX_FILE_BYTES });
           if (bytes.length > MAX_FILE_BYTES) {
             notes.push(`（文件超过 ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB，未下载）`);
           } else {
             const name = safeName(content.file_name, 'feishu-file');
-            const saved = await this.#save(bytes, `${message.message_id}-${name}`);
+            const saved = await this.#save(bytes, `${safeName(message.message_id, 'msg')}-${name}`);
             notes.push(`用户发送了文件「${name}」（${bytes.length} 字节，已保存到 ${saved}），需要时可以直接读取该路径。`);
           }
         } catch (error) {
-          this.#logger?.warn?.('[im-feishu] file download failed', error?.message ?? error);
-          notes.push('（用户发送的文件下载失败）');
+          if (/超过当前可用大小上限/.test(error?.message ?? '')) {
+            notes.push(`（文件超过 ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB，未下载）`);
+          } else {
+            this.#logger?.warn?.('[im-feishu] file download failed', error?.message ?? error);
+            notes.push('（用户发送的文件下载失败）');
+          }
         }
       }
     }

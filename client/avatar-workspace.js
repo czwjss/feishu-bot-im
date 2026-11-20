@@ -34,11 +34,17 @@ export function AvatarWorkspace({ connection, botId, saveRef, onOpenSession, wor
     setDrawer(null);
   });
   const [chatFilter, setChatFilter] = React.useState('');
+  const [keywordDrafts, setKeywordDrafts] = React.useState(() => new Map());
+  const writeSeqRef = React.useRef(0);
+  const acceptMonitor = (seq, value) => {
+    if (value && seq === writeSeqRef.current) setMonitor(value);
+  };
   const act = (label, operation, onSaved) => run(label, () => {
+    const seq = ++writeSeqRef.current;
     invalidate();
-    return operation();
-  }, (value) => {
-    if (value) setMonitor(value);
+    return Promise.resolve(operation()).then((value) => ({ seq, value }));
+  }, ({ seq, value }) => {
+    acceptMonitor(seq, value);
     onSaved?.(value);
   });
 
@@ -52,12 +58,24 @@ export function AvatarWorkspace({ connection, botId, saveRef, onOpenSession, wor
       setHistoricalWorker(null);
     });
   };
-  const setChat = (chat, patch) => act(`mode:${chat.chatId}`, () => call(API.userMonitorChatSet, { chatId: chat.chatId, ...patch }));
+  const setChat = (chat, patch) => {
+    if (patch.mode && patch.mode !== 'keyword') {
+      autoSave.cancel(`keywords:${chat.chatId}`);
+      setKeywordDrafts((previous) => {
+        if (!previous.has(chat.chatId)) return previous;
+        const next = new Map(previous);
+        next.delete(chat.chatId);
+        return next;
+      });
+    }
+    return act(`mode:${chat.chatId}`, () => call(API.userMonitorChatSet, { chatId: chat.chatId, ...patch }));
+  };
   const scheduleSetting = (key, method, payload, delay = 600, onSaved) => {
+    const seq = ++writeSeqRef.current;
     autoSave.schedule(key, () => {
       invalidate();
       return call(method, payload);
-    }, delay, (value) => { setMonitor(value); onSaved?.(value); });
+    }, delay, (value) => { acceptMonitor(seq, value); onSaved?.(value); });
   };
   const toggle = () => act('toggle', () => call(API.userMonitorEnable, { enabled: monitor?.enabled !== true }));
   const toggleDirect = () => act('toggle-direct', () => call(API.userMonitorDirectEnable, { enabled: !directEnabled }));
@@ -117,10 +135,20 @@ export function AvatarWorkspace({ connection, botId, saveRef, onOpenSession, wor
       mode === 'keyword' ? h('label', { className: 'bxf-identity-field bxf-identity-chat-extra' },
         h('span', null, t('匹配关键词', 'Match keywords')),
         h('input', { ...autoSave.compositionHandlers, style: control, className: 'bxf-identity-control',
-          defaultValue: (chat.keywords ?? []).join('，'), placeholder: t('关键词，逗号分隔', 'Keywords, comma separated'),
+          value: keywordDrafts.has(chat.chatId) ? keywordDrafts.get(chat.chatId) : (chat.keywords ?? []).join('，'),
+          placeholder: t('关键词，逗号分隔', 'Keywords, comma separated'),
           onChange: (event) => {
-            const keywords = event.target.value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
-            scheduleSetting(`keywords:${chat.chatId}`, API.userMonitorChatSet, { chatId: chat.chatId, keywords });
+            const text = event.target.value;
+            setKeywordDrafts((previous) => new Map(previous).set(chat.chatId, text));
+            const keywords = text.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
+            scheduleSetting(`keywords:${chat.chatId}`, API.userMonitorChatSet, { chatId: chat.chatId, keywords }, 600, () => {
+              setKeywordDrafts((previous) => {
+                if (previous.get(chat.chatId) !== text) return previous;
+                const next = new Map(previous);
+                next.delete(chat.chatId);
+                return next;
+              });
+            });
           },
           onBlur: () => void autoSave.flush(),
         })) : null);
@@ -169,7 +197,11 @@ export function AvatarWorkspace({ connection, botId, saveRef, onOpenSession, wor
   const watching = monitor?.enabled && monitor.authorization?.authorized;
   const status = !monitor?.enabled ? t('已暂停', 'Paused') : !monitor.authorization?.authorized ? t('等待授权', 'Awaiting authorization') : t('监听中', 'Watching');
   const titles = { chat: t('监听设置', 'Monitoring settings'), messages: t('消息详情', 'Message details'), add: t('添加群聊', 'Add group chat') };
-  const saveStatus = h(SaveStatus, { state: autoSave.state, onRetry: autoSave.retry });
+  const discardChanges = () => {
+    autoSave.discard();
+    setKeywordDrafts(new Map());
+  };
+  const saveStatus = h(SaveStatus, { state: autoSave.state, onRetry: autoSave.retry, onDiscard: discardChanges });
   const chatRows = (items, empty) => {
     const visible = items.filter((chat) => `${chat.name || ''} ${chat.chatId}`.toLowerCase().includes(needle));
     if (!visible.length) {
@@ -237,5 +269,6 @@ export function AvatarWorkspace({ connection, botId, saveRef, onOpenSession, wor
         selected.lastError && h('div', { className: 'bxf-work-alert', role: 'alert' }, selected.lastError),
         h(MonitorDetail, { key: selected.chatId, connection, botId, chatId: selected.chatId, active: active && drawer === 'messages', onViewWorker: (id) => selectChat(selected, id) })),
       drawer === 'add' && h(React.Fragment, null, pickerSection,
-        available === null && busy !== 'chats' && h('button', { type: 'button', className: 'bxf-mini', onClick: () => void discover() }, t('重试', 'Retry')))));
+        busy !== 'chats' && h('button', { type: 'button', className: 'bxf-mini', onClick: () => void discover() },
+          available === null ? t('重试', 'Retry') : t('刷新列表', 'Refresh list')))));
 }

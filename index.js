@@ -42,6 +42,7 @@ async function createUserIdentity(ctx, paths, botConfigStore, logger) {
   }).load();
   const tokenStore = await new UserTokenStore({
     path: join(paths.root, USER_TOKEN_FILE),
+    credentials: ctx.credentials,
   }).load();
   const auth = new UserIdentityAuth({
     configStore,
@@ -79,6 +80,7 @@ export async function apply(ctx, config = {}) {
 
   // 转人工关键词保存在监听配置里，机器人侧通过这个 provider 读取。
   let handoffKeywordsProvider = () => null;
+  let onBotRemoved = async () => {};
   const manager = new RuntimeManager({
     ctx,
     configStore,
@@ -88,6 +90,10 @@ export async function apply(ctx, config = {}) {
     version: pluginVersion,
     dataDir: paths.root,
     openState,
+    onRemoveBot: async (botId) => {
+      stateStores.delete(botId);
+      await onBotRemoved(botId);
+    },
   });
 
   ctx.inject(['systemPrompt'], (promptCtx) => {
@@ -108,6 +114,7 @@ export async function apply(ctx, config = {}) {
   });
 
   const { manager: userIdentity, auth: userIdentityAuth } = await createUserIdentity(ctx, paths, configStore, logger);
+  ctx.effect(() => () => userIdentity.dispose(), 'feishu-bot: user identity');
   userIdentity.startKeepalive();
 
   const monitorStore = await new MonitorStore({
@@ -121,13 +128,6 @@ export async function apply(ctx, config = {}) {
         return ctx.get('workspaceRegistry')?.archivedSessionIds?.includes(sessionId) === true;
       } catch {
         return false;
-      }
-    },
-    exists: (sessionId) => {
-      try {
-        return Boolean(ctx.get('sessions')?.get?.(sessionId));
-      } catch {
-        return true;
       }
     },
   };
@@ -151,7 +151,13 @@ export async function apply(ctx, config = {}) {
     defaultWorkspaceId: readDefaultWorkspaceId,
     logger,
   });
+  ctx.effect(() => () => userMonitor.dispose(), 'feishu-bot: user message monitor');
   handoffKeywordsProvider = () => userMonitor.store.config.handoffKeywords;
+  onBotRemoved = async (botId) => {
+    if (await userIdentity.detachBot(botId)) {
+      await userMonitor.onIdentityDetached();
+    }
+  };
   installUserIdentityContributions(ctx, userIdentityAuth, harness);
   installWorkerContexts(ctx, monitorStore);
   userMonitor.start();
@@ -198,8 +204,6 @@ export async function apply(ctx, config = {}) {
   });
 
   ctx.effect(() => () => manager.dispose(), 'feishu-bot: runtimes');
-  ctx.effect(() => () => userIdentity.dispose(), 'feishu-bot: user identity');
-  ctx.effect(() => () => userMonitor.dispose(), 'feishu-bot: user message monitor');
 
   try {
     await manager.start();

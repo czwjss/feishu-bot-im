@@ -36,11 +36,15 @@ export function IdentityStatus({ connection, bot, bots, active, query, monitorQu
     if (method === API.userConnectBegin) { query.invalidate(); await query.refresh(); }
     else query.accept(result);
   }, () => setNotice(success || null));
-  const disconnect = async () => {
+  const disconnect = () => run('disconnect', async () => {
     if (!await beforeDisconnect()) return;
     if (!window.confirm(t(`断开「${name}」的分身授权？将清除本地凭证，保留监听配置和 Worker 会话。`, `Disconnect ${name}? Local credentials are cleared; monitoring settings and Worker sessions are kept.`))) return;
-    return update('disconnect', API.userDisconnect, t('已断开授权', 'Disconnected'));
-  };
+    setNotice(null);
+    query.invalidate();
+    const result = await rpc(connection, API.userDisconnect, { botId: bot.id });
+    query.accept(result);
+    setNotice(t('已断开授权', 'Disconnected'));
+  });
   const action = (id, hint, onClick, label, disabled = Boolean(busy)) => h(ActionButton, {
     active, hintId: `bxf-${bot.id}-avatar-${id}-tip`, hint, disabled, onClick,
   }, label);

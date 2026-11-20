@@ -23,7 +23,7 @@ export async function withAccessToken(auth, operation, signal) {
   } catch (error) {
     signal?.throwIfAborted();
     if (!isExpiredTokenError(error)) throw error;
-    const refreshedToken = await auth.requireAccessToken({ force: true });
+    const refreshedToken = await auth.requireAccessToken({ force: true, failedAccessToken: accessToken });
     signal?.throwIfAborted();
     return operation(refreshedToken);
   }
@@ -36,6 +36,44 @@ export function createUserFeishuRequest({ auth, fetchImpl, signal }) {
   }), signal);
 }
 
+/**
+ * 跨多步请求复用同一份 accessToken；仅在某一步被飞书判过期时刷新一次并重试该步。
+ */
+export function createTokenSession(auth, { initialToken = null, signal } = {}) {
+  let accessToken = initialToken;
+  let openId;
+  const acquire = async (options) => {
+    if (typeof auth.requireAccessIdentity === 'function') {
+      ({ accessToken, openId } = await auth.requireAccessIdentity(options));
+    } else {
+      accessToken = await auth.requireAccessToken(options);
+    }
+    return accessToken;
+  };
+  return {
+    get openId() { return openId; },
+    async init() {
+      signal?.throwIfAborted?.();
+      if (!accessToken) await acquire();
+      signal?.throwIfAborted?.();
+      return accessToken;
+    },
+    async run(operation) {
+      signal?.throwIfAborted?.();
+      if (!accessToken) await acquire();
+      signal?.throwIfAborted?.();
+      try {
+        return await operation(accessToken);
+      } catch (error) {
+        signal?.throwIfAborted?.();
+        if (!isExpiredTokenError(error)) throw error;
+        await acquire({ force: true, failedAccessToken: accessToken });
+        signal?.throwIfAborted?.();
+        return operation(accessToken);
+      }
+    },
+  };
+}
 export class UserIdentityAuth {
   #configStore;
   #tokenStore;
@@ -147,7 +185,7 @@ export class UserIdentityAuth {
   }
 
   /** 同一个凭据快照中的 token 与用户身份，供私聊监听核对账号。 */
-  async requireAccessIdentity({ force = false } = {}) {
+  async requireAccessIdentity({ force = false, failedAccessToken = null } = {}) {
     await this.reload();
     const app = await this.resolveApp();
     const doc = this.#tokenStore.document;
@@ -155,7 +193,10 @@ export class UserIdentityAuth {
     if (!this.#appMatches(doc, app)) {
       throw new NotAuthorizedError('用户身份使用的飞书应用已变化，请重新授权');
     }
-    const current = !force && this.#tokenStore.accessTokenUsable(this.#now()) ? doc : await this.refresh();
+    const alreadyRotated = Boolean(failedAccessToken && doc.accessToken !== failedAccessToken);
+    const current = (!force || alreadyRotated) && this.#tokenStore.accessTokenUsable(this.#now())
+      ? doc
+      : await this.refresh({ failedAccessToken });
     return { accessToken: current.accessToken, openId: current.user.openId };
   }
 
@@ -171,7 +212,7 @@ export class UserIdentityAuth {
     return task;
   }
 
-  async #refreshOnce({ force = false } = {}) {
+  async #refreshOnce({ force = false, failedAccessToken = null } = {}) {
     await this.reload();
     const app = await this.resolveApp();
     const doc = this.#tokenStore.document;
@@ -180,6 +221,9 @@ export class UserIdentityAuth {
     }
     if (!this.#appMatches(doc, app)) {
       throw new NotAuthorizedError('用户身份使用的飞书应用已变化，请重新连接');
+    }
+    if (failedAccessToken && doc.accessToken !== failedAccessToken && this.#tokenStore.accessTokenUsable(this.#now())) {
+      return doc;
     }
     if (!force && !this.#tokenStore.refreshTokenUsable(this.#now())) {
       throw new NotAuthorizedError('refresh_token 已过期，请重新连接');

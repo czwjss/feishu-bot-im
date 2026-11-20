@@ -54,12 +54,15 @@ async function createWikiPage(request, parent, name, text) {
   }
 }
 
-function operateOnWikiFile(action, args, nodeId, context) {
+function operateOnWikiFile(action, args, nodeId, context, harness) {
   const path = requiredValue(args.path, 'path');
   const cwd = context?.agent?.session?.cwd;
   const signal = context?.signal;
   if (action === 'upload') {
     return (request) => uploadCloudFile({ request, path, cwd, signal, wikiParentId: nodeId, name: args.name });
+  }
+  if (action === 'download' && harness?.sandboxModeOf?.(context?.agent?.session) === 'read-only') {
+    throw new Error('当前会话处于只读沙箱模式，不允许向本地下载写入文件');
   }
 
   return async (request) => {
@@ -72,12 +75,15 @@ function operateOnWikiFile(action, args, nodeId, context) {
     }
     if (node.nodeType !== 'origin') throw invalidInput('replace 需要文件的原始 Wiki 节点，请提供原页面链接');
     if (!node.name.trim()) throw invalidInput('无法确认附件原名，请核对页面后再覆盖');
-    const result = await uploadCloudFile({ request, path, cwd, signal, fileId: node.objectId, wikiParentId: node.parentNodeId || undefined, name: node.name });
+    const result = await uploadCloudFile({
+      request, path, cwd, signal, fileId: node.objectId,
+      parentType: 'wiki', wikiParentId: node.parentNodeId || undefined, name: node.name,
+    });
     return { ...result, ...file };
   };
 }
 
-function operationFor(args, context) {
+function operationFor(args, context, harness) {
   const { action, target, limit, pageToken, text, find, confirm, includeChildren = false, taskId } = args;
   if (action === 'list') {
     const location = target === undefined || target.trim() === 'wiki'
@@ -99,7 +105,7 @@ function operationFor(args, context) {
 
   const { id: nodeId } = parseCloudTarget(target, ['wiki']);
   if (action === 'inspect') return (request) => resolveWikiNode({ request, nodeId });
-  if (['download', 'upload', 'replace'].includes(action)) return operateOnWikiFile(action, args, nodeId, context);
+  if (['download', 'upload', 'replace'].includes(action)) return operateOnWikiFile(action, args, nodeId, context, harness);
   if (action === 'rename') {
     const name = requiredValue(args.name, 'name');
     return (request) => renameCloudFile({ request, id: nodeId, type: 'wiki', name });
@@ -135,7 +141,7 @@ function operationFor(args, context) {
   };
 }
 
-export function createWikiTool({ auth, fetchImpl }) {
+export function createWikiTool({ auth, fetchImpl, harness = null } = {}) {
   return defineFeishuTool({
     name: WIKI_TOOL_NAME,
     description: '以本人身份浏览和管理飞书知识库节点，读写文档正文，下载、上传或覆盖附件。按关键词搜索用 feishu_avatar_cloud。',
@@ -203,7 +209,7 @@ export function createWikiTool({ auth, fetchImpl }) {
       const { action } = args;
       const unexpected = Object.keys(args).find((key) => key !== 'action' && !ACTION_FIELDS[action].includes(key));
       if (unexpected) throw invalidInput(`${action} 不接受 ${unexpected}`);
-      const operation = operationFor(args, context);
+      const operation = operationFor(args, context, harness);
       const request = createUserFeishuRequest({ auth, fetchImpl, signal: context?.signal });
       return { action, ...await operation(request) };
     },

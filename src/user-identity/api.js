@@ -5,13 +5,15 @@ import { messageContentOf, messageTypeOf, decodePost, renderPostText } from '../
  * 覆盖用户信息、会话历史、卡片/图片/文件发送。
  * 所有请求都使用 user_access_token（`Authorization: Bearer …`）。
  */
-import { readFile, stat } from 'node:fs/promises';
-import { basename, extname, isAbsolute, resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { basename, extname } from 'node:path';
+import { resolveReadableLocalFile } from '../local-path.js';
 
 import { normalizeCardColor, noticeCard } from '../cards.js';
 import { imageKeysOf, readImageBytes } from '../inbound.js';
-import { cardStreamingOf, interactiveTextOfContent } from '../message-text.js';
+import { applyMentionPlaceholders, cardStreamingOf, interactiveTextOfContent } from '../message-text.js';
 import { FeishuApiError, describeApiCode } from './errors.js';
+import { USER_INFO_URL } from './oauth.js';
 import { historyTimeRange, validateCardText } from '../tool-contract.js';
 
 export const FEISHU_API_ORIGIN = 'https://open.feishu.cn';
@@ -129,7 +131,7 @@ export function normalizeUserInfo(data) {
 /** 当前 user_access_token 对应的授权用户。 */
 export async function getUserInfo({ accessToken, fetchImpl, timeoutMs, signal } = {}) {
   const data = await requestFeishu({
-    path: '/open-apis/authen/v1/user_info',
+    path: new URL(USER_INFO_URL).pathname,
     accessToken,
     fetchImpl,
     timeoutMs,
@@ -286,7 +288,7 @@ export function extractMessageText(item) {
   const content = messageContentOf(item);
   switch (messageType) {
     case 'text':
-      return stringOf(content.text);
+      return applyMentionPlaceholders(content.text, item?.mentions);
     case 'post':
       return renderPostText(decodePost(content));
     case 'image':
@@ -605,11 +607,10 @@ async function uploadUserMedia({
 } = {}) {
   if (typeof path !== 'string' || !path.trim()) throw new Error('path 不能为空');
   if (typeof fetchImpl !== 'function') throw new TypeError('飞书 API 需要 fetch 实现');
-  const absolute = isAbsolute(path) ? path : resolve(cwd || process.cwd(), path);
-  const info = await stat(absolute).catch(() => null);
-  if (!info?.isFile()) throw new Error(`文件不存在或不是普通文件：${absolute}`);
+  const { realPath: absolute, info } = await resolveReadableLocalFile(path, { cwd, signal });
   const fileName = safeFileName(name, basename(absolute));
-  const extension = extname(fileName).toLowerCase();
+  const sourceExt = extname(absolute).toLowerCase();
+  const extension = sourceExt || extname(fileName).toLowerCase();
   const mime = IMAGE_MIME[extension] ?? 'application/octet-stream';
   const isImage = Boolean(IMAGE_MIME[extension]);
   const limit = isImage ? MAX_IMAGE_BYTES : MAX_FILE_BYTES;
@@ -617,7 +618,7 @@ async function uploadUserMedia({
     throw new Error(`${isImage ? '图片' : '文件'}超过飞书 ${Math.round(limit / 1024 / 1024)}MB 上限`);
   }
   signal?.throwIfAborted?.();
-  const bytes = await readFile(absolute);
+  const bytes = await readFile(absolute, { signal });
   signal?.throwIfAborted?.();
 
   const form = new FormData();
@@ -678,22 +679,24 @@ export async function sendMediaMessage({
   fetchImpl,
   timeoutMs,
   signal,
+  withToken = null,
 } = {}) {
   const [receiveIdType, receiveId] = resolveReceiveTarget({ chatId, openId, email });
-  const uploaded = await uploadUserMedia({
-    accessToken,
+  const run = typeof withToken === 'function' ? withToken : (operation) => operation(accessToken);
+  const uploaded = await run((token) => uploadUserMedia({
+    accessToken: token,
     path,
     name,
     cwd,
     fetchImpl,
     timeoutMs,
     signal,
-  });
+  }));
   const content = uploaded.kind === 'image'
     ? JSON.stringify({ image_key: uploaded.key })
     : JSON.stringify({ file_key: uploaded.key, file_name: uploaded.name });
-  const sent = await postUserMessage({
-    accessToken,
+  const sent = await run((token) => postUserMessage({
+    accessToken: token,
     receiveIdType,
     receiveId,
     msgType: uploaded.kind,
@@ -701,6 +704,6 @@ export async function sendMediaMessage({
     fetchImpl,
     timeoutMs,
     signal,
-  });
+  }));
   return Object.freeze({ ...sent, kind: uploaded.kind, name: uploaded.name, bytes: uploaded.bytes });
 }

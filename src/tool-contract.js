@@ -15,12 +15,15 @@ export function defineFeishuTool(definition) {
       if (!args || typeof args !== 'object' || Array.isArray(args)) fail('请传入参数对象');
       for (const key of Object.keys(args)) {
         if (!Object.hasOwn(properties, key)) fail(`不支持参数 ${key}；可用参数：${Object.keys(properties).join(', ') || '无'}`);
+        if (args[key] === undefined) continue;
         const rule = properties[key];
-        const validType = rule.type === 'integer' ? Number.isInteger(args[key]) : typeof args[key] === rule.type;
+        const validType = rule.type === 'integer' ? Number.isInteger(args[key])
+          : rule.type === 'number' ? Number.isFinite(args[key])
+            : typeof args[key] === rule.type;
         if (!validType) fail(`${key} 必须为 ${rule.type}`);
         if (rule.enum && !rule.enum.includes(args[key])) fail(`${key} 必须为 ${rule.enum.join(' / ')}`);
       }
-      for (const key of required) if (!Object.hasOwn(args, key)) fail(`缺少 ${key}`);
+      for (const key of required) if (!Object.hasOwn(args, key) || args[key] === undefined) fail(`缺少 ${key}`);
       return definition.execute(args, context);
     },
   });

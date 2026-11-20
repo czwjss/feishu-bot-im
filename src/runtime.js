@@ -4,8 +4,9 @@
  * Each bot has its own credential ref, state file, long connection, bridge and
  * settings; the manager routes Host events to the bot that owns the Session.
  */
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, isAbsolute, join, resolve } from 'node:path';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { basename, extname, join, resolve } from 'node:path';
+import { resolveReadableLocalFile } from './local-path.js';
 
 import { validateContextEnhancementConfig } from './context-enhancement.js';
 import { secretRefFor } from './config.js';
@@ -16,6 +17,7 @@ import { normalizeCardColor, noticeCard } from './cards.js';
 import { describeMessageForEavesdrop } from './eavesdrop.js';
 import { imageKeysOf } from './inbound.js';
 import { messageImageKey } from './message-image-tool.js';
+import { KeyedQueue } from './queue.js';
 import { RegistrationManager } from './registration.js';
 import { syncSlashCommands } from './slash-commands.js';
 import { boundedInteger, historyOptions, historyTimeRange, validateCardText } from './tool-contract.js';
@@ -63,6 +65,8 @@ export class BotRuntime {
   #presetSource = null;
   #handoffKeywords = null;
   #contexts = new Map();
+  #connectQueue = new KeyedQueue();
+  #connectGeneration = 0;
   #disposed = false;
 
   constructor({ ctx, botId, configStore, stateStore, harness, logger, version, dataDir, verify, createBot, handoffKeywords = null }) {
@@ -123,7 +127,7 @@ export class BotRuntime {
       inbound: this.#bridge?.stats?.() ?? null,
       lastError: this.#lastError,
     };
-    void mkdir(this.#dataDir, { recursive: true })
+    void mkdir(this.#dataDir, { recursive: true, mode: 0o700 })
       .then(() => writeFile(join(this.#dataDir, `status-${this.#botId}.json`), `${JSON.stringify(snapshot, null, 2)}\n`, { mode: 0o600 }))
       .catch(() => undefined);
   }
@@ -196,84 +200,119 @@ export class BotRuntime {
   }
 
   async connect() {
-    if (this.#disposed) return null;
-    const config = this.config;
-    const secret = await this.#secret();
-    if (!config?.appId || !secret) {
-      this.#setState(STATES.IDLE);
-      return null;
-    }
-    this.#setState(STATES.CONNECTING);
-    try {
-      const identity = await this.#verify({ appId: config.appId, appSecret: secret });
-      if (identity.name !== config.botName || identity.openId !== config.botOpenId) {
-        await this.#configStore.update(this.#botId, {
-          botName: identity.name,
-          botOpenId: identity.openId,
-          connectedAt: new Date().toISOString(),
+    const generation = ++this.#connectGeneration;
+    return this.#connectQueue.run('lifecycle', async () => {
+      const stale = () => this.#disposed || generation !== this.#connectGeneration;
+      if (stale()) return null;
+      if (this.#bot || this.#bridge) await this.#teardownConnection();
+      const config = this.config;
+      const secret = await this.#secret();
+      if (stale()) return null;
+      if (!config?.appId || !secret) {
+        this.#setState(STATES.IDLE);
+        return null;
+      }
+      this.#setState(STATES.CONNECTING);
+      let bot = null;
+      let bridge = null;
+      try {
+        const identity = await this.#verify({ appId: config.appId, appSecret: secret });
+        if (stale()) return null;
+        if (identity.name !== config.botName || identity.openId !== config.botOpenId) {
+          await this.#configStore.update(this.#botId, {
+            botName: identity.name,
+            botOpenId: identity.openId,
+            connectedAt: new Date().toISOString(),
+          });
+        }
+        if (stale()) return null;
+        bot = this.#createBot({ appId: config.appId, appSecret: secret });
+        bridge = new FeishuBridge({
+          bot,
+          harness: this.#harness,
+          config: this.config,
+          state: this.#stateStore,
+          logger: this.#logger,
+          inboxDir: join(this.#dataDir, 'inbox', this.#botId),
+          eventsPath: join(this.#dataDir, `events-${this.#botId}.log`),
+          onContext: (sessionId, text) => this.setInjectedContext(sessionId, text),
+          listPresets: () => this.listPresets(),
+          handoffKeywords: this.#handoffKeywords,
         });
-      }
-      const bot = this.#createBot({ appId: config.appId, appSecret: secret });
-      const bridge = new FeishuBridge({
-        bot,
-        harness: this.#harness,
-        config: this.config,
-        state: this.#stateStore,
-        logger: this.#logger,
-        inboxDir: join(this.#dataDir, 'inbox', this.#botId),
-        eventsPath: join(this.#dataDir, `events-${this.#botId}.log`),
-        onContext: (sessionId, text) => this.setInjectedContext(sessionId, text),
-        listPresets: () => this.listPresets(),
-        handoffKeywords: this.#handoffKeywords,
-      });
-      const wsState = await bot.startLongConnection({
-        onMessage: (data) => {
-          void bridge.handleMessage(data).catch((error) => this.#log('error', 'inbound message failed', error));
-        },
-        onCardAction: (data) => bridge.onCardAction(data),
-        onState: (state, error) => {
-          if (state === 'connected') this.#setState(STATES.CONNECTED);
-          else if (state === 'reconnecting') this.#setState(STATES.RECONNECTING);
-          else if (state === 'connecting') this.#setState(STATES.CONNECTING);
-          else if (state === 'error') {
-            this.#setState(STATES.ERROR);
-            this.#lastError = { code: 'connection-error', message: error?.message ?? '长连接错误', at: new Date().toISOString() };
-            this.#writeStatus();
-          }
-        },
-      });
-      this.#bot = bot;
-      this.#bridge = bridge;
-      if (wsState !== 'connected') {
-        this.#lastError = {
-          code: `ws-${wsState}`,
-          message: wsState === 'timeout'
-            ? '长连接 20 秒内未完成握手：请检查开发者后台的长连接订阅方式与 im.message.receive_v1 事件'
-            : `长连接状态：${wsState}`,
-          at: new Date().toISOString(),
-        };
+        const wsState = await bot.startLongConnection({
+          onMessage: (data) => {
+            void bridge.handleMessage(data).catch((error) => this.#log('error', 'inbound message failed', error));
+          },
+          onCardAction: (data) => bridge.onCardAction(data),
+          onState: (state, error) => {
+            if (stale()) return;
+            if (state === 'connected') {
+              this.#lastError = null;
+              this.#setState(STATES.CONNECTED);
+            } else if (state === 'reconnecting') this.#setState(STATES.RECONNECTING);
+            else if (state === 'connecting') this.#setState(STATES.CONNECTING);
+            else if (state === 'error') {
+              this.#lastError = { code: 'connection-error', message: error?.message ?? '长连接错误', at: new Date().toISOString() };
+              this.#setState(STATES.ERROR);
+              this.#writeStatus();
+            }
+          },
+        });
+        if (stale()) {
+          bridge.dispose();
+          await bot.stop?.().catch(() => undefined);
+          return null;
+        }
+        this.#bot = bot;
+        this.#bridge = bridge;
+        if (wsState !== 'connected') {
+          this.#lastError = {
+            code: `ws-${wsState}`,
+            message: wsState === 'timeout'
+              ? '长连接 20 秒内未完成握手：请检查开发者后台的长连接订阅方式与 im.message.receive_v1 事件'
+              : `长连接状态：${wsState}`,
+            at: new Date().toISOString(),
+          };
+          this.#setState(STATES.ERROR);
+          this.#writeStatus();
+          return { botId: this.#botId, wsState };
+        }
+        this.#lastError = null;
+        this.#setState(STATES.CONNECTED);
+        this.#startStatusPolling();
+        // 命令面板存在飞书侧，连接后对齐一次（失败只记日志）
+        void syncSlashCommands(bot, { logger: this.#logger })
+          .then((result) => {
+            if (result.removed.length || result.created.length) {
+              this.#log('info', `slash commands synced: -${result.removed.join(',') || '0'} +${result.created.join(',') || '0'}`);
+            }
+          })
+          .catch((error) => this.#log('warn', 'slash command sync failed', error));
+        this.#log('info', `connected as ${identity.name ?? config.appId}`);
+        return { botId: this.#botId, botName: identity.name, wsState };
+      } catch (error) {
+        bridge?.dispose();
+        if (bot && bot !== this.#bot) await bot.stop?.().catch(() => undefined);
+        if (stale()) return null;
+        this.#lastError = { code: error.code ?? 'connect-failed', message: error.message, at: new Date().toISOString() };
         this.#setState(STATES.ERROR);
-        return { botId: this.#botId, wsState };
+        this.#writeStatus();
+        this.#log('error', 'connect failed', error);
+        throw error;
       }
-      this.#lastError = null;
-      this.#setState(STATES.CONNECTED);
-      this.#startStatusPolling();
-      // 命令面板存在飞书侧，连接后对齐一次（失败只记日志）
-      void syncSlashCommands(bot, { logger: this.#logger })
-        .then((result) => {
-          if (result.removed.length || result.created.length) {
-            this.#log('info', `slash commands synced: -${result.removed.join(',') || '0'} +${result.created.join(',') || '0'}`);
-          }
-        })
-        .catch((error) => this.#log('warn', 'slash command sync failed', error));
-      this.#log('info', `connected as ${identity.name ?? config.appId}`);
-      return { botId: this.#botId, botName: identity.name, wsState };
-    } catch (error) {
-      this.#lastError = { code: error.code ?? 'connect-failed', message: error.message, at: new Date().toISOString() };
-      this.#setState(STATES.ERROR);
-      this.#log('error', 'connect failed', error);
-      throw error;
+    });
+  }
+
+  async #teardownConnection() {
+    if (this.#statusTimer) {
+      clearInterval(this.#statusTimer);
+      this.#statusTimer = null;
     }
+    const bot = this.#bot;
+    this.#bot = null;
+    this.#bridge?.dispose();
+    this.#bridge = null;
+    if (bot) await bot.stop();
   }
 
   async #secret() {
@@ -285,12 +324,11 @@ export class BotRuntime {
   }
 
   async disconnect() {
-    const bot = this.#bot;
-    this.#bot = null;
-    this.#bridge?.dispose();
-    this.#bridge = null;
-    this.#setState(STATES.IDLE);
-    if (bot) await bot.stop();
+    this.#connectGeneration += 1;
+    return this.#connectQueue.run('lifecycle', async () => {
+      await this.#teardownConnection();
+      this.#setState(STATES.IDLE);
+    });
   }
 
   async reconnect() {
@@ -299,10 +337,8 @@ export class BotRuntime {
   }
 
   async saveWorkspace(workspace) {
-    const value = typeof workspace === 'string' && workspace.trim() ? workspace.trim() : null;
-    await this.#configStore.update(this.#botId, { workspace: value });
-    this.#bridge?.setConfig(this.config);
-    return value;
+    const next = await this.save({ workspace });
+    return next.workspace;
   }
 
   async save(fields) {
@@ -384,16 +420,19 @@ export class BotRuntime {
     if (!this.#bot) throw new Error('机器人尚未连接');
     if (!chatId) throw new Error('缺少飞书群 chatId');
     await this.#assertInChat(chatId, signal);
-    const base = cwd || this.config?.workspace || process.cwd();
-    const absolute = isAbsolute(path) ? path : resolve(base, path);
-    signal?.throwIfAborted?.();
-    const info = await stat(absolute).catch(() => null);
-    if (!info?.isFile()) throw new Error(`文件不存在或不是普通文件：${absolute}`);
-    const fileName = basename(typeof name === 'string' && name.trim() ? name.trim() : absolute).replace(/[\u0000-\u001f]/g, '').slice(0, 120) || 'file';
-    const isImage = /\.(png|jpe?g|webp|gif|bmp|ico|tiff?|heic)$/i.test(fileName);
+    const base = cwd || this.config?.workspace || '';
+    const extraRoots = this.#dataDir ? [join(this.#dataDir, 'inbox', this.#botId)] : [];
+    const { realPath: absolute, info } = await resolveReadableLocalFile(path, { cwd: base, extraRoots, signal });
+    const rawName = basename(typeof name === 'string' && name.trim() ? name.trim() : absolute).replace(/[\u0000-\u001f]/g, '');
+    const rawExt = extname(rawName);
+    const fileName = rawName.length <= 120
+      ? (rawName || 'file')
+      : `${rawName.slice(0, Math.max(1, 120 - rawExt.length))}${rawExt}`;
+    const sourceExt = extname(absolute).toLowerCase();
+    const isImage = /\.(png|jpe?g|webp|gif|bmp|ico|tiff?|heic)$/i.test(sourceExt || rawExt);
     const limitMB = isImage ? 10 : 30;
     if (info.size > limitMB * 1024 * 1024) throw new Error(`${isImage ? '图片' : '文件'}超过飞书 ${limitMB}MB 上限：${info.size} 字节`);
-    const bytes = await readFile(absolute);
+    const bytes = await readFile(absolute, { signal });
     signal?.throwIfAborted?.();
     let messageId;
     if (isImage) {
@@ -445,7 +484,7 @@ export class BotRuntime {
           title ||= info?.name || '';
           if (['p2p', 'group'].includes(info?.chatType)) chatType = info.chatType;
         } else if (!title) {
-          title = await Promise.resolve(this.#bot?.getChatName?.(chatId)).catch(() => null) ?? '';
+          title = await Promise.resolve(this.#bot?.getChatName?.(chatId, { signal })).catch(() => null) ?? '';
         }
       }
       signal?.throwIfAborted();
@@ -499,17 +538,18 @@ export class BotRuntime {
         const key = `chat:${chat.chatId}`;
         const overrides = this.#stateStore.overrideFor(key);
         const meta = this.#stateStore.meta[chat.sessionId] ?? {};
+        const cfg = this.config;
         return {
           botId: this.botId, chatId: chat.chatId,
           title: chat.title || meta.titleName || chat.chatId,
           chatType: chat.chatType,
           sessionId: chat.sessionId || null,
           activity: this.#bridge?.managementState(key) ?? null,
-          usage: this.#stateStore.usageFor(key),
+          usage: chat.sessionId ? this.#stateStore.usageFor(`usage:${chat.sessionId}`) : null,
           nextSession: {
-            workspace: overrides.workspace ?? this.config.workspace ?? null,
-            model: overrides.model ?? this.config.model ?? null,
-            preset: overrides.preset ?? this.config.agentPreset ?? null,
+            workspace: overrides.workspace ?? cfg?.workspace ?? null,
+            model: overrides.model ?? cfg?.model ?? null,
+            preset: overrides.preset ?? cfg?.agentPreset ?? null,
             overrides: Object.keys(overrides),
           },
         };
@@ -558,6 +598,9 @@ export class BotRuntime {
       });
       signal?.throwIfAborted();
       for (const item of result.items) {
+        if (threadId && item?.chat_id && item.chat_id !== chatId) {
+          throw new Error('该 thread 不属于指定会话');
+        }
         scanned += 1;
         const row = map(item);
         if (!needle || `${row.text} ${row.senderName}`.normalize('NFKC').toLowerCase().includes(needle)) matched.push(row);
@@ -580,7 +623,10 @@ export class BotRuntime {
     const { messageId, maxBytes, signal } = target;
     const message = await bot.getMessage(messageId, { strict: true, signal });
     const imageKey = messageImageKey(message, target);
-    return bot.downloadResource(messageId, imageKey, 'image', { maxBytes, signal });
+    return {
+      chatId: target.chatId,
+      bytes: await bot.downloadResource(messageId, imageKey, 'image', { maxBytes, signal }),
+    };
   }
 
   /** Fuzzy lookup in the cached group roster; refreshes only when asked. */
@@ -646,6 +692,7 @@ export class BotRuntime {
 
   dispose() {
     this.#disposed = true;
+    this.#connectGeneration += 1;
     if (this.#statusTimer) {
       clearInterval(this.#statusTimer);
       this.#statusTimer = null;
@@ -673,10 +720,12 @@ export class RuntimeManager {
   #registration = null;
   #qrCodeDataUrl = null;
   #provision = null;
+  #provisionCompleting = null;
   #handoffKeywords = null;
+  #onRemoveBot = null;
   #disposed = false;
 
-  constructor({ ctx, configStore, harness, logger, version, dataDir, openState, verify, createBot, handoffKeywords = null }) {
+  constructor({ ctx, configStore, harness, logger, version, dataDir, openState, verify, createBot, handoffKeywords = null, onRemoveBot = null }) {
     this.#ctx = ctx;
     this.#configStore = configStore;
     this.#harness = harness;
@@ -687,6 +736,7 @@ export class RuntimeManager {
     this.#verify = verify ?? verifyCredentials;
     this.#createBot = createBot;
     this.#handoffKeywords = handoffKeywords;
+    this.#onRemoveBot = typeof onRemoveBot === 'function' ? onRemoveBot : null;
   }
 
   get runtimes() {
@@ -721,7 +771,13 @@ export class RuntimeManager {
   async start() {
     if (this.#disposed) return;
     for (const bot of this.#configStore.bots) {
+      if (this.#disposed) break;
       const runtime = await this.#createRuntime(bot.id);
+      if (this.#disposed) {
+        runtime.dispose();
+        this.#runtimes.delete(bot.id);
+        break;
+      }
       try {
         await runtime.start();
       } catch (error) {
@@ -746,10 +802,20 @@ export class RuntimeManager {
       botOpenId: identity.openId,
       connectedAt: new Date().toISOString(),
     });
-    await this.#ctx.credentials.set(bot.secretRef, cleanSecret);
-    const runtime = await this.#createRuntime(bot.id);
-    await runtime.connect();
-    return runtime.status();
+    let runtime = null;
+    try {
+      await this.#ctx.credentials.set(bot.secretRef, cleanSecret);
+      runtime = await this.#createRuntime(bot.id);
+      await runtime.connect();
+      return runtime.status();
+    } catch (error) {
+      runtime?.dispose();
+      this.#runtimes.delete(bot.id);
+      await this.#ctx.credentials.unset?.(bot.secretRef).catch(() => undefined);
+      await this.#configStore.remove(bot.id).catch(() => undefined);
+      this.#onRemoveBot?.(bot.id);
+      throw error;
+    }
   }
 
   async removeBot(botId) {
@@ -761,6 +827,9 @@ export class RuntimeManager {
     await this.#ctx.credentials.unset(bot.secretRef).catch(() => undefined);
     await this.#configStore.remove(botId);
     await this.#removeBotData(botId);
+    await Promise.resolve(this.#onRemoveBot?.(botId)).catch((error) => {
+      this.#logger?.warn?.(`[im-feishu] removeBot cleanup failed for ${botId}`, error);
+    });
     return true;
   }
 
@@ -794,7 +863,7 @@ export class RuntimeManager {
     const { default: QRCode } = await import('qrcode');
     this.#registration ??= new RegistrationManager({ logger: this.#logger });
     // 补齐权限：对已有应用发起一次"定向更新"，扫描后由开放平台写入缺失的 scope/事件。
-    let options = input;
+    let options = {};
     if (input.botId) {
       const bot = this.#configStore.bot(input.botId);
       if (!bot) throw new Error(`机器人不存在：${input.botId}`);
@@ -826,24 +895,35 @@ export class RuntimeManager {
     const qrCodeDataUrl = terminal ? null : this.#qrCodeDataUrl;
     if (terminal) this.#qrCodeDataUrl = null;
     if (snapshot.state === 'success') {
-      try {
-        if (this.#provision?.kind === 'grant' && this.#provision.botId) {
-          const status = await this.reconnectBot(this.#provision.botId);
-          return { ...rest, qrCodeDataUrl: null, bot: status };
+      if (this.#provisionCompleting) return this.#provisionCompleting;
+      const provision = this.#provision;
+      this.#provision = null;
+      this.#provisionCompleting = (async () => {
+        try {
+          if (provision?.kind === 'grant' && provision.botId) {
+            const status = await this.reconnectBot(provision.botId);
+            return { ...rest, qrCodeDataUrl: null, bot: status };
+          }
+          if (snapshot.appId && appSecret) {
+            const bot = await this.addBot({ appId: snapshot.appId, appSecret });
+            this.#registration?.clearCredentials?.();
+            return { ...rest, qrCodeDataUrl: null, bot };
+          }
+          return { ...rest, qrCodeDataUrl: null };
+        } catch (error) {
+          return { ...rest, qrCodeDataUrl: null, state: 'error', error: { code: 'bind-failed', message: error.message } };
+        } finally {
+          this.#provisionCompleting = null;
         }
-        if (snapshot.appId && appSecret) {
-          const bot = await this.addBot({ appId: snapshot.appId, appSecret });
-          return { ...rest, qrCodeDataUrl: null, bot };
-        }
-      } catch (error) {
-        return { ...rest, qrCodeDataUrl: null, state: 'error', error: { code: 'bind-failed', message: error.message } };
-      }
+      })();
+      return this.#provisionCompleting;
     }
     return { ...rest, qrCodeDataUrl };
   }
 
   provisionCancel() {
     this.#qrCodeDataUrl = null;
+    this.#provision = null;
     this.#registration?.cancel();
     return { state: 'cancelled' };
   }
@@ -975,8 +1055,21 @@ export class RuntimeManager {
     const runtimes = wanted
       ? [this.#runtimeForDelivery({ bot: wanted })]
       : this.runtimes;
+    if (runtimes.length <= 1) {
+      const rows = [];
+      for (const runtime of runtimes) rows.push(...await runtime.listChats({ refresh: refresh === true, signal }));
+      return rows;
+    }
+    const settled = await Promise.allSettled(
+      runtimes.map((runtime) => runtime.listChats({ refresh: refresh === true, signal })),
+    );
     const rows = [];
-    for (const runtime of runtimes) rows.push(...await runtime.listChats({ refresh: refresh === true, signal }));
+    let firstError = null;
+    for (const outcome of settled) {
+      if (outcome.status === 'fulfilled') rows.push(...outcome.value);
+      else firstError ??= outcome.reason;
+    }
+    if (rows.length === 0 && firstError) throw firstError;
     return rows;
   }
 
@@ -987,6 +1080,10 @@ export class RuntimeManager {
 
   dispose() {
     this.#disposed = true;
+    this.#qrCodeDataUrl = null;
+    this.#provision = null;
+    this.#registration?.dispose();
+    this.#registration = null;
     for (const runtime of this.#runtimes.values()) runtime.dispose();
     this.#runtimes.clear();
   }

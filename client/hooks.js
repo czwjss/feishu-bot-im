@@ -47,7 +47,7 @@ export function useAutoSave() {
     return () => { alive.current = false; unsubscribe(); void queue.flush(); };
   }, [queue]);
   return {
-    state, flush: queue.flush, cancel: queue.cancel,
+    state, flush: queue.flush, cancel: queue.cancel, discard: queue.discard,
     retry: () => queue.flush(true),
     compositionHandlers: { onCompositionStartCapture: queue.pauseText, onCompositionEndCapture: queue.resumeText },
     schedule(key, operation, delay = 0, onSaved) {

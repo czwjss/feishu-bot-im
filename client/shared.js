@@ -1,23 +1,22 @@
 import React from 'react';
-import { NS } from './locale.js';
 
 import { API, RPC_ENDPOINT, CONTEXT_ENHANCEMENT_FIELDS } from '../src/contracts.js';
 export { API };
 
 const h = React.createElement;
 
-    let boundTranslate = null;
     let activeLocale = '';
 
     export function configureLocale(service) {
-      boundTranslate = service.bind(NS);
       activeLocale = service.getLocale().active;
-      return service.subscribe(() => { activeLocale = service.getLocale().active; });
+      const unsubscribe = service.subscribe(() => { activeLocale = service.getLocale().active; });
+      return () => {
+        unsubscribe?.();
+        activeLocale = '';
+      };
     }
 
     export function t(zh, en) {
-      const translated = boundTranslate?.(zh);
-      if (translated && translated !== zh) return translated;
       const language = activeLocale || (navigator.language || '');
       return language.toLowerCase().startsWith('zh') ? zh : en;
     }
@@ -36,20 +35,21 @@ const h = React.createElement;
 
     export const CSS = `
 .bxf-page { --bxf-radius: 12px; }
-.bxf-page select {
+.bxf-page select:not(.bxf-worker-native *) {
   appearance: none; -webkit-appearance: none; cursor: pointer;
   padding-right: 30px !important;
   background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") !important;
   background-repeat: no-repeat !important;
   background-position: right 10px center !important;
 }
-.bxf-page input, .bxf-page select { height: 34px; }
-.bxf-page input:focus, .bxf-page select:focus, .bxf-page textarea:focus {
+.bxf-page input:not([type="checkbox"]):not([type="radio"]):not(.bxf-worker-native *),
+.bxf-page select:not(.bxf-worker-native *) { height: 34px; }
+.bxf-page :is(input, select, textarea):not(.bxf-worker-native *):focus {
   outline: 2px solid color-mix(in srgb, var(--dsw-alias-brand-primary, #3370ff) 32%, transparent);
   outline-offset: 1px;
   border-color: var(--dsw-alias-brand-primary, #3370ff);
 }
-.bxf-page select option:checked {
+.bxf-page select:not(.bxf-worker-native *) option:checked {
   background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-label-primary, #3370ff)) !important;
   color: var(--dsw-alias-label-primary-foreground, var(--dsw-alias-bg-base, #fff)) !important;
 }
@@ -57,7 +57,7 @@ const h = React.createElement;
 .bxf-bot-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .bxf-mini { background: transparent !important; -webkit-appearance: none; appearance: none;
   font-size: 11px; padding: 3px 8px; border-radius: 7px; cursor: pointer;
-  border: 1px solid var(--dsw-alias-border-l1, #e2e8f0); background: transparent; color: var(--dsw-alias-label-secondary); }
+  border: 1px solid var(--dsw-alias-border-l1, #e2e8f0); color: var(--dsw-alias-label-secondary); }
 .bxf-mini:hover { color: var(--dsw-alias-brand-primary, #3370ff); border-color: var(--dsw-alias-brand-primary, #3370ff); background: color-mix(in srgb, var(--dsw-alias-brand-primary, #3370ff) 10%, transparent) !important; }
 .bxf-button { appearance: none; display: inline-flex; align-items: center; justify-content: center;
   min-height: 34px; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer;
@@ -117,10 +117,6 @@ const h = React.createElement;
       error: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' },
       checkRow: { display: 'flex', flexWrap: 'wrap', gap: '6px 14px' },
       checkLabel: { fontSize: '12px', display: 'flex', gap: '5px', alignItems: 'center' },
-      overlay: {
-        position: 'fixed', inset: 0, background: 'rgba(15,23,42,.35)', display: 'flex',
-        alignItems: 'center', justifyContent: 'center', zIndex: 60, padding: '20px',
-      },
       modal: {
         width: 'min(460px, 100%)', background: 'var(--dsw-alias-bg-layer-1, #fff)', color: 'var(--dsw-alias-label-primary)',
         borderRadius: '14px', padding: '18px', boxShadow: '0 24px 60px rgba(15,23,42,.24)',
@@ -180,14 +176,17 @@ const h = React.createElement;
         children);
     }
 
-    export function SaveStatus({ state, onRetry }) {
+    export function SaveStatus({ state, onRetry, onDiscard }) {
       if (state.status === 'idle') return null;
       const label = state.status === 'error' ? `${t('保存失败：', 'Save failed: ')}${state.error}`
         : state.status === 'pending' ? t('等待保存…', 'Waiting to save…')
           : state.status === 'saving' ? t('保存中…', 'Saving…') : t('已保存', 'Saved');
       return h('div', { className: 'bxf-save-status', 'data-state': state.status, role: 'status' },
         h('span', null, label),
-        state.status === 'error' ? h('button', { type: 'button', className: 'bxf-mini', onClick: onRetry }, t('重试', 'Retry')) : null);
+        state.status === 'error' ? h('button', { type: 'button', className: 'bxf-mini', onClick: onRetry }, t('重试', 'Retry')) : null,
+        state.status === 'error' && onDiscard
+          ? h('button', { type: 'button', className: 'bxf-mini', onClick: onDiscard }, t('放弃修改', 'Discard'))
+          : null);
     }
 
     export function StatusBadge({ state }) {
@@ -201,4 +200,3 @@ const h = React.createElement;
       const [label, tone] = map[state] ?? map.idle;
       return h('span', { style: S.badge(tone) }, label);
     }
-

@@ -31,7 +31,7 @@ export async function runCommand(services, name, argument, context) {
     case 'new': {
       const previous = state.sessionFor(chatKey);
       await state.unbindSession(chatKey);
-      services.forgetSession?.(previous);
+      services.forgetSession?.(previous, chatKey);
       await notice('已解除当前会话绑定，下一条消息会开启全新会话。', '新会话');
       return true;
     }
@@ -127,13 +127,13 @@ export async function collectMenuData(services, chatKey) {
     reasoningEffort,
     models,
     efforts,
+    stats: projections,
   };
 }
 
 export async function buildMenuCard(services, { chatKey }) {
   const data = await collectMenuData(services, chatKey);
-  const stats = data.sessionId ? await services.harness.sessionProjections?.(data.sessionId).catch(() => null) : null;
-  return menuCard({ ...data, stats });
+  return menuCard(data);
 }
 
 /** The value a picker currently has, mirroring the menu card. */
@@ -142,7 +142,7 @@ export function currentMenuValue(data, kind) {
     return data.model ? `${data.model.provider}/${data.model.model}` : null;
   }
   if (kind === 'reasoning_pick') return data.reasoningEffort ?? data.model?.reasoningEffort ?? null;
-  if (kind === 'workspace_pick') return data.currentWorkspace;
+  if (kind === 'workspace_pick') return data.sessionWorkspace ?? data.currentWorkspace;
   if (kind === 'session_pick') return data.sessionId;
   return null;
 }

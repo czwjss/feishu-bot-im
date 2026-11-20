@@ -132,6 +132,7 @@ export async function editCloudDocument({ request, id, find, text }) {
   const updated = [...elements];
   if (replacement) updated[runIndex] = { ...elements[runIndex], text_run: { ...run, content: replacement } };
   else updated.splice(runIndex, 1);
+  if (updated.length === 0) updated.push({ text_run: { content: '' } });
 
   // Every read and the final patch use the same explicit revision. Use the
   // provider's conflict error if another collaborator edited the document.

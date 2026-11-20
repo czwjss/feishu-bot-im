@@ -164,7 +164,7 @@ export function createMessagesTool({ list, downloadImage, harness }) {
         `匹配 ${value.matched} 条，扫描 ${value.scanned} 条${value.hasMore ? '，还有更多，请使用 pageToken 继续读取' : ''}。`),
     },
     async execute(args, context) {
-      const target = messageImageTarget(args);
+      const target = messageImageTarget(args, { requireChatId: false });
       if (target) return readMessageImage(target, context, harness, (input) => downloadImage({
         ...input, sessionId: context?.agent?.session?.id, bot: args.bot,
       }));

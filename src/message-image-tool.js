@@ -36,7 +36,7 @@ export const MESSAGE_IMAGE_OUTPUT = {
   required: ['chatId', 'messageId', 'imageIndex', 'image'],
 };
 
-export function messageImageTarget(args) {
+export function messageImageTarget(args, { requireChatId = true } = {}) {
   if (args.action !== 'read_image') {
     if (args.messageId !== undefined || args.imageIndex !== undefined) {
       throw new Error('messageId 和 imageIndex 用于 read_image 操作');
@@ -46,10 +46,12 @@ export function messageImageTarget(args) {
   const chatId = args.chatId?.trim();
   const messageId = args.messageId?.trim();
   const imageIndex = args.imageIndex ?? 1;
-  if (!/^oc_[\w-]+$/.test(chatId ?? '')) throw new Error('read_image 需要显式提供有效的 chatId');
+  if (chatId || requireChatId) {
+    if (!/^oc_[\w-]+$/.test(chatId ?? '')) throw new Error('read_image 需要显式提供有效的 chatId');
+  }
   if (!/^om_[\w-]+$/.test(messageId ?? '')) throw new Error('read_image 需要有效的 messageId');
   if (!Number.isSafeInteger(imageIndex) || imageIndex < 1) throw new Error('imageIndex 需要是从 1 开始的整数');
-  return { chatId, messageId, imageIndex };
+  return { ...(chatId ? { chatId } : {}), messageId, imageIndex };
 }
 
 export function messageImageKey(message, { chatId, messageId, imageIndex }) {
@@ -62,18 +64,40 @@ export function messageImageKey(message, { chatId, messageId, imageIndex }) {
   return key;
 }
 
+function projectAttachment(attachment) {
+  const projected = {
+    attachmentId: attachment.attachmentId,
+    mediaType: attachment.mediaType,
+    bytes: attachment.bytes,
+    width: attachment.width,
+    height: attachment.height,
+  };
+  if (typeof attachment.name === 'string') projected.name = attachment.name;
+  if (attachment.originalDimensions && typeof attachment.originalDimensions === 'object') {
+    projected.originalDimensions = {
+      width: attachment.originalDimensions.width,
+      height: attachment.originalDimensions.height,
+    };
+  }
+  return projected;
+}
+
 export async function readMessageImage(target, context, harness, download) {
   const { signal } = context ?? {};
   const limits = harness?.imageLimits;
   if (!limits) throw new Error('DSH 图片附件服务不可用');
-  const maxBytes = Math.min(MAX_IMAGE_BYTES, limits.maxImageBytes, limits.maxMessageImageBytes);
-  const data = await download({ ...target, maxBytes, signal });
+  const candidates = [MAX_IMAGE_BYTES, limits.maxImageBytes, limits.maxMessageImageBytes]
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const maxBytes = Math.min(...candidates);
+  const downloaded = await download({ ...target, maxBytes, signal });
+  const data = Buffer.isBuffer(downloaded) ? downloaded : downloaded?.bytes;
+  const chatId = (Buffer.isBuffer(downloaded) ? null : downloaded?.chatId) || target.chatId || '';
   signal?.throwIfAborted();
   const mediaType = sniffImageType(data);
   if (!mediaType || !limits.mediaTypes.includes(mediaType)) throw new Error('图片格式不受当前 DSH 支持');
   const name = `feishu-${target.messageId}-${target.imageIndex}`;
   const image = await harness.saveImage({ data, mediaType, name }, context);
-  return { ...target, image };
+  return { chatId, messageId: target.messageId, imageIndex: target.imageIndex, image: projectAttachment(image) };
 }
 
 export function renderMessageImage({ chatId, messageId, imageIndex, image }) {

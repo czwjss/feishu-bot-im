@@ -28,7 +28,7 @@ function normalizeOpenIds(value) {
   return [...new Set(list.map(cleanString).filter(Boolean))].slice(0, 200);
 }
 
-export function normalizeAccess(value) {
+function normalizeAccess(value) {
   const source = value && typeof value === 'object' ? value : {};
   const pick = (candidate) => (candidate === ACCESS_MODES.ALLOWLIST ? ACCESS_MODES.ALLOWLIST : ACCESS_MODES.ALL);
   // Private chats are always open; only groups carry an access mode.
@@ -39,7 +39,7 @@ export function normalizeAccess(value) {
   });
 }
 
-export function normalizeModel(value) {
+function normalizeModel(value) {
   if (!value || typeof value !== 'object') return null;
   const provider = cleanString(value.provider);
   const model = cleanString(value.model);
@@ -88,7 +88,7 @@ export function normalizeBot(value) {
 }
 
 
-export function normalizeDocument(value) {
+function normalizeDocument(value) {
   if (value != null && (typeof value !== 'object' || !Array.isArray(value.bots))) {
     throw Object.assign(new Error('机器人配置必须包含 bots 数组，请使用当前多机器人配置格式'), { code: 'INVALID_CONFIG' });
   }
@@ -107,7 +107,7 @@ export function normalizeDocument(value) {
   return Object.freeze({ version: 2, bots: Object.freeze(bots) });
 }
 
-export function integrationDir(config = {}) {
+function integrationDir(config = {}) {
   const home = resolve(config.dshHome ?? process.env.DSH_HOME ?? join(homedir(), '.dsh'));
   return resolve(config.dataDir ?? join(home, 'integrations', 'im-feishu'));
 }
@@ -150,17 +150,17 @@ export class ConfigStore {
     return this.#store.update((doc) => {
       const current = doc.bots.find((item) => item.id === id);
       if (!current) throw new Error(`机器人不存在：${id}`);
-      next = normalizeBot({ ...current, ...patch, id, appId: current.appId });
+      const resolved = typeof patch === 'function' ? patch(current) : patch;
+      const busyMode = resolved?.busyMode && typeof resolved.busyMode === 'object'
+        ? { ...current.busyMode, ...resolved.busyMode }
+        : current.busyMode;
+      next = normalizeBot({ ...current, ...resolved, busyMode, id, appId: current.appId });
       return { version: 2, bots: doc.bots.map((item) => (item.id === id ? next : item)) };
     }).then(() => next);
   }
 
   remove(id) {
     return this.#store.update((doc) => ({ version: 2, bots: doc.bots.filter((item) => item.id !== id) }));
-  }
-
-  clear() {
-    return this.#store.update(() => ({ version: 2, bots: [] }));
   }
 }
 
@@ -178,6 +178,8 @@ function normalizeState(parsed) {
 /** Chat → Session bindings and inbound dedupe, one store per bot. */
 export class StateStore {
   #store;
+  #pendingSeen = new Set();
+  #seenTimer = null;
 
   constructor(path) { this.#store = new JsonStore(path, normalizeState); }
   get value() { return this.#store.value; }
@@ -213,9 +215,21 @@ export class StateStore {
   sessionFor(key) { return this.value.sessions[key] ?? null; }
   chatTypeFor(key) { return this.value.chatTypes[key] ?? null; }
 
+  #updateWithPendingSeen(updater) {
+    return this.#store.update((state) => {
+      const missing = this.#pendingSeen.size > 0
+        ? [...this.#pendingSeen].filter((id) => !state.seen.includes(id))
+        : [];
+      const merged = missing.length > 0 ? { ...state, seen: [...state.seen, ...missing] } : state;
+      const next = updater(merged);
+      if (next !== state && missing.length > 0) this.#pendingSeen.clear();
+      return next;
+    });
+  }
+
   async setChatType(key, type) {
     if (!['p2p', 'group'].includes(type)) return;
-    await this.#store.update((state) => state.chatTypes[key] === type ? state : {
+    await this.#updateWithPendingSeen((state) => state.chatTypes[key] === type ? state : {
       ...state, chatTypes: { ...state.chatTypes, [key]: type },
     });
   }
@@ -225,7 +239,7 @@ export class StateStore {
   }
 
   async bindSession(key, sessionId, { expectedSessionId, validate, preserveTitle = false } = {}) {
-    await this.#store.update((state) => {
+    await this.#updateWithPendingSeen((state) => {
       if (expectedSessionId !== undefined && (state.sessions[key] ?? null) !== expectedSessionId) {
         throw Object.assign(new Error('会话绑定已变化，请刷新后重新选择'), { code: 'conflict' });
       }
@@ -254,11 +268,45 @@ export class StateStore {
     return previous;
   }
 
-  hasSeen(messageId) { return this.value.seen.includes(messageId); }
+  hasSeen(messageId) { return this.#pendingSeen.has(messageId) || this.value.seen.includes(messageId); }
   async markSeen(messageId) {
+    this.#pendingSeen.delete(messageId);
     await this.#store.update((state) => state.seen.includes(messageId) ? state : { ...state, seen: [...state.seen, messageId] });
   }
 
+  /** 内存立即可见去重，按 2 秒窗口合并写盘，避免高活跃群每条旁听都全量落盘。 */
+  markSeenDeferred(messageId, delayMs = 2_000) {
+    if (!messageId || this.hasSeen(messageId)) return;
+    this.#pendingSeen.add(messageId);
+    if (this.#pendingSeen.size >= 50) {
+      void this.flushSeen().catch(() => undefined);
+      return;
+    }
+    if (this.#seenTimer) return;
+    this.#seenTimer = setTimeout(() => {
+      this.#seenTimer = null;
+      void this.flushSeen().catch(() => undefined);
+    }, delayMs);
+    this.#seenTimer.unref?.();
+  }
+
+  stopSeenTimer() {
+    if (this.#seenTimer) {
+      clearTimeout(this.#seenTimer);
+      this.#seenTimer = null;
+    }
+  }
+
+  async flushSeen() {
+    this.stopSeenTimer();
+    if (this.#pendingSeen.size === 0) return;
+    const batch = [...this.#pendingSeen];
+    this.#pendingSeen.clear();
+    await this.#store.update((state) => {
+      const missing = batch.filter((id) => !state.seen.includes(id));
+      return missing.length === 0 ? state : { ...state, seen: [...state.seen, ...missing] };
+    });
+  }
   overrideFor(chatKey) { return { ...this.value.overrides[chatKey] }; }
   async setOverride(chatKey, patch) {
     if (typeof chatKey !== 'string') return this.overrideFor(chatKey);
@@ -281,5 +329,12 @@ export class StateStore {
     }));
   }
   get meta() { return { ...this.value.meta }; }
-  reset() { return this.#store.update(() => ({})); }
+  reset() {
+    if (this.#seenTimer) {
+      clearTimeout(this.#seenTimer);
+      this.#seenTimer = null;
+    }
+    this.#pendingSeen.clear();
+    return this.#store.update(() => ({}));
+  }
 }

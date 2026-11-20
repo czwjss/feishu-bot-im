@@ -18,7 +18,7 @@ import { DEFAULT_EAVESDROP_LIMIT, EavesdropStore, describeMessageForEavesdrop, r
 import { renderMentions } from './mentions.js';
 import { InboundContent } from './inbound.js';
 import { renderGuidanceBlock, renderQuoteBlock, renderSourceBlock } from './context-enhancement.js';
-import { appendFile, mkdir } from 'node:fs/promises';
+import { appendFile, mkdir, rename, stat } from 'node:fs/promises';
 import { sendNotice } from './notify.js';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -44,7 +44,11 @@ function renderBatchBody(items) {
       .map((part) => String(part.text ?? '').trim())
       .filter(Boolean)
       .join('\n');
-    lines.push('', `${index + 1}. ${who}${stamp ? ` · ${stamp}` : ''}：`, text || '（附件见下）');
+    const quoteLine = item.quoted?.text
+      ? `[引用 ${item.quoted.senderName || '某人'}：${String(item.quoted.text).slice(0, 200)}]`
+      : '';
+    const body = [quoteLine, text].filter(Boolean).join('\n');
+    lines.push('', `${index + 1}. ${who}${stamp ? ` · ${stamp}` : ''}：`, body || '（附件见下）');
   });
   lines.push('', '请合并处理，必要时在回复里点名对应的人。');
   return lines.join('\n');
@@ -59,6 +63,9 @@ function formatBatchTime(value) {
 
 const PARENT_CACHE_TTL_MS = 5 * 60_000;
 const PARENT_MISS_TTL_MS = 30_000;
+
+const EVENT_LOG_MAX_BYTES = 5 * 1024 * 1024;
+const EVENT_LOG_ROTATE_EVERY = 100;
 
 export class FeishuBridge {
   #bot;
@@ -80,6 +87,7 @@ export class FeishuBridge {
   #batchDraining = new Set();
   #feishuPromptOrigins = new Map();
   #turnOrigin = new Map();
+  #activeTurnChat = new Map();
   #triggerMessages = new Map();
   #externalAsk = new Map();
   #reactionActive = new Map();
@@ -91,6 +99,8 @@ export class FeishuBridge {
   #disposed = false;
   #pendingCards = new Map();
   #cardTimer = null;
+  #sweepingCards = false;
+  #eventWrites = 0;
   #turns;
   #listPresets;
 
@@ -101,6 +111,7 @@ export class FeishuBridge {
     this.#state = state;
     this.#logger = logger ?? console;
     this.#inbound = new InboundContent({ bot, inboxDir, logger: this.#logger });
+    void this.#inbound.cleanupExpired().catch(() => undefined);
     this.#handoffKeywords = handoffKeywords;
     this.#onContext = typeof onContext === 'function' ? onContext : () => undefined;
     this.#eventsPath = eventsPath ?? null;
@@ -117,10 +128,7 @@ export class FeishuBridge {
       bot, harness, state,
       services: () => this.#services(),
       canManage: (key, operator) => this.#canManage(key, operator),
-      forgetSession: (sessionId, key) => {
-        this.#eavesdrop.reset(key);
-        this.#forgetSessionOrigin(sessionId);
-      },
+      forgetSession: (sessionId, key) => this.#resetSessionState(sessionId, key),
     });
     this.#turns = new TurnRunner({
       bot,
@@ -129,7 +137,11 @@ export class FeishuBridge {
       logEvent: (kind, detail) => this.#logEvent(kind, detail),
       processDetail: () => this.#config.processDetail ?? 'detailed',
       classifyUserMessage: (sessionId, source) => this.#classifyUserMessage(sessionId, source),
-      onTurnOrigin: (sessionId, kind) => this.#turnOrigin.set(sessionId, kind),
+      onTurnOrigin: (sessionId, kind, chat = null) => {
+        this.#turnOrigin.set(sessionId, kind === 'feishu' ? 'feishu' : kind === 'pending' ? 'pending' : 'external');
+        if (chat?.chatKey && chat?.chatId) this.#activeTurnChat.set(sessionId, { key: chat.chatKey, chatId: chat.chatId });
+        if (kind === 'feishu') this.#startTurnReactions(sessionId);
+      },
       showStats: (chatKey) => this.#state.statsFor?.(chatKey) === true,
       showTools: (chatKey) => this.#state.toolsFor?.(chatKey) === true,
       renderMentions: (text, { mode }) => this.#renderMentions(text, mode),
@@ -192,8 +204,15 @@ export class FeishuBridge {
     this.#stats.lastEventType = kind;
     if (!this.#eventsPath) return;
     const line = `${this.#stats.lastEventAt} ${kind} ${detail}\n`;
+    const shouldCheckRotate = (++this.#eventWrites % EVENT_LOG_ROTATE_EVERY) === 0;
     void (async () => {
-      await mkdir(dirname(this.#eventsPath), { recursive: true }).catch(() => undefined);
+      await mkdir(dirname(this.#eventsPath), { recursive: true, mode: 0o700 }).catch(() => undefined);
+      if (shouldCheckRotate) {
+        const info = await stat(this.#eventsPath).catch(() => null);
+        if (info && info.size > EVENT_LOG_MAX_BYTES) {
+          await rename(this.#eventsPath, `${this.#eventsPath}.1`).catch(() => undefined);
+        }
+      }
       await appendFile(this.#eventsPath, line, { mode: 0o600 }).catch(() => undefined);
     })();
   }
@@ -208,6 +227,8 @@ export class FeishuBridge {
     if (this.#cardTimer) clearInterval(this.#cardTimer);
     this.#cardTimer = null;
     this.#pendingCards.clear();
+    this.#activeTurnChat.clear();
+    this.#state.stopSeenTimer?.();
     this.#turns?.dispose();
     this.#interactions.dispose();
     this.#menu.dispose();
@@ -239,7 +260,8 @@ export class FeishuBridge {
     if (openId && this.#config.botOpenId && openId === this.#config.botOpenId) return;
     if (!resubmitted) {
       if (this.#state.hasSeen(message.message_id)) return;
-      await this.#state.markSeen(message.message_id);
+      if (typeof this.#state.markSeenDeferred === 'function') this.#state.markSeenDeferred(message.message_id);
+      else await this.#state.markSeen(message.message_id);
     }
 
     if (!isAllowed(this.#config, message, openId)) {
@@ -273,7 +295,7 @@ export class FeishuBridge {
         return;
       }
     }
-    const text = (textOfContentOrPost(message) ?? '').replace(/@_user_\d+/g, '').trim();
+    const text = this.#stripBotMentions(textOfContentOrPost(message) ?? '', message);
 
     if (text && this.#interactions.resolveText(chatKey, message.chat_id, openId, text)) return;
 
@@ -323,14 +345,13 @@ export class FeishuBridge {
     const quotedParts = Array.isArray(quoted?.parts) ? quoted.parts : [];
     const promptParts = quotedParts.length > 0 ? [...quotedParts, ...parts] : parts;
 
-    const submitPrompt = (incomingParts, promptText) => this.#deliver({
+    const submitPrompt = (incomingParts) => this.#deliver({
       chatKey,
       chatId: message.chat_id,
       chatType: message.chat_type,
       createTime: message.create_time,
       messageId: message.message_id,
       parts: incomingParts,
-      text: promptText,
       openId,
       senderName,
       quoted,
@@ -343,7 +364,7 @@ export class FeishuBridge {
       if (message.chat_type !== 'group') return;
       if (this.#state.sessionFor(chatKey)) {
         await this.#react(message.message_id, REACTION.processing);
-        await submitPrompt([{ type: 'text', text: BARE_MENTION_PROMPT }], BARE_MENTION_PROMPT);
+        await submitPrompt([{ type: 'text', text: BARE_MENTION_PROMPT }]);
         return;
       }
       await this.#sendBareMentionHint(message.chat_id);
@@ -351,7 +372,7 @@ export class FeishuBridge {
     }
 
     await this.#react(message.message_id, REACTION.processing);
-    await submitPrompt(promptParts, text);
+    await submitPrompt(promptParts);
   }
 
   /** Hint card for a bare group mention when the chat has no Session yet. */
@@ -383,6 +404,7 @@ export class FeishuBridge {
   #forgetSessionOrigin(sessionId) {
     if (!sessionId) return;
     this.#turnOrigin.delete(sessionId);
+    this.#activeTurnChat.delete(sessionId);
     this.#externalAsk.delete(sessionId);
     for (const [requestId, origin] of this.#feishuPromptOrigins) {
       if (origin.sessionId === sessionId) this.#feishuPromptOrigins.delete(requestId);
@@ -478,16 +500,58 @@ export class FeishuBridge {
     return result;
   }
 
+  /** 只移除针对本机器人的 @ 占位符，其它人的 @ 还原成可读姓名。 */
+  #stripBotMentions(raw, message) {
+    let output = String(raw ?? '');
+    const mentions = Array.isArray(message?.mentions) ? message.mentions : [];
+    if (mentions.length === 0) return output.replace(/@_user_\d+/g, '').trim();
+    const botOpenId = this.#config.botOpenId;
+    const botName = this.#config.botName;
+    for (const mention of mentions) {
+      const key = typeof mention?.key === 'string' ? mention.key : '';
+      if (!key) continue;
+      const openId = mention?.id?.open_id ?? mention?.id ?? '';
+      const isSelf = (botOpenId && openId === botOpenId)
+        || (!botOpenId && botName && mention?.name === botName);
+      if (isSelf) {
+        output = output.replaceAll(key, '');
+      } else if (typeof mention?.name === 'string' && mention.name) {
+        output = output.replaceAll(key, mention.name.startsWith('@') ? mention.name : `@${mention.name}`);
+      }
+    }
+    return output.replace(/@_user_\d+/g, '').trim();
+  }
+
+  #resetSessionState(sessionId, chatKey = null) {
+    const key = chatKey || (typeof sessionId === 'string' ? this.#state.keyForSession?.(sessionId) : null);
+    if (key) {
+      this.#eavesdrop.reset(key);
+      this.#batchQueue.delete(key);
+    }
+    if (sessionId) {
+      this.#reactionQueue.delete(sessionId);
+      this.#reactionActive.delete(sessionId);
+      this.#triggerMessages.delete(sessionId);
+      this.#onContext(sessionId, '');
+    }
+    this.#forgetSessionOrigin(sessionId);
+  }
+
+  /** 计算运行中收到新消息时的实际模式：只有飞书发起的当前回合才允许 steer。 */
+  #busyModeFor(chatType, sessionId) {
+    const scopeKey = chatType === 'p2p' ? 'direct' : 'group';
+    const wanted = this.#config.busyMode?.[scopeKey] === 'steer' ? 'steer' : 'queue';
+    const activeOrigin = sessionId ? this.#turnOrigin.get(sessionId) : null;
+    return wanted === 'steer' && activeOrigin === 'feishu' ? 'steer' : 'queue';
+  }
+
   /** 上一个回合还在跑时先攒着，回合结束后合并成一次派发。 */
   async #deliver(args) {
     const sessionId = this.#state.sessionFor(args.chatKey);
     const busy = Boolean(sessionId) && (this.#turnOrigin.has(sessionId) || this.#batchDraining.has(args.chatKey));
     if (busy) {
       // 明确开了 steer 且当前是飞书轮次时，仍然按插话处理，不攒批。
-      const scopeKey = args.chatType === 'p2p' ? 'direct' : 'group';
-      const wanted = this.#config.busyMode?.[scopeKey] === 'steer' ? 'steer' : 'queue';
-      const effective = wanted === 'steer' && this.#turnOrigin.get(sessionId) === 'feishu' ? 'steer' : 'queue';
-      if (effective === 'queue') {
+      if (this.#busyModeFor(args.chatType, sessionId) === 'queue') {
         const queue = this.#batchQueue.get(args.chatKey) ?? [];
         queue.push(args);
         this.#batchQueue.set(args.chatKey, queue);
@@ -499,14 +563,19 @@ export class FeishuBridge {
 
   /** 把排队期间攒下的消息合并成一条 prompt 派发。 */
   #drainBatch(sessionId) {
-    const chatKey = this.#state.keyForSession(sessionId);
-    if (!chatKey || !this.#batchQueue.get(chatKey)?.length) return;
-    return this.#inboundQueue.run(chatIdOfKey(chatKey), () => this.#drainBatchOnce(sessionId));
+    const chatKeys = Object.entries(this.#state.value?.sessions ?? {})
+      .filter(([, value]) => value === sessionId)
+      .map(([key]) => key);
+    const chatKey = chatKeys.find((key) => this.#batchQueue.get(key)?.length);
+    if (!chatKey) return;
+    return this.#inboundQueue.run(chatIdOfKey(chatKey), () => this.#drainBatchOnce(sessionId, chatKey));
   }
 
-  async #drainBatchOnce(sessionId) {
+  async #drainBatchOnce(sessionId, targetChatKey = null) {
     if (this.#disposed) return;
-    const chatKey = this.#state.keyForSession(sessionId);
+    const chatKey = targetChatKey && this.#state.sessionFor(targetChatKey) === sessionId
+      ? targetChatKey
+      : this.#state.keyForSession(sessionId);
     if (!chatKey) return;
     const items = this.#batchQueue.get(chatKey);
     if (!items || items.length === 0) return;
@@ -529,7 +598,6 @@ export class FeishuBridge {
         createTime: items.at(-1).createTime,
         messageId: null,
         parts,
-        text: '',
         openId: items.at(-1).openId,
         quoted: null,
         batchIds: items.map((item) => item.messageId),
@@ -541,7 +609,7 @@ export class FeishuBridge {
     }
   }
 
-  async #submitPrompt({ chatKey, chatId, chatType, createTime, messageId, parts, text, openId, quoted = null, batchIds = null }) {
+  async #submitPrompt({ chatKey, chatId, chatType, createTime, messageId, parts, openId, quoted = null, batchIds = null }) {
     let sessionId = this.#state.sessionFor(chatKey);
     const create = async () => {
       const override = this.#state.overrideFor?.(chatKey) ?? {};
@@ -585,11 +653,7 @@ export class FeishuBridge {
     const eavesdropEntries = reserved ? await this.#eavesdropEntries(reserved.entries) : [];
     const eavesdropBlock = renderEavesdropBlock(eavesdropEntries);
 
-    const scopeKey = chatType === 'p2p' ? 'direct' : 'group';
-    const wanted = this.#config.busyMode?.[scopeKey] === 'steer' ? 'steer' : 'queue';
-    // 当前轮不是飞书发起的（绑定会话里 Web 正在跑）时，飞书消息只能排队，不能插入。
-    const activeOrigin = sessionId ? this.#turnOrigin.get(sessionId) : null;
-    const mode = wanted === 'steer' && activeOrigin !== 'feishu' ? 'queue' : wanted;
+    const mode = this.#busyModeFor(chatType, sessionId);
     // The context never travels inside the user's message: it is published to
     // the per-session system-prompt context instead, so the bubble stays clean.
     const scope = this.#contextScope(chatType);
@@ -621,7 +685,7 @@ export class FeishuBridge {
           this.#log('error', 'session create failed', error);
           if (reserved) this.#eavesdrop.rollback(chatKey, reserved.seq);
           await sendNotice(this.#bot, chatId, `创建会话失败：${error.message}`, '创建失败');
-          await this.#abortReaction(sessionId, messageId);
+          await this.#abortReaction(sessionId, batchIds ?? messageId);
           return;
         }
       }
@@ -642,11 +706,12 @@ export class FeishuBridge {
         if (!stale || attempt > 0) {
           this.#log('error', 'prompt failed', error);
           if (reserved) this.#eavesdrop.rollback(chatKey, reserved.seq);
+          this.#onContext(sessionId, '');
           await sendNotice(this.#bot, chatId, `提交失败：${error.message}`, '提交失败');
-          await this.#abortReaction(sessionId, messageId);
+          await this.#abortReaction(sessionId, batchIds ?? messageId);
           return;
         }
-        this.#forgetReaction(sessionId, messageId);
+        this.#forgetReaction(sessionId, batchIds ?? messageId);
         await this.#state.unbindSession(chatKey);
         this.#forgetSessionOrigin(sessionId);
         sessionId = null;
@@ -685,6 +750,7 @@ export class FeishuBridge {
     const cached = this.#userNames.get(openId);
     if (cached && cached.expiresAt > Date.now()) return cached.name;
     const name = await Promise.resolve(this.#bot.getUserName?.(openId)).catch(() => null) ?? null;
+    if (this.#userNames.size >= 500) this.#userNames.delete(this.#userNames.keys().next().value);
     this.#userNames.set(openId, { name, expiresAt: Date.now() + 30 * 60_000 });
     return name;
   }
@@ -712,6 +778,7 @@ export class FeishuBridge {
     const name = await Promise.resolve(this.#bot.getChatName?.(chatId)).catch(() => null) ?? null;
     if (this.#chatNames.size > 200) {
       for (const [key, item] of this.#chatNames) if (item.expiresAt <= Date.now()) this.#chatNames.delete(key);
+      if (this.#chatNames.size > 200) this.#chatNames.delete(this.#chatNames.keys().next().value);
     }
     this.#chatNames.set(chatId, { name, expiresAt: Date.now() + 30 * 60_000 });
     return name;
@@ -752,6 +819,7 @@ export class FeishuBridge {
   /** 记下仍在流式输出的卡片，收尾后再走一遍入站流程。 */
   #trackPendingCard(data, message) {
     const created = Number(message.create_time) || Date.now();
+    if (this.#pendingCards.size >= 200) this.#pendingCards.delete(this.#pendingCards.keys().next().value);
     this.#pendingCards.set(message.message_id, {
       data,
       chatId: message.chat_id,
@@ -769,29 +837,39 @@ export class FeishuBridge {
 
   /** 定时检查挂起的卡片：收尾了就重新入站，超时则丢弃。 */
   async #sweepPendingCards() {
-    if (this.#disposed) return;
-    for (const [messageId, pending] of [...this.#pendingCards]) {
-      const now = Date.now();
-      if (now - pending.created > CARD_STUCK_MS) {
+    if (this.#disposed || this.#sweepingCards) return;
+    this.#sweepingCards = true;
+    try {
+      for (const [messageId, pending] of [...this.#pendingCards]) {
+        if (this.#disposed) break;
+        const now = Date.now();
+        if (now - pending.created > CARD_STUCK_MS) {
+          this.#pendingCards.delete(messageId);
+          this.#log('warn', `卡片超过 10 分钟未收尾，丢弃 ${messageId}`);
+          continue;
+        }
+        const latest = await this.#bot.getMessage?.(messageId).catch(() => null);
+        if (latest?.deleted) {
+          this.#pendingCards.delete(messageId);
+          continue;
+        }
+        if (!latest?.bodyContent) continue;
+        if (cardStreamingOf(latest.bodyContent) === true) continue;
         this.#pendingCards.delete(messageId);
-        this.#log('warn', `卡片超过 10 分钟未收尾，丢弃 ${messageId}`);
-        continue;
+        const data = {
+          ...pending.data,
+          message: { ...pending.data.message, content: latest.bodyContent },
+        };
+        await this.handleMessage(data, { resubmitted: true }).catch((error) => {
+          this.#log('warn', `收尾卡片重新入站失败 ${messageId}`, error);
+        });
       }
-      const latest = await this.#bot.getMessage?.(messageId).catch(() => null);
-      if (!latest?.bodyContent) continue;
-      if (cardStreamingOf(latest.bodyContent) === true) continue;
-      this.#pendingCards.delete(messageId);
-      const data = {
-        ...pending.data,
-        message: { ...pending.data.message, content: latest.bodyContent },
-      };
-      await this.handleMessage(data, { resubmitted: true }).catch((error) => {
-        this.#log('warn', `收尾卡片重新入站失败 ${messageId}`, error);
-      });
-    }
-    if (this.#pendingCards.size === 0 && this.#cardTimer) {
-      clearInterval(this.#cardTimer);
-      this.#cardTimer = null;
+      if (this.#pendingCards.size === 0 && this.#cardTimer) {
+        clearInterval(this.#cardTimer);
+        this.#cardTimer = null;
+      }
+    } finally {
+      this.#sweepingCards = false;
     }
   }
 
@@ -835,17 +913,24 @@ export class FeishuBridge {
   /** Group management (including approvals) is restricted to the manager list. */
   #canManage(chatKey, operatorId) {
     const chatType = this.#chatTypes.get(chatKey) ?? this.#state.chatTypeFor?.(chatKey);
-    if (chatType === 'p2p') return Boolean(operatorId);
-    if (chatType !== 'group') return false;
     const managers = this.#config.access?.managers ?? [];
+    if (chatType === 'p2p') {
+      if (!operatorId) return false;
+      // 一旦配置了管理员名单，私聊管理操作同样仅允许管理员本人执行。
+      return managers.length > 0 ? managers.includes(operatorId) : true;
+    }
+    if (chatType !== 'group') return false;
     if (managers.length === 0) return false; // 默认无人可执行群内管理操作
     return Boolean(operatorId) && managers.includes(operatorId);
   }
 
   async #runCommand(name, argument, context) {
-    const managed = name === 'new' || name === 'stop';
+    const managed = name === 'menu' || name === 'new' || name === 'stop';
     if (managed && !this.#canManage(context.chatKey, context.openId ?? null)) {
-      await sendNotice(this.#bot, context.chatId, '只有管理员可以在群里执行这个操作。', '需要管理员');
+      const detail = context.chatType === 'p2p'
+        ? '只有管理员可以执行这个操作。'
+        : '只有管理员可以在群里执行这个操作。';
+      await sendNotice(this.#bot, context.chatId, detail, '需要管理员');
       return true;
     }
     return runCommand(this.#services(), name, argument, context);
@@ -858,11 +943,7 @@ export class FeishuBridge {
       state: this.#state,
       harness: this.#harness,
       config: () => this.#config,
-      forgetSession: (sessionId) => {
-        const key = typeof sessionId === 'string' ? this.#state.keyForSession?.(sessionId) : null;
-        if (key) this.#eavesdrop.reset(key);
-        this.#forgetSessionOrigin(sessionId);
-      },
+      forgetSession: (sessionId, chatKey = null) => this.#resetSessionState(sessionId, chatKey),
       externalAsk: (sessionId) => this.#externalAsk.get(sessionId) ?? null,
       listPresets: () => this.#listPresets(),
       modelFor: (sessionId) => this.#menu.modelFor(sessionId),
@@ -892,25 +973,30 @@ export class FeishuBridge {
   }
 
   /** Drop a queued/active message without changing its reaction (retry path). */
-  #forgetReaction(sessionId, messageId) {
-    if (!sessionId || !messageId) return;
+  #forgetReaction(sessionId, messageIdOrIds) {
+    const ids = (Array.isArray(messageIdOrIds) ? messageIdOrIds : [messageIdOrIds]).filter(Boolean);
+    if (!sessionId || ids.length === 0) return;
+    const target = new Set(ids);
     const queue = this.#reactionQueue.get(sessionId);
     if (queue) {
       for (const group of queue) {
-        const index = group.indexOf(messageId);
-        if (index >= 0) group.splice(index, 1);
+        for (let i = group.length - 1; i >= 0; i -= 1) {
+          if (target.has(group[i])) group.splice(i, 1);
+        }
       }
       const kept = queue.filter((group) => group.length > 0);
       if (kept.length === 0) this.#reactionQueue.delete(sessionId);
       else this.#reactionQueue.set(sessionId, kept);
     }
-    this.#reactionActive.get(sessionId)?.delete(messageId);
+    const active = this.#reactionActive.get(sessionId);
+    if (active) for (const id of target) active.delete(id);
   }
 
   /** Prompt never became a turn: drop it from the queues and mark it stopped. */
-  async #abortReaction(sessionId, messageId) {
-    this.#forgetReaction(sessionId, messageId);
-    if (messageId) await this.#react(messageId, REACTION.stopped).catch(() => undefined);
+  async #abortReaction(sessionId, messageIdOrIds) {
+    const ids = (Array.isArray(messageIdOrIds) ? messageIdOrIds : [messageIdOrIds]).filter(Boolean);
+    this.#forgetReaction(sessionId, ids);
+    for (const id of ids) await this.#react(id, REACTION.stopped).catch(() => undefined);
   }
 
   /** A turn started: queued prompts run one per turn, so take only the head. */
@@ -941,12 +1027,18 @@ export class FeishuBridge {
 
   async onSessionEvent(session, event) {
     const sessionId = session?.id;
-    if (sessionId && event?.type === 'turn/start') this.#startTurnReactions(sessionId);
     const result = await this.#turns.onSessionEvent(session, event);
     if (sessionId && event?.type === 'turn/end') {
+      const origin = this.#turnOrigin.get(sessionId);
       this.#turnOrigin.delete(sessionId);
+      this.#activeTurnChat.delete(sessionId);
       this.#triggerMessages.delete(sessionId);
       this.#externalAsk.delete(sessionId);
+      this.#onContext(sessionId, '');
+      // 仅当回合未被明确归类为外部/定时任务且尚未认领 reaction 时，兜底结算队头。
+      if (origin !== 'external' && !this.#reactionActive.get(sessionId)?.size) {
+        this.#startTurnReactions(sessionId);
+      }
       await this.#settleTurnReactions(sessionId, event?.data?.reason).catch(() => undefined);
       await this.#drainBatch(sessionId);
     }
@@ -962,6 +1054,8 @@ export class FeishuBridge {
 
   /** Session → its chat binding: `{ key, chatId }`, or null when unbound. */
   #chatContextFor(sessionId) {
+    const active = typeof sessionId === 'string' ? this.#activeTurnChat.get(sessionId) : null;
+    if (active) return active;
     const key = typeof sessionId === 'string' ? this.#state.keyForSession(sessionId) : null;
     const chatId = chatIdOfKey(key);
     return chatId ? { key, chatId } : null;
@@ -974,7 +1068,7 @@ export class FeishuBridge {
     if (!binding) return next();
     const { key: chatKey, chatId } = binding;
     // 绑定会话里 Web 发起的轮次：审批留在 Web，不打扰飞书；只记下摘要供 /stop 说明。
-    if (sessionId && this.#turnOrigin.get(sessionId) === 'external') {
+    if (sessionId && (this.#turnOrigin.get(sessionId) === 'external' || this.#turnOrigin.get(sessionId) === 'pending')) {
       this.#rememberExternalAsk(sessionId, '审批', request.toolName ?? '工具');
       return next();
     }
@@ -989,7 +1083,7 @@ export class FeishuBridge {
     const question = Array.isArray(request?.questions) ? request.questions[0] : null;
     if (!chatId || !question) return next();
     // 绑定会话里 Web 发起的轮次：提问留在 Web，不打扰飞书；只记下摘要供 /stop 说明。
-    if (sessionId && this.#turnOrigin.get(sessionId) === 'external') {
+    if (sessionId && (this.#turnOrigin.get(sessionId) === 'external' || this.#turnOrigin.get(sessionId) === 'pending')) {
       this.#rememberExternalAsk(sessionId, '回答', question?.question ?? question?.header ?? '一个问题');
       return next();
     }
@@ -1007,9 +1101,12 @@ export class FeishuBridge {
     if (operator && this.#config.botOpenId && operator === this.#config.botOpenId) return undefined;
 
     if (this.#menu.handles(action)) {
-      return this.#inboundQueue.run(event?.context?.open_chat_id, () => {
-        if (!this.#disposed) return this.#menu.handle(action, event);
-      });
+      if (this.#menu.needsQueue(action)) {
+        return this.#inboundQueue.run(event?.context?.open_chat_id, () => {
+          if (!this.#disposed) return this.#menu.handle(action, event);
+        });
+      }
+      return this.#menu.handle(action, event);
     }
     return this.#interactions.onCardAction(action, event, operator);
   }

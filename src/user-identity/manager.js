@@ -14,6 +14,7 @@ export class UserIdentityManager {
   #qrCodeDataUrl = null;
   #keepaliveTimer = null;
   #connectGeneration = 0;
+  #lastRefreshDueExpiry = null;
 
   constructor({ configStore, botConfigStore, auth, connect, logger = null }) {
     this.#configStore = configStore;
@@ -86,10 +87,18 @@ export class UserIdentityManager {
     this.#connectGeneration += 1;
     this.#connect.cancel();
     this.#qrCodeDataUrl = null;
+    this.#lastRefreshDueExpiry = null;
     await this.#auth.disconnect();
     return this.status();
   }
 
+  /** 当复用的机器人被删除时，解绑该 botId 并清除失效凭据。 */
+  async detachBot(botId) {
+    if (!botId || this.#configStore.config.botId !== botId) return false;
+    await this.#configStore.save({ botId: '' });
+    await this.disconnect();
+    return true;
+  }
   async refresh() {
     await this.#auth.refresh({ force: true });
     return this.status();
@@ -111,13 +120,18 @@ export class UserIdentityManager {
       try {
         const status = await this.status();
         if (!status.authorization?.authorized) return;
+        if (status.authorization.refreshable === false) return;
         const now = Date.now();
         const accessExpiresAt = status.authorization.accessTokenExpiresAt;
         const refreshExpiresAt = status.authorization.refreshTokenExpiresAt;
+        if (Number.isFinite(refreshExpiresAt) && refreshExpiresAt <= now) return;
         const accessDue = !Number.isFinite(accessExpiresAt) || accessExpiresAt - now <= accessBeforeMs;
-        const refreshDue = Number.isFinite(refreshExpiresAt) && refreshExpiresAt - now <= refreshBeforeMs;
+        const refreshDue = Number.isFinite(refreshExpiresAt)
+          && refreshExpiresAt - now <= refreshBeforeMs
+          && this.#lastRefreshDueExpiry !== refreshExpiresAt;
         if (!accessDue && !refreshDue) return;
-        await this.refresh();
+        if (!accessDue && refreshDue) this.#lastRefreshDueExpiry = refreshExpiresAt;
+        await this.#auth.refresh({ force: false });
         this.#logger?.info?.(`[im-feishu] 用户身份 token 已自动续期（${accessDue ? 'access' : 'refresh'}）`);
       } catch (error) {
         this.#logger?.warn?.('[im-feishu] 用户身份自动续期失败', error);
