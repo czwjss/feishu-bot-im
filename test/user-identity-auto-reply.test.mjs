@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { AutoReplyEngine, renderBatchPrompt } from '../src/user-identity/auto-reply.js';
+import { listMessages } from '../src/user-identity/api.js';
 import { UserMonitorManager } from '../src/user-identity/monitor.js';
 import { MonitorStore } from '../src/user-identity/monitor-store.js';
 
@@ -365,3 +367,98 @@ try {
 }
 
 console.log('user identity auto reply: assertions passed');
+
+test('分身派发本批与引用原图，单图失败和模型拒绝时保留文字', async (t) => {
+  const imageDir = await mkdtemp(join(tmpdir(), 'im-feishu-batch-images-'));
+  const store = await new MonitorStore({
+    configPath: join(imageDir, 'monitor.json'), statePath: join(imageDir, 'monitor-state.json'),
+  }).load();
+  await store.saveConfig({ enabled: true, chats: [{ chatId, name: '测试图片', mode: 'all' }] });
+  await store.updateChat(chatId, { cursorTimeMs: now - 10_000 });
+  const clock = createClock();
+  const image = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
+  const rawMessage = (id, type, content, parentId) => ({
+    message_id: id, chat_id: chatId, msg_type: type, create_time: String(clock.now()), parent_id: parentId,
+    sender: { id: 'ou_friend', sender_name: '朋友', sender_type: 'user' },
+    body: { content: JSON.stringify(content) },
+  });
+  const quoted = rawMessage('om_quoted', 'interactive', { body: { elements: [{ tag: 'img', img_key: 'img_quoted' }] } });
+  let incoming = [
+    rawMessage('om_image', 'image', { image_key: 'img_direct' }),
+    rawMessage('om_failed', 'image', { image_key: 'img_failed' }),
+    rawMessage('om_corrupt', 'image', { image_key: 'img_corrupt' }),
+    rawMessage('om_reply', 'text', { text: '看看这张卡片里的截图' }, 'om_quoted'),
+    rawMessage('om_reply_again', 'text', { text: '特别是第二行' }, 'om_quoted'),
+  ];
+  const downloads = [];
+  let quotesRead = 0;
+  const fetchImpl = async (url, init) => {
+    assert.equal(init.headers.authorization, 'Bearer avatar-test-token');
+    const prefix = '/open-apis/im/v1/messages';
+    if (url.pathname === prefix) return Response.json({ code: 0, data: { items: incoming } });
+    if (url.pathname === `${prefix}/om_quoted`) {
+      quotesRead += 1;
+      return Response.json({ code: 0, data: { items: [quoted] } });
+    }
+    const [messageId, segment, key] = url.pathname.slice(prefix.length + 1).split('/');
+    assert.equal(segment, 'resources');
+    assert.equal(url.searchParams.get('type'), 'image');
+    downloads.push([messageId, key]);
+    if (key === 'img_failed') return Response.json({ code: 234003, msg: '图片不可用' });
+    return new Response(image, { headers: { 'content-type': 'image/png' } });
+  };
+  const submitted = [];
+  let rejectImages = false;
+  const monitor = new UserMonitorManager({
+    auth: {
+      async status() { return { authorization: { authorized: true, user: { openId: 'ou_self' } } }; },
+      async requireAccessToken() { return 'avatar-test-token'; },
+    },
+    store,
+    harness: {
+      async createSession() { return 'worker-image-session'; },
+      async validateImage({ name }) {
+        if (name === 'feishu-om_corrupt-1') throw new Error('图片已损坏');
+      },
+      async prompt(_sessionId, content, { requestId }) {
+        submitted.push({ content, requestId });
+        if (rejectImages && Array.isArray(content)) throw Object.assign(new Error('reject image'), {
+          code: 'session/attachment-invalid', details: { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' },
+        });
+      },
+    },
+    now: clock.now,
+    setTimeout: clock.setTimeout.bind(clock),
+    clearTimeout: clock.clearTimeout.bind(clock),
+    listMessages: (options) => listMessages({ ...options, fetchImpl }),
+    fetchImpl,
+  });
+  t.after(async () => { monitor.dispose(); await rm(imageDir, { recursive: true, force: true }); });
+
+  await monitor.pollOnce();
+  assert.deepEqual(downloads, []);
+  assert.deepEqual(store.state.chats[chatId].messages[0].imageKeys, ['img_direct']);
+  assert.equal((await monitor.flushPending({ chatId })).dispatched, 1);
+  const [{ content }] = submitted;
+  assert.deepEqual(content.map((part) => part.type), ['text', 'image', 'image']);
+  assert.deepEqual(content.slice(1).map((part) => part.data), [image.toString('base64'), image.toString('base64')]);
+  assert.match(content[0].text, /om_image[\s\S]*本消息的第 1 张图片已附带为本批图片 1/);
+  assert.match(content[0].text, /om_failed[\s\S]*图片不可用/);
+  assert.match(content[0].text, /om_corrupt[\s\S]*图片已损坏/);
+  assert.match(content[0].text, /引用消息（om_quoted）的第 1 张图片已附带为本批图片 2/);
+  assert.equal(quotesRead, 1);
+  assert.deepEqual(downloads, [
+    ['om_image', 'img_direct'], ['om_failed', 'img_failed'], ['om_corrupt', 'img_corrupt'], ['om_quoted', 'img_quoted'],
+  ]);
+  assert.deepEqual(store.state.chats[chatId].batch.messageIds, []);
+
+  rejectImages = true;
+  clock.advance(1_000);
+  incoming = [rawMessage('om_text_only', 'image', { image_key: 'img_text_only' })];
+  await monitor.pollOnce();
+  assert.equal((await monitor.flushPending({ chatId })).dispatched, 1);
+  assert.equal(submitted[1].requestId, submitted[2].requestId);
+  assert.match(submitted[2].content, /om_text_only[\s\S]*当前会话模型不支持图像输入/);
+  assert.doesNotMatch(submitted[2].content, /已附带为本批图片/);
+  assert.deepEqual(store.state.chats[chatId].batch.messageIds, []);
+});

@@ -4,7 +4,7 @@
  * Wraps only what this plugin needs: tenant verification, text/card message
  * delivery, resource download and the long-connection event loop.
  */
-import { chmod, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +12,7 @@ import * as Lark from '@larksuiteoapi/node-sdk';
 
 import { DELIVERY_RETRY_MS, isRetryableDeliveryError, sleep } from './feishu-errors.js';
 import { abortableSdkTransport } from './feishu-http.js';
+import { imageSizeError, readImageBytes } from './inbound.js';
 
 const OPEN_ORIGIN = 'https://open.feishu.cn';
 const CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
@@ -285,7 +286,9 @@ export class FeishuBot {
         senderId: item.sender?.open_bot_id || item.sender?.id || item.sender?.sender_id?.open_id || null,
         senderType: item.sender?.sender_type ?? null,
         messageId: item.message_id ?? messageId,
+        chatId: item.chat_id ?? '',
         msgType: item.msg_type ?? item.message_type ?? null,
+        deleted: Boolean(item.deleted),
         bodyContent: item.body?.content ?? '',
         mentions: Array.isArray(item.mentions) ? item.mentions : [],
       };
@@ -590,14 +593,18 @@ export class FeishuBot {
   }
 
   /** Download one image/file resource of an inbound message. */
-  async downloadResource(messageId, fileKey, type) {
+  async downloadResource(messageId, fileKey, type, { maxBytes, signal } = {}) {
+    const response = assertApiSuccess('Feishu resource download', await this.#transport.run(signal,
+      () => this.#client.im.v1.messageResource.get({
+        path: { message_id: messageId, file_key: fileKey },
+        params: { type: type === 'image' ? 'image' : 'file' },
+      })));
+    if (maxBytes !== undefined && typeof response?.getReadableStream === 'function') {
+      return readImageBytes(response.getReadableStream(), maxBytes, signal);
+    }
     const directory = await mkdtemp(join(tmpdir(), 'im-feishu-'));
     const target = join(directory, 'resource');
     try {
-      const response = await this.#client.im.v1.messageResource.get({
-        path: { message_id: messageId, file_key: fileKey },
-        params: { type: type === 'image' ? 'image' : 'file' },
-      });
       if (typeof response?.writeFile === 'function') {
         await response.writeFile(target);
       } else if (typeof response?.getReadableStream === 'function') {
@@ -607,8 +614,10 @@ export class FeishuBot {
       } else {
         throw new Error('Feishu resource download returned no body');
       }
+      signal?.throwIfAborted();
+      if (maxBytes !== undefined && (await stat(target)).size > maxBytes) throw imageSizeError(maxBytes);
       await chmod(target, 0o600);
-      return await readFile(target);
+      return await readFile(target, { signal });
     } finally {
       await rm(directory, { recursive: true, force: true }).catch(() => undefined);
     }

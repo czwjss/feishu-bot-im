@@ -7,13 +7,17 @@ import { withAccessToken } from './auth.js';
 import { createCloudTool } from './cloud-tool.js';
 import { createWikiTool } from './wiki-tool.js';
 import { boundedInteger, defineFeishuTool, HISTORY_PARAMETERS, historyOptions, historyTimeRange, renderToolOutput, validateCardText } from '../tool-contract.js';
+import { MESSAGE_IMAGE_OUTPUT, MESSAGE_IMAGE_PARAMETERS, messageImageKey, messageImageTarget, readMessageImage, renderMessageImage } from '../message-image-tool.js';
 import {
   MAX_TEXT_LENGTH,
+  downloadMessageImage,
   filterMessagesByKeyword,
+  getMessage,
   getUserInfo,
   listMessages,
   normalizeChatId,
   replyCardMessage,
+  requestFeishu,
   searchChats,
   sendCardMessage,
   sendMediaMessage,
@@ -32,6 +36,7 @@ function messageOutputItem(item) {
     senderOpenId: item.senderOpenId ?? '',
     msgType: item.msgType ?? '',
     text: item.text ?? '',
+    ...(!item.deleted && item.imageKeys?.length ? { imageCount: item.imageKeys.length } : {}),
   };
 }
 
@@ -137,15 +142,16 @@ export function createChatsTool({ auth, fetchImpl }) {
   });
 }
 
-export function createMessagesTool({ auth, fetchImpl }) {
+export function createMessagesTool({ auth, fetchImpl, harness }) {
   return defineFeishuTool({
     name: MESSAGES_TOOL_NAME,
     description: '以你本人身份读取会话历史（群聊或私聊），支持时间范围、分页和本次拉取范围内的本地关键词筛选；'
-      + '不是飞书全文搜索，每次只读取一页再筛选，可能返回空结果但 hasMore 为 true；需要用 pageToken 继续读取。chatId 需要 oc_ 开头的会话 ID。',
+      + '不是飞书全文搜索，每次只读取一页再筛选，可能返回空结果但 hasMore 为 true；需要用 pageToken 继续读取。需要看原图时用 read_image 并指定 chatId 和 messageId。',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
+        ...MESSAGE_IMAGE_PARAMETERS,
         chatId: {
           type: 'string',
           description: '私聊或群聊的 chat_id（oc_…），必须显式提供，不猜测目标会话。',
@@ -155,7 +161,7 @@ export function createMessagesTool({ auth, fetchImpl }) {
       required: ['chatId'],
     },
     output: {
-      schema: {
+      schema: { oneOf: [{
         type: 'object',
         additionalProperties: false,
         properties: {
@@ -176,17 +182,26 @@ export function createMessagesTool({ auth, fetchImpl }) {
                 senderOpenId: { type: 'string' },
                 msgType: { type: 'string' },
                 text: { type: 'string' },
+                imageCount: { type: 'integer' },
               },
               required: ['messageId', 'createTime', 'senderName', 'senderOpenId', 'msgType', 'text'],
             },
           },
         },
         required: ['chatId', 'items', 'hasMore', 'pageToken', 'total', 'scanned'],
-      },
-      render: (_args, value) => renderToolOutput(value,
+      }, MESSAGE_IMAGE_OUTPUT] },
+      render: (_args, value) => value.image ? renderMessageImage(value) : renderToolOutput(value,
         `本页读取 ${value.scanned} 条，匹配 ${value.total} 条${value.hasMore ? '，还有更多，请使用 pageToken 继续读取' : ''}。`),
     },
     async execute(args, context) {
+      const target = messageImageTarget(args);
+      if (target) return readMessageImage(target, context, harness, ({ maxBytes, signal }) => withAccessToken(auth, async (accessToken) => {
+        const { messageId } = target;
+        const message = await getMessage({ accessToken, messageId, fetchImpl, signal });
+        const imageKey = messageImageKey(message, target);
+        const request = (input) => requestFeishu({ ...input, accessToken, fetchImpl, signal });
+        return downloadMessageImage({ request, messageId, imageKey, maxBytes, signal });
+      }, signal));
       const chatId = normalizeChatId(args?.chatId);
       const { limit, order, query } = historyOptions(args);
       historyTimeRange(args?.startTime, args?.endTime);
@@ -360,11 +375,11 @@ export function createSendTool({ auth, fetchImpl }) {
   });
 }
 
-export function createUserIdentityTools({ auth, fetchImpl } = {}) {
+export function createUserIdentityTools({ auth, fetchImpl, harness } = {}) {
   return [
     createMeTool({ auth, fetchImpl }),
     createChatsTool({ auth, fetchImpl }),
-    createMessagesTool({ auth, fetchImpl }),
+    createMessagesTool({ auth, fetchImpl, harness }),
     createSendTool({ auth, fetchImpl }),
     createCloudTool({ auth, fetchImpl }),
     createWikiTool({ auth, fetchImpl }),

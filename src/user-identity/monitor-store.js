@@ -136,6 +136,9 @@ export function normalizeMonitorMessage(value) {
   const messageId = cleanString(source.messageId);
   if (!messageId) return null;
   const text = stringOf(source.text);
+  const parentId = cleanString(source.parentId);
+  const imageKeys = Array.isArray(source.imageKeys)
+    ? Object.freeze([...new Set(source.imageKeys.map(cleanString).filter(Boolean))]) : undefined;
   return Object.freeze({
     messageId,
     senderName: cleanString(source.senderName),
@@ -145,6 +148,8 @@ export function normalizeMonitorMessage(value) {
     contextOnly: source.contextOnly === true || source.isSelf === true,
     createTime: cleanString(source.createTime),
     text,
+    ...(parentId ? { parentId } : {}),
+    ...(imageKeys ? { imageKeys } : {}),
   });
 }
 

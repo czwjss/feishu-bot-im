@@ -9,6 +9,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, resolve } from 'node:path';
 
 import { normalizeCardColor, noticeCard } from '../cards.js';
+import { imageKeysOf, readImageBytes } from '../inbound.js';
 import { cardStreamingOf, interactiveTextOfContent } from '../message-text.js';
 import { FeishuApiError, describeApiCode } from './errors.js';
 import { historyTimeRange, validateCardText } from '../tool-contract.js';
@@ -339,6 +340,7 @@ export function normalizeMessage(item) {
     senderName: stringOf(sender.sender_name) || stringOf(sender.name),
     senderType: stringOf(sender.sender_type),
     deleted: Boolean(source.deleted),
+    imageKeys: Object.freeze(imageKeysOf(source)),
     mentions: normalizeMentions(source),
     streaming: cardStreamingOf(source.body?.content),
     text: extractMessageText(source),
@@ -365,6 +367,20 @@ export async function getMessage({
   });
   const items = Array.isArray(data.items) ? data.items : [];
   return items.length > 0 ? normalizeMessage(items[0]) : null;
+}
+
+export async function downloadMessageImage({ request, messageId, imageKey, maxBytes, signal }) {
+  if (!/^[\w-]+$/.test(imageKey)) throw new Error('飞书返回的图片 key 无效');
+  const response = await request({
+    path: `/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/resources/${encodeURIComponent(imageKey)}`,
+    query: { type: 'image' },
+    responseType: 'binary',
+  });
+  if (response.status !== 200 || response.headers?.has('content-range')) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new FeishuApiError('飞书未返回完整图片', { status: response.status });
+  }
+  return readImageBytes(response.body, maxBytes, signal);
 }
 
 /**

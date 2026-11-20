@@ -9,7 +9,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { messageContentOf, messageTypeOf, decodePost } from './message-content.js';
 
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_MESSAGE_IMAGES = 9;
 const MAX_FILE_BYTES = 30 * 1024 * 1024;
 
 /** Detect the four image media types DSH accepts from the leading bytes. */
@@ -28,12 +29,13 @@ function safeName(value, fallback) {
   return (cleaned || fallback).slice(0, 120);
 }
 
-function imageKeysOf(message) {
+export function imageKeysOf(message) {
+  const type = messageTypeOf(message);
+  if (type === 'interactive') return imageKeysOfCard(messageContentOf(message));
+  if (type !== 'image' && type !== 'post') return [];
   const content = messageContentOf(message);
-  if (messageTypeOf(message) === 'image' && content.image_key) return [content.image_key];
-  if (messageTypeOf(message) === 'post') return decodePost(content).imageKeys;
-
-  return [];
+  if (type === 'post') return decodePost(content).imageKeys;
+  return typeof content.image_key === 'string' && content.image_key ? [content.image_key] : [];
 }
 
 /** Card images use img_key/image_key at arbitrary nesting levels. */
@@ -46,7 +48,7 @@ export function imageKeysOfCard(content) {
   }
   const keys = new Set();
   const visit = (node, depth = 0) => {
-    if (!node || depth > 8 || keys.size >= 9) return;
+    if (!node || depth > 8 || keys.size >= MAX_MESSAGE_IMAGES) return;
     if (Array.isArray(node)) {
       for (const item of node) visit(item, depth + 1);
       return;
@@ -60,7 +62,30 @@ export function imageKeysOfCard(content) {
     }
   };
   visit(parsed);
-  return [...keys].slice(0, 9);
+  return [...keys].slice(0, MAX_MESSAGE_IMAGES);
+}
+
+export function imagePromptPart(data, mediaType, name) {
+  return { type: 'image', mediaType, data: data.toString('base64'), name };
+}
+
+export function imageSizeError(maxBytes) {
+  return new Error(`图片超过当前可用大小上限（${maxBytes} 字节）`);
+}
+
+/** Bound memory while reading a Feishu image download stream. */
+export async function readImageBytes(stream, maxBytes, signal) {
+  if (!stream) throw new Error('飞书未返回图片内容');
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of stream) {
+    signal?.throwIfAborted();
+    bytes += chunk.length;
+    if (bytes > maxBytes) throw imageSizeError(maxBytes);
+    chunks.push(chunk);
+  }
+  signal?.throwIfAborted();
+  return Buffer.concat(chunks, bytes);
 }
 
 export class InboundContent {
@@ -90,10 +115,7 @@ export class InboundContent {
     if (!messageId) return { parts: [], notes: [], count: 0 };
     const messageType = parent.messageType ?? parent.message_type ?? '';
     const content = parent.bodyContent ?? parent.content ?? '';
-    const keys = messageType === 'interactive'
-      ? imageKeysOfCard(content)
-      : imageKeysOf({ message_type: messageType, content });
-    const unique = [...new Set(keys)].slice(0, 9);
+    const unique = imageKeysOf({ message_type: messageType, content }).slice(0, MAX_MESSAGE_IMAGES);
     const parts = [];
     const notes = [];
     for (const [index, key] of unique.entries()) {
@@ -108,12 +130,7 @@ export class InboundContent {
           notes.push(`引用消息的第 ${index + 1} 张图片格式不受支持`);
           continue;
         }
-        parts.push({
-          type: 'image',
-          mediaType,
-          data: bytes.toString('base64'),
-          name: `feishu-quote-${messageId}-${index + 1}`,
-        });
+        parts.push(imagePromptPart(bytes, mediaType, `feishu-quote-${messageId}-${index + 1}`));
       } catch (error) {
         this.#logger?.warn?.('[im-feishu] quoted image download failed', error?.message ?? error);
         notes.push(`引用消息的第 ${index + 1} 张图片下载失败`);
@@ -131,7 +148,7 @@ export class InboundContent {
     const notes = [];
     if (text) parts.push({ type: 'text', text });
 
-    const imageKeys = imageKeysOf(message).slice(0, 9);
+    const imageKeys = imageKeysOf(message).slice(0, MAX_MESSAGE_IMAGES);
     for (const [index, key] of imageKeys.entries()) {
       try {
         const bytes = await this.#bot.downloadResource(message.message_id, key, 'image');
@@ -146,12 +163,7 @@ export class InboundContent {
           notes.push(`（第 ${index + 1} 张图片格式不受支持，已保存到 ${saved}）`);
           continue;
         }
-        parts.push({
-          type: 'image',
-          mediaType,
-          data: bytes.toString('base64'),
-          name: `feishu-${message.message_id}-${index + 1}`,
-        });
+        parts.push(imagePromptPart(bytes, mediaType, `feishu-${message.message_id}-${index + 1}`));
       } catch (error) {
         this.#logger?.warn?.('[im-feishu] image download failed', error?.message ?? error);
         notes.push('（有一张图片下载失败）');

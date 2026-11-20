@@ -152,7 +152,7 @@ export async function apply(ctx, config = {}) {
     logger,
   });
   handoffKeywordsProvider = () => userMonitor.store.config.handoffKeywords;
-  installUserIdentityContributions(ctx, userIdentityAuth);
+  installUserIdentityContributions(ctx, userIdentityAuth, harness);
   installWorkerContexts(ctx, monitorStore);
   userMonitor.start();
 
@@ -183,6 +183,8 @@ export async function apply(ctx, config = {}) {
     }));
     toolCtx.tools.register(createMessagesTool({
       list: (input) => manager.listMessages(input),
+      downloadImage: (input) => manager.downloadMessageImage(input),
+      harness,
     }));
     toolCtx.tools.register(createChatsTool({
       list: (input) => manager.listChats(input),

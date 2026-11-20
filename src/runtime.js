@@ -14,6 +14,8 @@ import { FeishuBot, verifyCredentials } from './feishu.js';
 import { FeishuBridge } from './bridge.js';
 import { normalizeCardColor, noticeCard } from './cards.js';
 import { describeMessageForEavesdrop } from './eavesdrop.js';
+import { imageKeysOf } from './inbound.js';
+import { messageImageKey } from './message-image-tool.js';
 import { RegistrationManager } from './registration.js';
 import { syncSlashCommands } from './slash-commands.js';
 import { boundedInteger, historyOptions, historyTimeRange, validateCardText } from './tool-contract.js';
@@ -528,6 +530,7 @@ export class BotRuntime {
     const map = (item) => {
       const at = Number(item?.create_time) || 0;
       const sender = item?.sender ?? {};
+      const imageCount = item?.deleted ? 0 : imageKeysOf(item).length;
       return {
         messageId: String(item?.message_id ?? ''),
         at,
@@ -537,6 +540,7 @@ export class BotRuntime {
         type: String(item?.msg_type ?? ''),
         text: describeMessageForEavesdrop(item, { maxLength: Infinity }).text,
         threadId: String(item?.thread_id ?? ''),
+        ...(imageCount ? { imageCount } : {}),
       };
     };
     let token = pageToken || null;
@@ -568,6 +572,15 @@ export class BotRuntime {
       scanned, matched: matched.length, hasMore,
       pageToken: token || '',
     };
+  }
+
+  async downloadMessageImage(target) {
+    const bot = this.#bot;
+    if (!bot) throw new Error('机器人尚未连接');
+    const { messageId, maxBytes, signal } = target;
+    const message = await bot.getMessage(messageId, { strict: true, signal });
+    const imageKey = messageImageKey(message, target);
+    return bot.downloadResource(messageId, imageKey, 'image', { maxBytes, signal });
   }
 
   /** Fuzzy lookup in the cached group roster; refreshes only when asked. */
@@ -950,6 +963,11 @@ export class RuntimeManager {
   async listMessages({ sessionId, bot, chatId, ...options }) {
     const resolved = this.#deliveryTarget({ sessionId, bot, chatId });
     return resolved.runtime.listMessages({ chatId: resolved.target, ...options });
+  }
+
+  async downloadMessageImage({ sessionId, bot, chatId, ...options }) {
+    const resolved = this.#deliveryTarget({ sessionId, bot, chatId });
+    return resolved.runtime.downloadMessageImage({ chatId: resolved.target, ...options });
   }
 
   async listChats({ bot, refresh = false, signal } = {}) {

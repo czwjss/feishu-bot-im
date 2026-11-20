@@ -118,6 +118,36 @@ export class HarnessAdapter {
     return this.invoke('session', 'prompt', { request }, signal);
   }
 
+  get imageLimits() {
+    return this.#ctx.get?.('attachments')?.imageLimits;
+  }
+
+  async validateImage(input, signal) {
+    signal?.throwIfAborted();
+    await this.#ctx.get?.('attachments')?.validateImage?.(input);
+    signal?.throwIfAborted();
+  }
+
+  async saveImage(input, { agent, signal } = {}) {
+    signal?.throwIfAborted();
+    const attachments = this.#ctx.get?.('attachments');
+    if (!attachments) throw new Error('DSH 图片附件服务不可用');
+    const route = agent?.session?.requestHeader?.()?.config;
+    const provider = route?.provider ?? agent?.options?.provider;
+    const model = route?.model ?? agent?.options?.model;
+    const llm = this.#ctx.get?.('llm');
+    if (provider && model && llm) {
+      const info = await llm.resolveModelInfo(provider, model, signal);
+      if (info.inputModalities && !info.inputModalities.includes('image')) {
+        throw new Error(`当前模型 ${model} 不支持图像输入`);
+      }
+    }
+    signal?.throwIfAborted();
+    const attachment = await attachments.saveImage(input);
+    signal?.throwIfAborted();
+    return attachment;
+  }
+
   /** Current projection values (token usage / context pressure / breakdown). */
   async sessionProjections(sessionId) {
     const value = await this.invoke('session', 'projections', { request: { sessionId } });

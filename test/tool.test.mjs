@@ -165,7 +165,7 @@ console.log('feishu tool naming: 4 assertions passed');
     }),
   });
   const value = await tool.execute({});
-  const declared = Object.keys(tool.output.schema.properties.messages.items.properties);
+  const declared = Object.keys(tool.output.schema.oneOf[0].properties.messages.items.properties);
   for (const row of value.messages) {
     for (const key of Object.keys(row)) {
       assert.ok(declared.includes(key), `${key} must be declared in the output schema`);

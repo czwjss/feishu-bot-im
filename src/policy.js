@@ -17,6 +17,7 @@ export const FEISHU_POLICY = [
   '- 机器人误发消息需要撤回时用 feishu_bot_recall；只能撤回机器人自己发的消息，时限由管理员配置。',
   '- 发消息时标题按需：日常对话和短消息不加标题；需要明确主题或突出结论时才加一句简短标题。',
   '- 旁听只提供最近的实时上下文；更早或离线期间的消息用 feishu_bot_messages 回查。关键词只在本次拉取范围内做本地筛选，不是飞书全文搜索。',
+  '- 飞书消息已附带原图时直接分析。需要查看历史图片时，用对应身份的 feishu_bot_messages 或 feishu_avatar_messages 执行 read_image，传对应的 chatId 和 messageId。图片读取失败且影响回答时，说明具体原因。',
   '- 机器人可见群和成员 open_id 用 feishu_bot_chats / feishu_bot_people 查，不要猜。',
   '- at 规则：涉及需要某人做决策、批准、确认、选择或答复时，at 到该当事人；纯信息同步、状态汇报、闲聊、感谢等不需要对方行动时不要 at。',
   '- 需要 at 时先查真实 open_id，写 <at id=真实open_id></at>，不要留占位符，不要猜。',

@@ -29,11 +29,14 @@ function triggersReply(chat, message) {
 }
 
 /** 每个任务只携带本批消息与背景快照；会话信息和回复规则由动态上下文提供。 */
-export function renderBatchPrompt({ messages, contextMessages = [] }) {
+export function renderBatchPrompt({ messages, contextMessages = [], imageNotes, imageFailure }) {
   const renderMessage = (message, index) => {
     const who = message.isSelf ? '本人' : message.senderName || message.senderOpenId || '未知';
     const stamp = formatPromptTime(message.createTime);
-    const body = String(message.text ?? '').trim().split('\n')
+    const notes = (imageNotes?.get(message.messageId) ?? []).map(({ label, error, partIndex }) => (
+      error || imageFailure ? `${label}未附带（${error ?? imageFailure}）` : `${label}已附带为本批图片 ${partIndex}`
+    ));
+    const body = [String(message.text ?? '').trim(), ...notes].join('\n').split('\n')
       .map((line) => `   ${line}`)
       .join('\n');
     // 每条消息都保留 ID，便于区分上下文、待处理消息和按需回查。
@@ -72,6 +75,7 @@ export class AutoReplyEngine {
   #sessionGuard;
   #defaultWorkspaceId;
   #authorizeDirect;
+  #loadImages;
   #debounceMs;
   #maxWaitMs;
   #timers = new Map();
@@ -91,6 +95,7 @@ export class AutoReplyEngine {
     sessionGuard = null,
     defaultWorkspaceId = null,
     authorizeDirect = null,
+    loadImages = null,
     debounceMs = BATCH_DEBOUNCE_MS,
     maxWaitMs = BATCH_MAX_WAIT_MS,
   } = {}) {
@@ -105,6 +110,7 @@ export class AutoReplyEngine {
     this.#sessionGuard = sessionGuard;
     this.#defaultWorkspaceId = defaultWorkspaceId;
     this.#authorizeDirect = authorizeDirect;
+    this.#loadImages = loadImages;
     this.#debounceMs = debounceMs;
     this.#maxWaitMs = maxWaitMs;
   }
@@ -260,11 +266,23 @@ export class AutoReplyEngine {
       .filter((message) => !pendingIds.has(message.messageId) && acceptsSender(chat, message))
       .slice(-MAX_MESSAGES_PER_CHAT)
       .sort((a, b) => Date.parse(a.createTime) - Date.parse(b.createTime));
+    const images = await this.#loadImages?.({ chat, messages, cachedMessages: latest.messages ?? [], signal });
+    if (images && !await this.#canDispatch(chat, signal)) return null;
     const requestId = `feishu-avatar-${createHash('sha256').update(JSON.stringify([chat.chatId, ids])).digest('hex')}`;
-    await this.#harness.prompt(sessionId, renderBatchPrompt({
-      messages,
-      contextMessages,
-    }), { signal, requestId });
+    const render = (imageFailure) => renderBatchPrompt({ messages, contextMessages, imageNotes: images?.notes, imageFailure });
+    const parts = images?.parts ?? [];
+    const text = render();
+    const options = { signal, requestId };
+    try {
+      await this.#harness.prompt(sessionId, parts.length ? [{ type: 'text', text }, ...parts] : text, options);
+    } catch (error) {
+      // The Host rejects invalid attachments before admitting the user message.
+      if (!parts.length || error?.code !== 'session/attachment-invalid') throw error;
+      if (!await this.#canDispatch(chat, signal)) return null;
+      const reason = error.details?.reason === 'MODEL_DOES_NOT_SUPPORT_IMAGES'
+        ? '当前会话模型不支持图像输入' : `DSH 无法加载图片，${error.message}`;
+      await this.#harness.prompt(sessionId, render(reason), options);
+    }
     await this.#acknowledge(chat, ids, { lastDispatchAt: this.#now() });
     return chat.chatId;
   }

@@ -11,6 +11,7 @@ import { CARD_STUCK_MS } from '../message-text.js';
 import { KeyedQueue } from '../queue.js';
 import { chatMemberNames, getMessage, listChats, listMessages } from './api.js';
 import { AutoReplyEngine } from './auto-reply.js';
+import { loadBatchImages } from './batch-images.js';
 import { DEFAULT_REPLY_RULES, normalizeReplyRules } from './worker-context.js';
 import {
   MAX_MONITOR_CHATS,
@@ -66,6 +67,7 @@ export class UserMonitorManager {
     listChats: listChatsImpl = listChats,
     chatMemberNames: chatMemberNamesImpl = chatMemberNames,
     getMessage: getMessageImpl = getMessage,
+    fetchImpl,
     now = Date.now,
     setInterval: setIntervalImpl = setInterval,
     clearInterval: clearIntervalImpl = clearInterval,
@@ -86,6 +88,10 @@ export class UserMonitorManager {
           sessionGuard,
           defaultWorkspaceId,
           authorizeDirect: async () => this.#syncDirectOwner(await this.#auth.status().catch(() => null)),
+          loadImages: (batch) => loadBatchImages({
+            ...batch, auth, limits: harness.imageLimits, getMessage: getMessageImpl, fetchImpl,
+            validateImage: (image, signal) => harness.validateImage?.(image, signal),
+          }),
           logger,
           now,
           setTimeout: setTimeoutImpl,
@@ -527,6 +533,8 @@ export class UserMonitorManager {
         contextOnly,
         createTime: message.createTime || card.createTime,
         text: this.#renderAt(message.text ?? card.lastText, names),
+        parentId: message.parentId,
+        imageKeys: message.imageKeys ?? [],
       });
       if (!contextOnly) fresh.push(card.messageId);
     }
@@ -657,8 +665,12 @@ export class UserMonitorManager {
         if (existing) {
           if (item.streaming === true) continue; // A stale list projection must not overwrite a settled card.
           const nextText = this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, await namesOf());
-          if (nextText && nextText !== existing.text) {
-            eligible.push({ item, time, updateOf: item.messageId, nextText });
+          const imageKeys = item.imageKeys ?? [];
+          const updateImages = existing.imageKeys?.length !== imageKeys.length
+            || imageKeys.some((key, index) => key !== existing.imageKeys?.[index]);
+          if ((nextText && nextText !== existing.text) || updateImages || (item.parentId && item.parentId !== existing.parentId)) {
+            const update = { text: nextText || existing.text, imageKeys, parentId: item.parentId || existing.parentId };
+            eligible.push({ item, time, updateOf: item.messageId, update });
           }
           continue;
         }
@@ -680,11 +692,11 @@ export class UserMonitorManager {
       const roster = names ?? (eligible.some(({ item }) => !item.senderName) ? await namesOf() : new Map());
 
       let nextMessages = messages;
-      for (const { item, time, updateOf, nextText, isSelf, contextOnly } of eligible) {
+      for (const { item, time, updateOf, update, isSelf, contextOnly } of eligible) {
         seen.add(item.messageId);
         if (updateOf) {
           nextMessages = nextMessages.map((message) => (
-            message.messageId === updateOf ? { ...message, text: nextText } : message
+            message.messageId === updateOf ? { ...message, ...update } : message
           ));
         } else {
           const entry = {
@@ -697,6 +709,8 @@ export class UserMonitorManager {
             contextOnly,
             createTime: item.createTime ?? new Date(time).toISOString(),
             text: this.#renderAt(item.text ?? `[${item.msgType || '消息'}]`, roster),
+            parentId: item.parentId,
+            imageKeys: item.imageKeys ?? [],
           };
           nextMessages = [...nextMessages, entry];
         }

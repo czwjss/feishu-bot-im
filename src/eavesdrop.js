@@ -9,8 +9,7 @@ import { messageContentOf, messageTypeOf, decodePost, renderPostText } from './m
  *
  * Entries keep text only. Images and files are represented by placeholders
  * (`[图片]`, `[文件：报告.pdf]`); nothing is downloaded while listening or when
- * the bot is mentioned. If the model needs the content, it asks the user to
- * resend it.
+ * the bot is mentioned. The history tool can fetch images on demand.
  */
 
 import { interactiveTextOfContent } from './message-text.js';

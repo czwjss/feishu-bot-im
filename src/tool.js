@@ -1,5 +1,6 @@
 import { normalizeCardColor } from './cards.js';
 import { defineFeishuTool, HISTORY_PARAMETERS, historyOptions, renderToolOutput, validateCardText } from './tool-contract.js';
+import { MESSAGE_IMAGE_OUTPUT, MESSAGE_IMAGE_PARAMETERS, messageImageTarget, readMessageImage, renderMessageImage } from './message-image-tool.js';
 
 /**
  * Model-facing Feishu tools.
@@ -95,15 +96,16 @@ export function createSendTool({ send }) {
 
 export const MESSAGES_TOOL_NAME = 'feishu_bot_messages';
 
-export function createMessagesTool({ list }) {
+export function createMessagesTool({ list, downloadImage, harness }) {
   return defineFeishuTool({
     name: MESSAGES_TOOL_NAME,
     description: '以机器人身份读取它所在会话的历史消息（群聊或私聊），支持时间范围、分页、thread，'
-      + '以及本次拉取范围内的本地关键词筛选；不是飞书全文搜索。',
+      + '以及本次拉取范围内的本地关键词筛选；不是飞书全文搜索。需要看原图时用 read_image 并指定 chatId 和 messageId。',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
+        ...MESSAGE_IMAGE_PARAMETERS,
         bot: {
           type: 'string',
           description: '机器人别名、名称或 id；多机器人且当前会话未绑定时需要。',
@@ -125,7 +127,7 @@ export function createMessagesTool({ list }) {
       },
     },
     output: {
-      schema: {
+      schema: { oneOf: [{
         type: 'object',
         additionalProperties: false,
         properties: {
@@ -150,17 +152,22 @@ export function createMessagesTool({ list }) {
                 type: { type: 'string' },
                 text: { type: 'string' },
                 threadId: { type: 'string' },
+                imageCount: { type: 'integer' },
               },
               required: ['messageId', 'at', 'time', 'senderId', 'senderName', 'type', 'text', 'threadId'],
             },
           },
         },
         required: ['chatId', 'threadId', 'query', 'scanned', 'matched', 'hasMore', 'pageToken', 'messages'],
-      },
-      render: (_args, value) => renderToolOutput(value,
+      }, MESSAGE_IMAGE_OUTPUT] },
+      render: (_args, value) => value.image ? renderMessageImage(value) : renderToolOutput(value,
         `匹配 ${value.matched} 条，扫描 ${value.scanned} 条${value.hasMore ? '，还有更多，请使用 pageToken 继续读取' : ''}。`),
     },
     async execute(args, context) {
+      const target = messageImageTarget(args);
+      if (target) return readMessageImage(target, context, harness, (input) => downloadImage({
+        ...input, sessionId: context?.agent?.session?.id, bot: args.bot,
+      }));
       return list({
         sessionId: context?.agent?.session?.id,
         bot: args?.bot,

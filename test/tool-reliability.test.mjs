@@ -303,7 +303,11 @@ test('avatar cancellation during token lookup prevents any request; absent send 
 });
 
 function assertSchema(schema, value) {
-  if (schema.type === 'object') {
+  if (schema.oneOf) {
+    const matches = schema.oneOf.filter((variant) => variant.required.every((key) => Object.hasOwn(value, key)));
+    assert.equal(matches.length, 1);
+    assertSchema(matches[0], value);
+  } else if (schema.type === 'object') {
     assert.ok(value && typeof value === 'object' && !Array.isArray(value));
     for (const key of schema.required ?? []) assert.ok(Object.hasOwn(value, key), `required output: ${key}`);
     for (const [key, child] of Object.entries(value)) {
@@ -313,6 +317,8 @@ function assertSchema(schema, value) {
   } else if (schema.type === 'array') {
     assert.ok(Array.isArray(value));
     value.forEach((item) => assertSchema(schema.items, item));
+  } else if (schema.type === 'integer') {
+    assert.ok(Number.isInteger(value));
   } else {
     assert.equal(typeof value, schema.type);
     if (schema.enum) assert.ok(schema.enum.includes(value));
@@ -355,4 +361,56 @@ test('all eight tools return schema-compliant values and complete native project
       assert.equal(value.hasMore, true);
     }
   }
+});
+
+test('both history tools open only the selected image from the specified chat', async (t) => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const body = JSON.stringify({ content: [[{ tag: 'img', image_key: 'img_first' }, { tag: 'img', image_key: 'img_second' }]] });
+  const item = { ...message(2), msg_type: 'post', body: { content: body } };
+  const target = { action: 'read_image', chatId: 'oc_chat', messageId: 'om_2', imageIndex: 2 };
+  const botDownloads = [];
+  const { manager, context } = await setup(t, {
+    async listMessages() { return { items: [item], hasMore: false }; },
+    async getMessage() { return { messageId: 'om_2', chatId: 'oc_chat', msgType: 'post', bodyContent: body }; },
+    async downloadResource(messageId, key, type, { maxBytes }) {
+      botDownloads.push([messageId, key, type, maxBytes]);
+      return png;
+    },
+  });
+  const stored = [];
+  const harness = {
+    imageLimits: { maxImageBytes: 512, maxMessageImageBytes: 256, mediaTypes: ['image/png'] },
+    async saveImage({ data, mediaType, name }) {
+      assert.deepEqual(data, png);
+      stored.push(name);
+      return { attachmentId: 'image-ref', mediaType, name, width: 1, height: 1, bytes: data.length };
+    },
+  };
+  const avatarDownloads = [];
+  const fetchImpl = async (url, init) => {
+    assert.equal(init.headers.authorization, 'Bearer test-token');
+    if (url.pathname.includes('/resources/')) {
+      avatarDownloads.push([url.pathname, url.searchParams.get('type')]);
+      return new Response(png, { headers: { 'content-type': 'image/png' } });
+    }
+    return response({ items: [item], has_more: false });
+  };
+  const bot = botTools.createMessagesTool({
+    list: manager.listMessages.bind(manager), downloadImage: manager.downloadMessageImage.bind(manager), harness,
+  });
+  const avatar = avatarTools.createMessagesTool({ auth, fetchImpl, harness });
+  assert.equal((await bot.execute({}, context)).messages[0].imageCount, 2);
+  assert.equal((await avatar.execute({ chatId: 'oc_chat' }, context)).items[0].imageCount, 2);
+  assert.deepEqual(botDownloads, []);
+  assert.deepEqual(avatarDownloads, []);
+  for (const tool of [bot, avatar]) {
+    await assert.rejects(tool.execute({ ...target, chatId: 'oc_other' }, context), /不属于指定会话/);
+    await assert.rejects(tool.execute({ ...target, imageIndex: 3 }, context), /imageIndex 超出范围/);
+    const value = await tool.execute(target, context);
+    assertSchema(tool.output.schema, value);
+    assert.deepEqual(tool.output.render(target, value)[1], { type: 'image', attachment: value.image });
+  }
+  assert.deepEqual(botDownloads, [['om_2', 'img_second', 'image', 256]]);
+  assert.deepEqual(avatarDownloads, [['/open-apis/im/v1/messages/om_2/resources/img_second', 'image']]);
+  assert.deepEqual(stored, ['feishu-om_2-2', 'feishu-om_2-2']);
 });

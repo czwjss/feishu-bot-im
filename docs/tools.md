@@ -6,12 +6,12 @@
 |---|---|---|
 | `feishu_bot_chats` | 查询机器人可见群和已知绑定会话 | 可按 `bot` 过滤；返回 `botId`、名称、`chatId`、`chatType`、绑定 `sessionId` |
 | `feishu_bot_people` | 查询群成员姓名或 open_id | `query` 必填；返回最多 10 个候选及 `matched`、`hasMore` |
-| `feishu_bot_messages` | 读取机器人可见历史 | 会话或 thread；返回 `messages`、`scanned`、`matched`、`hasMore`、`pageToken` |
+| `feishu_bot_messages` | 读取机器人可见历史和消息图片 | 历史返回 `messages`、`scanned`、`matched`、`hasMore`、`pageToken`。`read_image` 返回所选图片 |
 | `feishu_bot_send` | 机器人发送独立卡片、图片或文件 | `text` / `path` 二选一；返回 `messageId`、`chatId`、`kind`，文件另带名称、字节数 |
 | `feishu_bot_recall` | 撤回所选机器人自己发送的消息 | `messageId` 必填；核对发送者后撤回，返回 `recalled`、`messageId` |
 | `feishu_avatar_me` | 查看授权用户身份 | 返回姓名、英文名、open_id、union_id、邮箱、头像；飞书未提供的字段为空字符串 |
 | `feishu_avatar_chats` | 按群名搜索本人已加入的群 | `query` 必填，可传 `limit` 和 `pageToken`。返回候选群 `items`、`hasMore` 和 `pageToken` |
-| `feishu_avatar_messages` | 以本人身份读取历史 | 显式 `chatId`；返回 `items`、`scanned`、本页匹配数 `total`、`hasMore`、`pageToken` |
+| `feishu_avatar_messages` | 以本人身份读取历史和消息图片 | 显式 `chatId`。历史返回 `items`、`scanned`、`total`、`hasMore`、`pageToken`。`read_image` 返回所选图片 |
 | `feishu_avatar_send` | 本人发送卡片、图片或文件 | `chatId` / `openId` / `email` 三选一；返回 `messageId`、`chatId`、`kind`、时间等信息 |
 | `feishu_avatar_cloud` | 统一搜索飞书文档，管理云空间资源 | 按 `action` 选择文档、文件与目录操作，支持下载和覆盖普通文件 |
 | `feishu_avatar_wiki` | 管理知识库节点和附件 | 支持浏览、查询详情、读写正文、新建页面、改名、移动、删除及附件操作 |
@@ -48,7 +48,9 @@
 
 关键词不是飞书全文搜索。机器人在扫描预算内读取多页，分身每次读取一页再过滤；因此“本次没有匹配”不表示历史里没有匹配。只要 `hasMore` 为 true，就应使用实际 `pageToken` 继续读取。机器人每页最多读取剩余结果容量，消费完这一页才推进游标，不会因匹配数达到上限而丢掉页内剩余消息。
 
-消息正文与卡片文本不再由工具截断。图片、文件等非文本消息仍返回类型占位符，历史工具不负责下载附件。时间保留时区，Native 工具内容与 PTC 返回对象都包含完整的消息 ID、字段和游标；不会只渲染前 20 条或只提示“还有更多”。
+历史查询默认使用 `action: "list"`，返回完整的消息正文、卡片文本、类型占位符、消息 ID 和游标。含可读取图片的消息带 `imageCount`。
+
+需要看图时，传 `action: "read_image"`、`chatId` 和 `messageId`。`imageIndex` 从 1 开始，默认读取第一张。插件核对消息所属会话后按对应身份读取原图，并使用 DSH 的原生图片附件返回给模型。
 
 ## 云空间与云文档
 
