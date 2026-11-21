@@ -22,7 +22,7 @@ async function existingFileName(request, id) {
   return metadata.title;
 }
 
-export async function uploadCloudFile({ request, path, cwd, folderId, wikiParentId, parentType, fileId, name, signal }) {
+export async function uploadCloudFile({ request, path, cwd, folderId, wikiParentId, parentType, fileId, name, signal, sandboxMode = null }) {
   if (typeof path !== 'string' || !path.trim()) throw new Error('path 必须是本地文件路径');
   if (folderId !== undefined && (typeof folderId !== 'string' || !tokenPattern.test(folderId))) {
     throw new Error('上传需要有效的文件夹 ID');
@@ -39,7 +39,7 @@ export async function uploadCloudFile({ request, path, cwd, folderId, wikiParent
   }
 
   signal?.throwIfAborted();
-  const { realPath: absolutePath, info } = await resolveReadableLocalFile(path, { cwd, signal });
+  const { realPath: absolutePath, info } = await resolveReadableLocalFile(path, { cwd, signal, sandboxMode });
   if (info.size > MAX_CLOUD_UPLOAD_BYTES) throw new Error('单次上传的文件不能超过 20 MiB');
   const file = await openAsBlob(absolutePath, { type: 'application/octet-stream' });
   if (file.size > MAX_CLOUD_UPLOAD_BYTES) throw new Error('单次上传的文件不能超过 20 MiB');

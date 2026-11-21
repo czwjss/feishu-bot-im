@@ -16,11 +16,11 @@ import { FeishuBridge } from './bridge.js';
 import { normalizeCardColor, noticeCard } from './cards.js';
 import { describeMessageForEavesdrop } from './eavesdrop.js';
 import { imageKeysOf } from './inbound.js';
-import { messageImageKey } from './message-image-tool.js';
+import { messageFileResource, messageImageKey } from './message-image-tool.js';
 import { KeyedQueue } from './queue.js';
 import { RegistrationManager } from './registration.js';
 import { syncSlashCommands } from './slash-commands.js';
-import { boundedInteger, historyOptions, historyTimeRange, validateCardText } from './tool-contract.js';
+import { boundedInteger, historyOptions, historyTimeRange, MAX_SEND_TEXT_LENGTH, validateCardText } from './tool-contract.js';
 
 /** 扫码补齐权限时，由二维码携带的目标配置。 */
 export const REQUIRED_SCOPES = Object.freeze([
@@ -404,25 +404,38 @@ export class BotRuntime {
     return this.#bot.deleteMessage(messageId, { strict: true, signal });
   }
 
-  /** Send a standalone interactive card with Markdown text. */
-  async sendCardText(chatId, text, title = null, color = null, signal) {
+  /** Send a standalone interactive card with Markdown text, optionally replying to one message. */
+  async sendCardText(chatId, text, title = null, color = null, signal, replyToMessageId = null) {
     if (!this.#bot) throw new Error('机器人尚未连接');
     if (!chatId) throw new Error('缺少飞书群 chatId');
-    const { body, heading } = validateCardText(text, title, 4000);
+    const { body, heading } = validateCardText(text, title, MAX_SEND_TEXT_LENGTH);
     await this.#assertInChat(chatId, signal);
-    const messageId = await this.#bot.sendCard(chatId, noticeCard(body, heading || null, normalizeCardColor(color)), { signal });
+    const card = noticeCard(body, heading || null, normalizeCardColor(color));
+    let messageId;
+    if (replyToMessageId) {
+      const replyId = String(replyToMessageId).trim();
+      if (!/^om_[\w-]+$/.test(replyId)) throw new Error('replyToMessageId 需要是 om_ 开头的消息 ID');
+      const original = await this.#bot.getMessage(replyId, { strict: true, signal });
+      if (!original?.chatId || original.chatId !== chatId) {
+        throw new Error('replyToMessageId 不属于指定 chatId，已取消发送');
+      }
+      signal?.throwIfAborted();
+      messageId = await this.#bot.replyCard(replyId, card, { signal });
+    } else {
+      messageId = await this.#bot.sendCard(chatId, card, { signal });
+    }
     if (!messageId) throw new Error('飞书发送未返回 message_id，无法确认发送结果');
     return { messageId, sentAt: new Date().toISOString() };
   }
 
   /** Upload and send one file/image to a chat. */
-  async sendFileToChat(chatId, path, name, signal, cwd) {
+  async sendFileToChat(chatId, path, name, signal, cwd, sandboxMode = null) {
     if (!this.#bot) throw new Error('机器人尚未连接');
     if (!chatId) throw new Error('缺少飞书群 chatId');
     await this.#assertInChat(chatId, signal);
     const base = cwd || this.config?.workspace || '';
     const extraRoots = this.#dataDir ? [join(this.#dataDir, 'inbox', this.#botId)] : [];
-    const { realPath: absolute, info } = await resolveReadableLocalFile(path, { cwd: base, extraRoots, signal });
+    const { realPath: absolute, info } = await resolveReadableLocalFile(path, { cwd: base, extraRoots, signal, sandboxMode });
     const rawName = basename(typeof name === 'string' && name.trim() ? name.trim() : absolute).replace(/[\u0000-\u001f]/g, '');
     const rawExt = extname(rawName);
     const fileName = rawName.length <= 120
@@ -617,6 +630,57 @@ export class BotRuntime {
     };
   }
 
+  /** Read a single message (expanding merge_forward children when present) and verify chat ownership. */
+  async getMessageById({ chatId = null, messageId, signal }) {
+    if (!this.#bot) throw new Error('机器人尚未连接');
+    const id = String(messageId ?? '').trim();
+    if (!/^om_[\w-]+$/.test(id)) throw new Error('messageId 需要是 om_ 开头的消息 ID');
+    const message = await this.#bot.getMessage(id, { strict: true, signal });
+    if (!message) throw new Error('找不到指定的飞书消息');
+    const resolvedChatId = message.chatId || chatId || '';
+    if (chatId && message.chatId && message.chatId !== chatId) {
+      throw new Error('飞书消息不属于指定会话');
+    }
+    if (resolvedChatId) await this.#assertInChat(resolvedChatId, signal);
+    const projectRow = (entry, fallbackId = '') => {
+      const at = Number(entry.createTime) || 0;
+      const rawForDescribe = {
+        message_id: entry.messageId,
+        msg_type: entry.msgType,
+        deleted: entry.deleted,
+        body: { content: entry.bodyContent },
+        mentions: entry.mentions,
+      };
+      const imageCount = entry.deleted ? 0 : imageKeysOf(rawForDescribe).length;
+      const senderId = String(entry.senderId ?? '');
+      const senderName = String(entry.senderName ?? '').trim()
+        || (resolvedChatId && senderId ? (this.#bot.cachedMemberName?.(resolvedChatId, senderId) ?? '') : '');
+      return {
+        messageId: String(entry.messageId ?? fallbackId),
+        at,
+        time: at ? new Date(at).toISOString() : '',
+        senderId,
+        senderName,
+        type: String(entry.msgType ?? ''),
+        text: entry.deleted ? '[已撤回消息]' : describeMessageForEavesdrop(rawForDescribe, { maxLength: Infinity }).text,
+        threadId: String(entry.threadId ?? ''),
+        ...(imageCount ? { imageCount } : {}),
+      };
+    };
+    const entries = [message, ...(Array.isArray(message.subMessages) ? message.subMessages : [])];
+    const rows = entries.map((entry, idx) => projectRow(entry, idx === 0 ? id : ''));
+    return {
+      chatId: resolvedChatId,
+      threadId: message.threadId || '',
+      query: '',
+      scanned: rows.length,
+      matched: rows.length,
+      hasMore: false,
+      pageToken: '',
+      messages: rows,
+    };
+  }
+
   async downloadMessageImage(target) {
     const bot = this.#bot;
     if (!bot) throw new Error('机器人尚未连接');
@@ -626,6 +690,19 @@ export class BotRuntime {
     return {
       chatId: target.chatId,
       bytes: await bot.downloadResource(messageId, imageKey, 'image', { maxBytes, signal }),
+    };
+  }
+
+  async downloadMessageFile(target) {
+    const bot = this.#bot;
+    if (!bot) throw new Error('机器人尚未连接');
+    const { messageId, maxBytes, signal } = target;
+    const message = await bot.getMessage(messageId, { strict: true, signal });
+    const { fileKey, fileName } = messageFileResource(message, target);
+    return {
+      chatId: target.chatId,
+      fileName,
+      bytes: await bot.downloadResource(messageId, fileKey, 'file', { maxBytes, signal }),
     };
   }
 
@@ -1017,18 +1094,20 @@ export class RuntimeManager {
     return { runtime, target };
   }
 
-  async send({ sessionId, bot, chatId, text, title, color, path, name, signal, cwd }) {
+  async send({ sessionId, bot, chatId, text, title, color, path, name, replyToMessageId, signal, cwd, sandboxMode = null }) {
     signal?.throwIfAborted();
     const hasText = typeof text === 'string' && text.trim().length > 0;
     const hasFile = typeof path === 'string' && path.trim().length > 0;
     if (hasText === hasFile) throw new Error('text 和 path 必须且只能提供一个');
     if (hasFile && (title || color)) throw new Error('title/color 仅用于文本卡片');
+    if (hasFile && replyToMessageId) throw new Error('replyToMessageId 仅支持文本卡片，不能与 path 同用');
+    if (color && !title) throw new Error('color 需要同时提供 title');
     const resolved = this.#deliveryTarget({ sessionId, bot, chatId });
     if (hasText) {
-      const result = await resolved.runtime.sendCardText(resolved.target, text, title, color, signal);
+      const result = await resolved.runtime.sendCardText(resolved.target, text, title, color, signal, replyToMessageId);
       return { kind: 'card', chatId: resolved.target, ...result };
     }
-    return resolved.runtime.sendFileToChat(resolved.target, path, name, signal, cwd);
+    return resolved.runtime.sendFileToChat(resolved.target, path, name, signal, cwd, sandboxMode);
   }
 
   /** Recall one message the bot itself sent. */
@@ -1040,7 +1119,13 @@ export class RuntimeManager {
     return { recalled: ok, messageId: id };
   }
 
-  async listMessages({ sessionId, bot, chatId, ...options }) {
+  async listMessages({ sessionId, bot, chatId, messageId, ...options }) {
+    if (messageId) {
+      const runtime = this.#runtimeForDelivery({ sessionId, bot });
+      const bound = sessionId ? chatIdOfKey(runtime.chatKeyForSession(sessionId)) : null;
+      const expectedChat = String(chatId ?? '').trim() || bound || null;
+      return runtime.getMessageById({ chatId: expectedChat, messageId, signal: options.signal });
+    }
     const resolved = this.#deliveryTarget({ sessionId, bot, chatId });
     return resolved.runtime.listMessages({ chatId: resolved.target, ...options });
   }
@@ -1048,6 +1133,11 @@ export class RuntimeManager {
   async downloadMessageImage({ sessionId, bot, chatId, ...options }) {
     const resolved = this.#deliveryTarget({ sessionId, bot, chatId });
     return resolved.runtime.downloadMessageImage({ chatId: resolved.target, ...options });
+  }
+
+  async downloadMessageFile({ sessionId, bot, chatId, ...options }) {
+    const resolved = this.#deliveryTarget({ sessionId, bot, chatId });
+    return resolved.runtime.downloadMessageFile({ chatId: resolved.target, ...options });
   }
 
   async listChats({ bot, refresh = false, signal } = {}) {

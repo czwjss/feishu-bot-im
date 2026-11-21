@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,7 +17,7 @@ import { BotRuntime } from '../src/runtime.js';
 import { UserTokenStore } from '../src/user-identity/token-store.js';
 import { resolveReadableLocalFile } from '../src/local-path.js';
 import { uploadCloudFile } from '../src/user-identity/cloud-upload.js';
-import { downloadCloudFile } from '../src/user-identity/cloud-download.js';
+import { downloadCloudFile, resolveWorkspaceDownloadPath } from '../src/user-identity/cloud-download.js';
 import { createSendTool, createUserIdentityTools } from '../src/user-identity/tools.js';
 import { MonitorStore } from '../src/user-identity/monitor-store.js';
 import { AutoReplyEngine } from '../src/user-identity/auto-reply.js';
@@ -289,17 +289,16 @@ test('DSH 只读沙箱对齐 & 分身 Worker 默认权限档位配置与生效',
   const dir = await mkdtemp(join(tmpdir(), 'feishu-worker-perm-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
 
-  // 1) read-only 沙箱下禁止 cloud/wiki download 写入本地磁盘
+  // 1) read-only 沙箱下禁止 feishu_avatar_doc_file download 写入本地磁盘（Drive 与 Wiki 均被拦截）
   const tools = createUserIdentityTools({
     auth: { async requireAccessToken() { return 'tok'; } },
     fetchImpl: () => assert.fail('read-only sandbox must block before network'),
     harness: { sandboxModeOf: () => 'read-only' },
   });
-  const cloudTool = tools.find((item) => item.name === 'feishu_avatar_cloud');
-  const wikiTool = tools.find((item) => item.name === 'feishu_avatar_wiki');
+  const fileTool = tools.find((item) => item.name === 'feishu_avatar_doc_file');
   const ctx = { agent: { session: { id: 's1', cwd: dir } } };
-  await assert.rejects(() => cloudTool.execute({ action: 'download', target: 'file:box_1', path: 'a.txt' }, ctx), /只读沙箱/);
-  await assert.rejects(() => wikiTool.execute({ action: 'download', target: 'wiki:wik_1', path: 'a.txt' }, ctx), /只读沙箱/);
+  await assert.rejects(() => fileTool.execute({ action: 'download', target: 'file:box_1', path: 'a.txt' }, ctx), /只读沙箱/);
+  await assert.rejects(() => fileTool.execute({ action: 'download', target: 'wiki:wik_1', path: 'a.txt' }, ctx), /只读沙箱/);
 
   // 2) 分身 Worker 配置 permissionPreset：建会话时应用权限，修改后自动重建
   const store = await new MonitorStore({
@@ -373,4 +372,90 @@ test('DSH 只读沙箱对齐 & 分身 Worker 默认权限档位配置与生效',
   assert.equal(good.ok, true);
   assert.equal(store.config.worker.permissionPreset, 'read-only');
   monitor.dispose();
+});
+
+test('S2+: danger-full-access 放宽工作区限制，但敏感目录黑名单始终生效', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'feishu-s2-full-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'workspace');
+  const outside = join(root, 'outside');
+  await mkdir(workspace, { recursive: true });
+  await mkdir(outside, { recursive: true });
+  await writeFile(join(workspace, 'report.txt'), 'ok');
+  const outsideFile = join(outside, 'secret.txt');
+  await writeFile(outsideFile, 'top-secret');
+
+  // 1) 完全访问：工作区外的绝对路径可读
+  const full = await resolveReadableLocalFile(outsideFile, { sandboxMode: 'danger-full-access' });
+  assert.equal(full.realPath, await realpath(outsideFile));
+
+  // 2) 完全访问且没有会话工作区：相对路径按 Host 进程目录解析，不再报“缺少工作目录”
+  await assert.rejects(() => resolveReadableLocalFile('report.txt', { sandboxMode: 'danger-full-access' }), /不存在|不是普通文件/);
+
+  // 3) 其余档位（含未知 null）仍按最严格规则拦截工作区外路径
+  for (const mode of [null, undefined, 'read-only', 'workspace-write', 'unknown-mode']) {
+    await assert.rejects(
+      () => resolveReadableLocalFile(outsideFile, { cwd: workspace, sandboxMode: mode }),
+      /工作目录内/,
+      `mode ${String(mode)} keeps the workspace boundary`,
+    );
+    await assert.rejects(
+      () => resolveReadableLocalFile('report.txt', { sandboxMode: mode }),
+      /缺少当前会话工作目录/,
+      `mode ${String(mode)} still requires a workspace`,
+    );
+  }
+
+  // 4) 关键：完全访问下敏感目录黑名单仍然拦截
+  const fakeDsh = join(outside, '.dsh');
+  await mkdir(fakeDsh, { recursive: true });
+  const fakeToken = join(fakeDsh, 'user-token.json');
+  await writeFile(fakeToken, '{"token":"x"}');
+  const prevDshHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = fakeDsh;
+  try {
+    await assert.rejects(
+      () => resolveReadableLocalFile(fakeToken, { sandboxMode: 'danger-full-access' }),
+      /敏感目录/,
+      'full access must not read credential files',
+    );
+  } finally {
+    if (prevDshHome === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = prevDshHome;
+  }
+
+  // 5) 下载写入同样按档位放宽，但覆盖保护与敏感目录仍然生效
+  await assert.rejects(
+    () => resolveWorkspaceDownloadPath('../outside/a.txt', workspace, 'workspace-write'),
+    /工作目录内/,
+  );
+  const allowed = await resolveWorkspaceDownloadPath(join(outside, 'downloaded.txt'), workspace, 'danger-full-access');
+  assert.equal(allowed, join(await realpath(outside), 'downloaded.txt'));
+  await assert.rejects(
+    () => resolveWorkspaceDownloadPath(join(outside, 'secret.txt'), workspace, 'danger-full-access'),
+    /已存在/,
+  );
+  process.env.DSH_HOME = fakeDsh;
+  try {
+    await assert.rejects(
+      () => resolveWorkspaceDownloadPath(join(fakeDsh, 'leak.json'), workspace, 'danger-full-access'),
+      /敏感目录/,
+      'full access must not write into credential directories',
+    );
+  } finally {
+    if (prevDshHome === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = prevDshHome;
+  }
+
+  // 6) 只读档位在工具层先于网络被拒绝（回归）
+  const tools = createUserIdentityTools({
+    auth: { async requireAccessToken() { return 'tok'; } },
+    fetchImpl: () => assert.fail('read-only must block before network'),
+    harness: { sandboxModeOf: () => 'read-only' },
+  });
+  const fileTool = tools.find((item) => item.name === 'feishu_avatar_doc_file');
+  await assert.rejects(
+    () => fileTool.execute({ action: 'download', target: 'file:box_1', path: 'a.txt' }, { agent: { session: { header: { cwd: workspace } } } }),
+    /只读沙箱/,
+  );
 });

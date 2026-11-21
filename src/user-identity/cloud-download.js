@@ -1,19 +1,24 @@
 import { createWriteStream } from 'node:fs';
-import { link, lstat, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { link, lstat, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { isPathInside, isSensitivePath } from '../local-path.js';
+import { isFullAccess, isPathInside, isSensitivePath } from '../local-path.js';
 import { FeishuApiError } from './errors.js';
 
 const EXISTS_ERROR = '下载目标已存在，请更换本地路径';
 
-async function resolveDownloadPath(path, cwd) {
+export async function resolveWorkspaceDownloadPath(path, cwd, sandboxMode = null) {
   if (typeof path !== 'string' || !path.trim() || path.includes('\0')) throw new Error('path 必须是本地文件路径');
-  if (typeof cwd !== 'string' || !cwd.trim()) throw new Error('缺少当前会话工作目录，无法保存下载文件');
-  const workspace = await realpath(cwd);
-  const target = resolve(cwd, path);
+  const fullAccess = isFullAccess(sandboxMode);
+  const cleanCwd = typeof cwd === 'string' && cwd.trim() ? cwd.trim() : '';
+  if (!cleanCwd && !fullAccess) throw new Error('缺少当前会话工作目录，无法保存下载文件');
+  // 完全访问下相对路径按 Host 进程目录解析，与 shell 语义一致；
+  // 其余档位必须在会话工作区内。
+  const base = cleanCwd || (fullAccess ? process.cwd() : '');
+  const workspace = cleanCwd ? await realpath(cleanCwd) : null;
+  const target = resolve(base, path);
   const directory = await realpath(dirname(target));
-  if (!isPathInside(workspace, directory)) {
+  if (!fullAccess && (!workspace || !isPathInside(workspace, directory))) {
     throw new Error('下载路径必须位于当前会话的工作目录内');
   }
   const destination = join(directory, basename(target));
@@ -27,10 +32,32 @@ async function resolveDownloadPath(path, cwd) {
   return destination;
 }
 
-export async function downloadCloudFile({ request, id, path, cwd, signal }) {
+/** 原子写入内存字节到工作区新文件（不覆盖已有文件，异常自动清理临时文件）。 */
+export async function writeNewWorkspaceFile({ path, cwd, data, signal, sandboxMode = null }) {
+  signal?.throwIfAborted();
+  const destination = await resolveWorkspaceDownloadPath(path, cwd, sandboxMode);
+  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  let temporaryDirectory;
+  try {
+    signal?.throwIfAborted();
+    temporaryDirectory = await mkdtemp(join(dirname(destination), '.feishu-download-'));
+    const temporaryFile = join(temporaryDirectory, 'file');
+    await writeFile(temporaryFile, buffer, { flag: 'wx', mode: 0o600, signal });
+    signal?.throwIfAborted();
+    await link(temporaryFile, destination);
+    return { path: destination, bytes: buffer.length };
+  } catch (error) {
+    if (error?.code === 'EEXIST') throw new Error(EXISTS_ERROR, { cause: error });
+    throw error;
+  } finally {
+    if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+export async function downloadCloudFile({ request, id, path, cwd, signal, sandboxMode = null }) {
   if (typeof id !== 'string' || !/^[A-Za-z0-9_-]+$/.test(id)) throw new Error('下载需要有效的文件 ID');
   signal?.throwIfAborted();
-  const destination = await resolveDownloadPath(path, cwd);
+  const destination = await resolveWorkspaceDownloadPath(path, cwd, sandboxMode);
   signal?.throwIfAborted();
   const response = await request({
     path: `/open-apis/drive/v1/files/${encodeURIComponent(id)}/download`,

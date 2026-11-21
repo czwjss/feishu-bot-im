@@ -37,6 +37,7 @@ export const DOCS_READ_USER_SCOPES = Object.freeze([
 export const DOCS_WRITE_USER_SCOPES = Object.freeze([
   'docx:document:create',
   'docx:document:write_only',
+  'docx:document.block:convert',
   'docs:doc',
   'drive:file:upload',
 ]);

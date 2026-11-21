@@ -11,6 +11,7 @@ import {
   PEOPLE_TOOL_NAME,
   SEND_TOOL_NAME,
 } from '../src/tool.js';
+import { createMessageAttachmentTool, MESSAGE_ATTACHMENT_TOOL_NAME } from '../src/message-image-tool.js';
 
 // 发送工具：文本和文件二选一
 {
@@ -24,7 +25,8 @@ import {
     },
   });
   assert.equal(tool.name, SEND_TOOL_NAME);
-  assert.deepEqual(Object.keys(tool.parameters.properties), ['bot', 'chatId', 'title', 'color', 'text', 'path', 'name']);
+  assert.equal(tool.timeoutMs, 30_000);
+  assert.deepEqual(Object.keys(tool.parameters.properties), ['bot', 'chatId', 'title', 'color', 'text', 'path', 'name', 'replyToMessageId']);
   const text = await tool.execute({ title: '问候', color: 'blue', text: '早上好' }, { agent: { session: { id: 'sess-1' } } });
   assert.equal(text.kind, 'card');
   assert.equal(calls[0].sessionId, 'sess-1');
@@ -43,9 +45,8 @@ import {
   await assert.rejects(() => tool.execute({}, {}), /text 和 path/);
   await assert.rejects(() => tool.execute({ text: 'x', path: '/tmp/a' }, {}), /text 和 path/);
   await assert.rejects(() => tool.execute({ path: '/tmp/a', title: 'x' }, {}), /title\/color 仅用于文本卡片/);
-  const noTitle = await tool.execute({ text: '无标题', color: 'blue' }, { agent: { session: { id: 'sess-1' } } });
-  assert.equal(noTitle.kind, 'card');
-  assert.equal(calls.at(-1).color, 'blue');
+  // 无标题时 color 不会生效（飞书卡片没有 header 就没有 template），因此直接拒绝。
+  await assert.rejects(() => tool.execute({ text: '无标题', color: 'blue' }, {}), /color 需要同时提供 title/);
   const supported = await tool.execute({ title: '紫色标题', color: 'purple', text: 'x' }, { agent: { session: { id: 'sess-1' } } });
   assert.equal(supported.kind, 'card');
   assert.equal(calls.at(-1).color, 'purple');
@@ -54,7 +55,7 @@ import {
   assert.equal(calls.at(-1).color, 'grey');
 }
 
-// 历史消息工具
+// 历史消息工具（与分身统一 items/msgType/senderId 字段，声明并发安全）
 {
   const calls = [];
   const tool = createMessagesTool({
@@ -71,6 +72,7 @@ import {
     },
   });
   assert.equal(tool.name, MESSAGES_TOOL_NAME);
+  assert.equal(tool.isConcurrencySafe({}), true);
   const result = await tool.execute(
     { chatId: 'oc_daily', query: '上线', limit: 10, scanLimit: 80, order: 'newest' },
     { agent: { session: { id: 'sess-1' } } },
@@ -79,34 +81,44 @@ import {
   assert.equal(calls[0].query, '上线');
   assert.equal(calls[0].scanLimit, 80);
   assert.equal(result.matched, 1);
+  assert.equal(result.items[0].msgType, 'text');
   assert.match(tool.output.render({}, result)[0].text, /匹配 1 条，扫描 80 条/);
   assert.match(tool.output.render({}, result)[0].text, /"senderName":"陈志文"/);
   assert.match(tool.output.render({}, result)[0].text, /"text":"今晚上线"/);
   assert.match(tool.output.render({}, result)[0].text, /还有更多/);
 }
 
-// 群发现工具
+// 群发现工具（支持 query/limit 有界输出，统一 items/name 字段）
 {
   const list = [];
   const chats = createChatsTool({
     list: async (input) => {
       list.push(input);
       return [
-        { bot: 'bot_default', chatId: 'oc_daily', title: '日报群', sessionId: 'sess-9', kind: 'chat' },
-        { bot: 'bot_default', chatId: 'oc_ops', title: '', sessionId: 'sess-10', kind: 'group' },
+        { bot: 'bot_default', botId: 'b1', chatType: 'group', chatId: 'oc_daily', title: '日报群', sessionId: 'sess-9', kind: 'chat' },
+        { bot: 'bot_default', botId: 'b1', chatType: 'group', chatId: 'oc_ops', title: '运维群', sessionId: 'sess-10', kind: 'group' },
+        { bot: 'bot_default', botId: 'b1', chatType: 'group', chatId: 'oc_empty', title: '', sessionId: 'sess-11', kind: 'group' },
       ];
     },
   });
   assert.equal(chats.name, CHATS_TOOL_NAME);
-  const result = await chats.execute({ bot: 'bot_default', refresh: true });
+  assert.equal(chats.isConcurrencySafe({}), true);
+  const result = await chats.execute({ bot: 'bot_default', refresh: true, limit: 2 });
   assert.equal(list[0].bot, 'bot_default');
   assert.equal(list[0].refresh, true);
-  assert.equal(result.chats.length, 2);
-  assert.equal(result.chats[0].chatId, 'oc_daily');
-  assert.equal(result.chats[1].title, '');
-  assert.match(chats.output.render({}, result)[0].text, /"title":"日报群"/);
+  assert.equal(result.items.length, 2);
+  assert.equal(result.total, 3);
+  assert.equal(result.hasMore, true);
+  assert.equal(result.items[0].chatId, 'oc_daily');
+  assert.equal(result.items[0].name, '日报群');
+  assert.match(chats.output.render({}, result)[0].text, /"name":"日报群"/);
   assert.match(chats.output.render({}, result)[0].text, /"chatId":"oc_daily"/);
-  assert.match(chats.output.render({}, { chats: [] })[0].text, /没有可用/);
+  assert.match(chats.output.render({}, { items: [], total: 0, hasMore: false })[0].text, /没有匹配/);
+
+  const filtered = await chats.execute({ query: '运维' });
+  assert.equal(filtered.items.length, 1);
+  assert.equal(filtered.items[0].chatId, 'oc_ops');
+  assert.equal(filtered.hasMore, false);
 }
 
 // 人物模糊查询工具
@@ -119,6 +131,7 @@ import {
     },
   });
   assert.equal(people.name, PEOPLE_TOOL_NAME);
+  assert.equal(people.isConcurrencySafe({}), true);
   assert.deepEqual(people.parameters.required, ['query']);
   const result = await people.execute(
     { query: '志文', refresh: true },
@@ -150,8 +163,9 @@ console.log('tool: 38 assertions passed');
   assert.ok(tools[0].description.includes('机器人身份'), 'bot send states its identity');
   assert.ok(tools[1].description.includes('机器人身份'), 'bot messages states its identity');
   assert.ok(!tools[0].description.includes('授权用户本人的身份'), 'bot tools never claim the user identity');
+  assert.equal(createMessageAttachmentTool({}).name, MESSAGE_ATTACHMENT_TOOL_NAME);
 }
-console.log('feishu tool naming: 4 assertions passed');
+console.log('feishu tool naming: 5 assertions passed');
 
 // 输出必须与运行时返回的字段一致，否则 Host 会拒绝工具结果。
 {
@@ -165,8 +179,8 @@ console.log('feishu tool naming: 4 assertions passed');
     }),
   });
   const value = await tool.execute({});
-  const declared = Object.keys(tool.output.schema.oneOf[0].properties.messages.items.properties);
-  for (const row of value.messages) {
+  const declared = Object.keys(tool.output.schema.properties.items.items.properties);
+  for (const row of value.items) {
     for (const key of Object.keys(row)) {
       assert.ok(declared.includes(key), `${key} must be declared in the output schema`);
     }

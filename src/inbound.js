@@ -11,7 +11,7 @@ import { messageContentOf, messageTypeOf, decodePost } from './message-content.j
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_MESSAGE_IMAGES = 9;
-const MAX_FILE_BYTES = 30 * 1024 * 1024;
+export const MAX_FILE_BYTES = 30 * 1024 * 1024;
 
 /** Detect the four image media types DSH accepts from the leading bytes. */
 export function sniffImageType(bytes) {

@@ -128,6 +128,27 @@ export class UserIdentityAuth {
     return Boolean(doc?.appId) && doc.appId === app?.appId;
   }
 
+  /**
+   * 同步读取内存中的分身授权快照，用于 DSH 工具按步 `when` 激活与身份上下文注入。
+   * 绝不发起网络请求或磁盘读写，保持每步零额外 I/O 开销。
+   */
+  availability() {
+    const doc = this.#tokenStore?.document;
+    const bots = this.#botConfigStore?.bots ?? [];
+    const botId = this.config?.botId || '';
+    const bot = botId ? bots.find((item) => item.id === botId) : (bots.length === 1 ? bots[0] : null);
+    const appMatched = Boolean(bot?.appId && doc?.appId && bot.appId === doc.appId);
+    const authorized = Boolean(doc?.accessToken && doc.user?.openId) && appMatched;
+    const rawScope = typeof doc?.scope === 'string' ? doc.scope.trim() : '';
+    const scopes = new Set(rawScope ? rawScope.split(/\s+/).filter(Boolean) : []);
+    return Object.freeze({
+      authorized,
+      user: authorized ? doc.user : null,
+      scopes,
+      hasRecordedScope: rawScope.length > 0,
+    });
+  }
+
   /** 主面板状态：不返回任何 token 明文。 */
   async status() {
     await this.reload();
@@ -154,7 +175,7 @@ export class UserIdentityAuth {
     const missingScopes = requiredScopes.filter((scope) => !grantedScopes.has(scope));
     const scopeSatisfied = Boolean(tokens.present) && missingScopes.length === 0;
     const messageScopesSatisfied = Boolean(tokens.present)
-      && missingScopes.every((scope) => CLOUD_SPACE_USER_SCOPES.includes(scope));
+      && missingScopes.every((scope) => CLOUD_SPACE_USER_SCOPES.includes(scope) || scope === 'docx:document.block:convert');
     return Object.freeze({
       config: Object.freeze({
         botId: this.config.botId,

@@ -42,7 +42,7 @@ try {
   calls.length = 0;
   const file = await tool.execute({ openId: 'ou_1234', path: 'report.pdf', name: '周报.pdf' }, context);
   assert.equal(file.kind, 'file');
-  assert.equal(file.name, '周报.pdf');
+  assert.equal(file.fileName, '周报.pdf');
   assert.match(calls[0].url, /\/im\/v1\/files$/);
   const fileSend = JSON.parse(calls[1].init.body);
   assert.equal(fileSend.msg_type, 'file');
@@ -69,8 +69,9 @@ try {
 async function registeredSend(identity = auth) {
   const registered = [], registrations = [];
   installUserIdentityContributions({ inject(services, apply) {
-    assert.deepEqual(services, ['tools']);
-    registrations.push(apply({ tools: { register(tool) { registered.push(tool); } } }));
+    if (services.includes('tools')) {
+      registrations.push(apply({ tools: { register(tool) { registered.push(tool); } } }));
+    }
   } }, identity);
   await Promise.all(registrations);
   const tool = registered.find((item) => item.name === 'feishu_avatar_send');
@@ -111,7 +112,7 @@ test('Host-registered avatar uploads files and images using default fetch and th
     const result = await tool.execute({ ...target, path, name }, context);
     assert.equal(result.messageId, 'om_native');
     assert.equal(result.kind, kind);
-    assert.equal(result.name, name);
+    assert.equal(result.fileName, name);
     assert.equal(requests.length, 2, 'one upload, then one send');
     const form = requests[0].init.body;
     assert.ok(form instanceof FormData);

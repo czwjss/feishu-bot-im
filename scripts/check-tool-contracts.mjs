@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as bot from '../src/tool.js';
+import { createMessageAttachmentTool } from '../src/message-image-tool.js';
 import { createUserIdentityTools } from '../src/user-identity/tools.js';
 import { FEISHU_POLICY } from '../src/policy.js';
 
@@ -22,7 +23,8 @@ const { assertSupportedJsonSchema, projectToolSchema } = await import(pathToFile
 const { jsonSchemaToTs, jsonSchemaToPy, renderToolsSdk } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-tool-executor-ptc')));
 const tools = [
   bot.createSendTool({}), bot.createMessagesTool({}), bot.createChatsTool({}),
-  bot.createPeopleTool({}), bot.createRecallTool({}), ...createUserIdentityTools({}),
+  bot.createPeopleTool({}), bot.createRecallTool({}), createMessageAttachmentTool({}),
+  ...createUserIdentityTools({}),
 ];
 for (const tool of tools) {
   assertSupportedJsonSchema(tool.parameters);

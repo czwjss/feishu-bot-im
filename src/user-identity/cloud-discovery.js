@@ -90,7 +90,7 @@ export async function listCloudFolder({ request, target, limit, pageToken }) {
     data = await request({ path: '/open-apis/drive/v1/files', query });
   } catch (error) {
     if (error?.feishuCode !== 99991679) throw error;
-    throw new FeishuApiError('浏览云空间目录需要 space:document:retrieve 或等效 Drive 权限。请在飞书应用开通后，到「状态 → 飞书分身 → 重新授权」扫码（code 99991679）', error.details);
+    throw new FeishuApiError('浏览云空间目录需要 space:document:retrieve 或等效 Drive 权限。请在飞书应用开通后，到「状态 → 分身状态 → 重新授权」扫码（code 99991679）', error.details);
   }
   const items = resultRows(data, 'files').map((file) => ({
     id: stringOf(file.token),
@@ -99,4 +99,50 @@ export async function listCloudFolder({ request, target, limit, pageToken }) {
     url: stringOf(file.url),
   }));
   return pageOf(items, data, data.next_page_token, pageToken);
+}
+
+function formatEpochSeconds(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return '';
+  return new Date(num > 1e12 ? num : num * 1000).toISOString();
+}
+
+/** 查询云空间资源元数据（Drive batch_query，仅需 drive:drive.metadata:readonly）。 */
+export async function inspectCloudMeta({ request, id, type }) {
+  let data;
+  try {
+    data = await request({
+      path: '/open-apis/drive/v1/metas/batch_query',
+      method: 'POST',
+      body: {
+        request_docs: [{ doc_token: id, doc_type: type }],
+        with_url: true,
+      },
+    });
+  } catch (error) {
+    if (![99991672, 99991679].includes(error?.feishuCode)) throw error;
+    throw new FeishuApiError(
+      `查看云空间资源详情需要 drive:drive.metadata:readonly 权限。请在飞书应用开通后，到「状态 → 分身状态 → 重新授权」扫码（code ${error.feishuCode}）`,
+      error.details,
+    );
+  }
+  const metas = Array.isArray(data?.metas) ? data.metas : [];
+  const meta = metas.find((item) => item?.doc_token === id) ?? metas[0];
+  if (!meta) {
+    throw new FeishuApiError('飞书未返回该资源的元数据，请核对链接与访问权限');
+  }
+  const resolvedType = stringOf(meta.doc_type) || type;
+  const createTime = formatEpochSeconds(meta.create_time);
+  const latestModifyTime = formatEpochSeconds(meta.latest_modify_time);
+  return {
+    id,
+    type: resolvedType,
+    name: stringOf(meta.title),
+    url: stringOf(meta.url),
+    target: `${resolvedType}:${id}`,
+    ...(stringOf(meta.parent_token) ? { parentNodeId: stringOf(meta.parent_token) } : {}),
+    ...(stringOf(meta.owner_id) ? { ownerId: stringOf(meta.owner_id) } : {}),
+    ...(createTime ? { createTime } : {}),
+    ...(latestModifyTime ? { latestModifyTime } : {}),
+  };
 }

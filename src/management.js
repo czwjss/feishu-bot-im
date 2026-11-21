@@ -54,6 +54,8 @@ export async function managementSnapshot({ manager, harness, userMonitor, refres
         ...chat,
         bindingState: !chat.sessionId ? 'unbound' : sessionResult.error ? 'unknown' : session ? 'available' : 'unavailable',
         conflict: (claims.get(chat.sessionId)?.length ?? 0) > 1,
+        // 这里读的是 `session/list` RPC 摘要（其 cwd 来自 session.header.cwd），
+        // 不是 Session 实例——后者没有 cwd 属性。工具侧解析目录见 resolveSessionCwd。
         session: session ? {
           title: session.projections?.values?.title || chat.sessionId,
           running: typeof session.running === 'boolean' ? session.running : null,

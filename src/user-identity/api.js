@@ -336,12 +336,14 @@ export function normalizeMessage(item) {
     parentId: stringOf(source.parent_id),
     rootId: stringOf(source.root_id),
     chatId: stringOf(source.chat_id),
+    threadId: stringOf(source.thread_id),
     msgType: stringOf(source.msg_type),
     createTime: formatCreateTime(source.create_time),
     senderOpenId: stringOf(sender.open_bot_id) || stringOf(sender.id),
     senderName: stringOf(sender.sender_name) || stringOf(sender.name),
     senderType: stringOf(sender.sender_type),
     deleted: Boolean(source.deleted),
+    bodyContent: stringOf(source.body?.content),
     imageKeys: Object.freeze(imageKeysOf(source)),
     mentions: normalizeMentions(source),
     streaming: cardStreamingOf(source.body?.content),
@@ -349,7 +351,7 @@ export function normalizeMessage(item) {
   });
 }
 
-/** 单条消息（用于判断“回复我”的父消息发送者）。 */
+/** 单条消息（含合并转发 merge_forward 的子消息列表）。 */
 export async function getMessage({
   accessToken,
   messageId,
@@ -361,14 +363,20 @@ export async function getMessage({
   if (!id) throw new Error('messageId 不能为空');
   const data = await requestFeishu({
     path: `/open-apis/im/v1/messages/${encodeURIComponent(id)}`,
-    query: { card_msg_content_type: 'user_card_content' },
+    query: { card_msg_content_type: 'user_card_content', user_id_type: 'open_id' },
     accessToken,
     fetchImpl,
     timeoutMs,
     signal,
   });
   const items = Array.isArray(data.items) ? data.items : [];
-  return items.length > 0 ? normalizeMessage(items[0]) : null;
+  if (items.length === 0) return null;
+  const primary = normalizeMessage(items[0]);
+  if (items.length === 1) return primary;
+  return Object.freeze({
+    ...primary,
+    subMessages: Object.freeze(items.slice(1).map(normalizeMessage)),
+  });
 }
 
 export async function downloadMessageImage({ request, messageId, imageKey, maxBytes, signal }) {
@@ -385,12 +393,29 @@ export async function downloadMessageImage({ request, messageId, imageKey, maxBy
   return readImageBytes(response.body, maxBytes, signal);
 }
 
+/** 以用户身份下载历史消息中的普通文件资源。 */
+export async function downloadMessageFile({ request, messageId, fileKey, maxBytes = MAX_FILE_BYTES, signal }) {
+  if (!/^[\w-]+$/.test(fileKey)) throw new Error('飞书返回的文件 key 无效');
+  const response = await request({
+    path: `/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/resources/${encodeURIComponent(fileKey)}`,
+    query: { type: 'file' },
+    responseType: 'binary',
+    timeoutMs: 120_000,
+  });
+  if (response.status !== 200 || response.headers?.has('content-range')) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new FeishuApiError('飞书未返回完整文件', { status: response.status });
+  }
+  return readImageBytes(response.body, maxBytes, signal);
+}
+
 /**
- * 读群历史消息。分页 token 由调用方原样带回来。
+ * 读群历史或话题回复。分页 token 由调用方原样带回来。
  */
 export async function listMessages({
   accessToken,
   chatId,
+  threadId,
   startTime,
   endTime,
   pageSize = 20,
@@ -401,17 +426,21 @@ export async function listMessages({
   signal,
 } = {}) {
   const containerId = normalizeChatId(chatId);
+  const thread = typeof threadId === 'string' ? threadId.trim() : '';
+  const { start, end } = historyTimeRange(startTime, endTime);
+  if (thread && (start !== null || end !== null)) {
+    throw new Error('threadId 不支持 startTime/endTime，请只使用 threadId 或按 chatId 查询时间范围');
+  }
   const size = Math.min(50, Math.max(1, Number.parseInt(String(pageSize ?? 20), 10) || 20));
   const query = {
-    container_id_type: 'chat',
-    container_id: containerId,
+    container_id_type: thread ? 'thread' : 'chat',
+    container_id: thread || containerId,
     page_size: size,
     sort_type: sort === 'asc' ? 'ByCreateTimeAsc' : 'ByCreateTimeDesc',
     // 卡片默认返回精简投影；要原始卡片 JSON 才读得到正文。
     card_msg_content_type: 'user_card_content',
     with_sender_name: true,
   };
-  const { start, end } = historyTimeRange(startTime, endTime);
   if (start !== null) query.start_time = start;
   if (end !== null) query.end_time = end;
   if (typeof pageToken === 'string' && pageToken.trim()) query.page_token = pageToken.trim();
@@ -425,12 +454,102 @@ export async function listMessages({
     signal,
   });
   const items = Array.isArray(data.items) ? data.items.map(normalizeMessage) : [];
+  if (thread) {
+    for (const item of items) {
+      if (item.chatId && item.chatId !== containerId) {
+        throw new Error('该 thread 不属于指定会话');
+      }
+    }
+  }
   return Object.freeze({
     chatId: containerId,
+    threadId: thread,
     items: Object.freeze(items),
     hasMore: Boolean(data.has_more),
     pageToken: stringOf(data.page_token) || null,
   });
+}
+
+const MEMBER_CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
+const avatarMemberCache = new Map();
+
+/** 仅查本地内存缓存中的群成员姓名（不触发网络请求），供单条消息回填。 */
+export function lookupCachedMemberName(chatId, openId) {
+  if (!chatId || !openId) return '';
+  const cached = avatarMemberCache.get(chatId);
+  if (!cached || Date.now() - cached.at >= MEMBER_CACHE_TTL_MS) return '';
+  return cached.members.find((item) => item.openId === openId)?.name ?? '';
+}
+
+/** 模糊查询本人所在群的成员（带 6 小时缓存，最多返回 10 个候选；超 2000 人不缓存残缺名单）。 */
+export async function findChatMembers({
+  accessToken,
+  chatId,
+  query,
+  refresh = false,
+  fetchImpl,
+  timeoutMs,
+  signal,
+} = {}) {
+  const containerId = normalizeChatId(chatId);
+  const needle = String(query ?? '').normalize('NFKC').toLowerCase().replace(/\s+/g, '');
+  if (!needle) throw new Error('查询关键词不能为空');
+  signal?.throwIfAborted();
+
+  let members;
+  const cached = avatarMemberCache.get(containerId);
+  if (!refresh && cached && Date.now() - cached.at < MEMBER_CACHE_TTL_MS) {
+    members = cached.members;
+  } else {
+    const map = await chatMemberNames({ accessToken, chatId: containerId, strict: true, fetchImpl, timeoutMs, signal });
+    members = [...map.entries()].map(([openId, name]) => ({ openId, name }));
+    avatarMemberCache.set(containerId, { at: Date.now(), members });
+    if (avatarMemberCache.size > 100) avatarMemberCache.delete(avatarMemberCache.keys().next().value);
+  }
+
+  const ranked = [];
+  for (const member of members) {
+    const name = String(member.name ?? '').normalize('NFKC').toLowerCase().replace(/\s+/g, '');
+    const openId = String(member.openId ?? '').toLowerCase();
+    const rank = name === needle || openId === needle ? 0
+      : name.startsWith(needle) ? 1
+        : (name.includes(needle) || openId.includes(needle)) ? 2 : -1;
+    if (rank >= 0) ranked.push({ rank, name: member.name || member.openId, openId: member.openId });
+  }
+  ranked.sort((left, right) => left.rank - right.rank || String(left.name).localeCompare(String(right.name)));
+  return {
+    chatId: containerId,
+    matched: ranked.length,
+    hasMore: ranked.length > 10,
+    people: ranked.slice(0, 10).map(({ name, openId }) => ({ name, openId })),
+  };
+}
+
+/** 撤回当前授权用户本人发出的一条消息（先核对发送者归属）。 */
+export async function deleteMessage({
+  accessToken,
+  messageId,
+  expectedSenderOpenId,
+  fetchImpl,
+  timeoutMs,
+  signal,
+} = {}) {
+  const id = stringOf(messageId).trim();
+  if (!/^om_[\w-]+$/.test(id)) throw new Error('messageId 需要是 om_ 开头的消息 ID');
+  const original = await getMessage({ accessToken, messageId: id, fetchImpl, timeoutMs, signal });
+  if (!original || original.deleted) throw new Error('找不到要撤回的消息或该消息已撤回');
+  if (expectedSenderOpenId && original.senderOpenId && original.senderOpenId !== expectedSenderOpenId) {
+    throw new Error('只能撤回当前授权用户本人发送的消息');
+  }
+  await requestFeishu({
+    path: `/open-apis/im/v1/messages/${encodeURIComponent(id)}`,
+    method: 'DELETE',
+    accessToken,
+    fetchImpl,
+    timeoutMs,
+    signal,
+  });
+  return { recalled: true, messageId: id };
 }
 
 /**
@@ -443,6 +562,7 @@ export async function chatMemberNames({
   accessToken,
   chatId,
   pageSize = 100,
+  strict = false,
   fetchImpl,
   timeoutMs,
   signal,
@@ -468,9 +588,17 @@ export async function chatMemberNames({
       const name = stringOf(item?.name).trim();
       if (id && name) names.set(id, name);
     }
-    if (!data.has_more || !data.page_token) break;
-    pageToken = stringOf(data.page_token) || null;
-    if (!pageToken) break;
+    if (!data.has_more) break;
+    const nextToken = stringOf(data.page_token) || null;
+    if (!nextToken || nextToken === pageToken) {
+      if (strict) throw new Error('飞书群成员分页游标缺失或未前进，未缓存不完整成员表');
+      break;
+    }
+    if (page === 19) {
+      if (strict) throw new Error('飞书群成员超过本次 2000 人读取上限，未缓存不完整成员表');
+      break;
+    }
+    pageToken = nextToken;
   }
   return names;
 }
@@ -601,13 +729,14 @@ async function uploadUserMedia({
   path,
   name,
   cwd,
+  sandboxMode = null,
   fetchImpl = fetch,
   timeoutMs,
   signal,
 } = {}) {
   if (typeof path !== 'string' || !path.trim()) throw new Error('path 不能为空');
   if (typeof fetchImpl !== 'function') throw new TypeError('飞书 API 需要 fetch 实现');
-  const { realPath: absolute, info } = await resolveReadableLocalFile(path, { cwd, signal });
+  const { realPath: absolute, info } = await resolveReadableLocalFile(path, { cwd, signal, sandboxMode });
   const fileName = safeFileName(name, basename(absolute));
   const sourceExt = extname(absolute).toLowerCase();
   const extension = sourceExt || extname(fileName).toLowerCase();
@@ -676,6 +805,7 @@ export async function sendMediaMessage({
   path,
   name,
   cwd,
+  sandboxMode = null,
   fetchImpl,
   timeoutMs,
   signal,
@@ -688,6 +818,7 @@ export async function sendMediaMessage({
     path,
     name,
     cwd,
+    sandboxMode,
     fetchImpl,
     timeoutMs,
     signal,

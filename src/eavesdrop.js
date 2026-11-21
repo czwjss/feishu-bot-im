@@ -91,7 +91,7 @@ export function describeMessageForEavesdrop(message, { maxLength = 2_000 } = {})
 
 /** Keep a crafted message from closing the injected block early. */
 function neutralizeBlockTag(text) {
-  return String(text ?? '').replace(/<(\/?)(feishu_bot_[a-z0-9_]*)\b([^>]*)(>|$)/gi, '&lt;$1$2$3&gt;');
+  return String(text ?? '').replace(/<(\/?)(feishu_(?:bot|avatar)_[a-z0-9_]*)\b([^>]*)(>|$)/gi, '&lt;$1$2$3&gt;');
 }
 
 function senderLabel(entry) {

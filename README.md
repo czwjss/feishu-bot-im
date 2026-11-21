@@ -24,16 +24,17 @@
 - **主动投递**：先用 `feishu_bot_chats` 查机器人所在群和精确 chat id，再用 `feishu_bot_send` 发送独立卡片或文件；文本卡片可通过 `title` 设置标题、`color` 设置标题颜色，省略 `chatId` 时发当前 Session 绑定的飞书群。
 - **Web 发飞书**：Web turn 通过 `feishu_bot_send` 发送独立卡片/文件；Web 轮次不生成飞书流式卡片。
 - **人物查询**：`feishu_bot_people` 按姓名模糊查询群成员并返回精确 open_id；群成员缓存 6 小时，可主动 refresh。
-- **历史查询**：`feishu_bot_messages` 按会话与时间范围，或按 thread 读取历史；可选本地关键词筛选，不是飞书全文搜索。返回完整正文、消息 ID 与翻页游标。
-- **用户身份（飞书分身）**：Host 默认挂载 `feishu_avatar_*` 工具，复用机器人应用的设备授权。分身以本人身份按群名查找已加入的群、读取聊天历史、发送卡片和文件、管理云空间资源。Wiki 工具支持查看节点详情、读写正文、新建和移动页面，以及下载、上传和覆盖附件。见[工具契约](docs/tools.md)。
+- **历史查询**：`feishu_bot_messages` 按会话与时间范围，或按 thread 读取历史，也可按 `messageId` 精查单条（合并转发消息会完整展开子消息）；可选本地关键词筛选，不是飞书全文搜索。返回完整正文、消息 ID 与翻页游标。
+- **消息附件**：`feishu_message_attachment` 统一读取历史消息原图（`read_image`）或把历史文件附件下载到当前工作区（`download_file`，只读沙箱下拒绝）。
+- **用户身份（飞书分身）**：Host 默认按需挂载 `feishu_avatar_*` 工具，复用机器人应用的设备授权。分身以本人身份按群名查找已加入的群、查询群成员、读取聊天历史、发送卡片和文件、撤回本人消息，并按[权限清单](docs/feishu-scopes.md)门控只读检索、远端写管理与本地文件收发。见[工具契约](docs/tools.md)。
 - **内嵌 Worker 会话**：分身页采用会话列表与原生对话双栏布局，选择会话直接查看 Worker；单会话监听设置与消息详情通过抽屉打开，历史 Worker 可内嵌查看，也可「独立打开」。
 - **会话绑定**：会话详情可搜索并绑定已有 DSH 会话，也可更换绑定或解绑。保留所选会话的历史、模型和工作区；绑定操作不发送消息，后续触发消息进入所选会话。其他聊天占用的 Session、分身 Worker 和运行中的会话不可选择。
 - **会话命名**：机器人会话首次创建时按聊天名命名；分身 Worker 使用监听会话名，重建后也会重新命名。
-- **转人工**：关键词可在飞书机器人IM → 选择机器人 → 状态 → 分身自动回复设置中配置（默认「转人工 / 人工客服 / 找真人 / 我要投诉」）；命中后机器人不回复、分身丢弃当前批次，等人处理。
+- **转人工**：关键词可在飞书机器人IM → 选择机器人 → 状态 → 分身状态 → 自动回复设置中配置（默认「转人工 / 人工客服 / 找真人 / 我要投诉」）；命中后机器人不回复、分身丢弃当前批次，等人处理。
 - **分身消息监听**：在飞书机器人IM → 选择机器人 → 分身中逐个添加群聊，或打开默认关闭的「监听所有私聊」。开始监听后以本人身份轮询新消息，合批交给 Worker 处理。私聊由飞书会话目录自动发现，群聊默认处理 @我 / 回复我，可配置触发规则。Worker 用 `feishu_avatar_send` 回复，流式卡片收尾后入库。
 - **设置自动保存**：机器人配置、分身回复规则修改后自动保存；下拉框与开关即时提交，文本停止输入 600 毫秒后提交，失败保留草稿并支持重试。
 - **状态与连接管理**：状态页集中展示应用信息、运行观测和分身授权（含到期时间）；机器人已连接时显示可编辑配置，分身有效授权后显示自动回复设置。连接诊断、刷新、重连、补齐权限均为文字按钮，悬停 2 秒显示说明。诊断只校验凭证和连接状态，不发送消息；刷新只更新会话目录与状态，不重连、不拉取分身新消息。右侧「…」展开删除入口，二次确认后删除当前机器人。
-- **分身回复规则**：飞书机器人IM → 选择机器人 → 状态 → 自动回复设置可编辑回复规则或恢复默认模板；会话信息和规则分别通过 Worker 专属动态上下文注入，新消息与背景记录作为用户消息投递。规则保存后从下一次模型请求起生效。
+- **分身回复规则**：飞书机器人IM → 选择机器人 → 状态 → 分身状态 → 自动回复设置可编辑回复规则或恢复默认模板；会话信息和规则分别通过 Worker 专属动态上下文注入，新消息与背景记录作为用户消息投递。规则保存后从下一次模型请求起生效。
 
 ## 快速开始
 
@@ -68,7 +69,8 @@ pnpm install    # 或 npm install
 除了机器人身份，插件还会以你本人身份操作飞书：
 
 ```text
-feishu_avatar_me / feishu_avatar_chats / feishu_avatar_messages / feishu_avatar_send / feishu_avatar_cloud / feishu_avatar_wiki
+feishu_avatar_chats / feishu_avatar_people / feishu_avatar_messages / feishu_avatar_send / feishu_avatar_recall
+feishu_avatar_doc_read / feishu_avatar_doc_write / feishu_avatar_doc_file
   复用某个机器人的 App ID / App Secret
   设备授权（Device Flow）连接，不需要重定向 URL
 ```
@@ -77,7 +79,7 @@ feishu_avatar_me / feishu_avatar_chats / feishu_avatar_messages / feishu_avatar_
 无需修改 Agent 预设；插件不提供预设。
 
 分身文档入口：[使用与排障](docs/user-identity.md) · [开发架构](docs/user-identity-architecture.md) · [监听与派发规则](docs/user-message-monitor-design.md) · [权限清单](docs/feishu-scopes.md)。
-全部 11 个模型工具的输入、返回值和边界见[工具契约](docs/tools.md)。
+全部 14 个模型工具的输入、返回值和边界见[工具契约](docs/tools.md)。
 可视化：[分身消息流程](docs/feishu-avatar-message-flow.svg) · [机器人入站流程](docs/bot-inbound-flow.html)。
 
 ## 常用命令

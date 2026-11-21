@@ -3,15 +3,19 @@ import assert from 'node:assert/strict';
 import { NotAuthorizedError } from '../src/user-identity/errors.js';
 import {
   CHATS_TOOL_NAME,
+  DOC_FILE_TOOL_NAME,
+  DOC_READ_TOOL_NAME,
+  DOC_WRITE_TOOL_NAME,
   MESSAGES_TOOL_NAME,
-  ME_TOOL_NAME,
+  PEOPLE_TOOL_NAME,
+  RECALL_TOOL_NAME,
   SEND_TOOL_NAME,
   createChatsTool,
-  createMeTool,
   createMessagesTool,
   createSendTool,
   createUserIdentityTools,
 } from '../src/user-identity/tools.js';
+import { extractMessageText } from '../src/user-identity/api.js';
 
 function fakeAuth({ failFirst = false } = {}) {
   let calls = 0;
@@ -38,8 +42,16 @@ function fakeFetch(handler) {
 
 {
   const tools = createUserIdentityTools({ auth: fakeAuth(), fetchImpl: async () => ({}) });
-  assert.deepEqual(tools.map((tool) => tool.name), [ME_TOOL_NAME, CHATS_TOOL_NAME, MESSAGES_TOOL_NAME, SEND_TOOL_NAME, 'feishu_avatar_cloud', 'feishu_avatar_wiki']);
-  assert.deepEqual([ME_TOOL_NAME, CHATS_TOOL_NAME, MESSAGES_TOOL_NAME, SEND_TOOL_NAME], ['feishu_avatar_me', 'feishu_avatar_chats', 'feishu_avatar_messages', 'feishu_avatar_send']);
+  assert.deepEqual(tools.map((tool) => tool.name), [
+    CHATS_TOOL_NAME,
+    PEOPLE_TOOL_NAME,
+    MESSAGES_TOOL_NAME,
+    SEND_TOOL_NAME,
+    RECALL_TOOL_NAME,
+    DOC_READ_TOOL_NAME,
+    DOC_WRITE_TOOL_NAME,
+    DOC_FILE_TOOL_NAME,
+  ]);
   for (const tool of tools) {
     assert.equal(tool.parameters.type, 'object');
     assert.equal(typeof tool.execute, 'function');
@@ -47,53 +59,67 @@ function fakeFetch(handler) {
   }
 }
 
-{
-  const auth = fakeAuth();
-  const fetchImpl = fakeFetch(() => ({
-    code: 0,
-    data: { name: '陈志文', open_id: 'ou_1', union_id: 'on_1', enterprise_email: 'a@b.c' },
-  }));
-  const tool = createMeTool({ auth, fetchImpl });
-  const value = await tool.execute({}, {});
-  assert.equal(value.name, '陈志文');
-  assert.equal(value.openId, 'ou_1');
-  assert.match(tool.output.render({}, value)[0].text, /陈志文/);
-}
-
+// feishu_avatar_chats：传 query 按群名搜索，省略 query 列出最近活跃会话
 {
   const query = '超鸟送实物 - [需求同步群]';
   const auth = fakeAuth();
-  const fetchImpl = fakeFetch((url) => ({
-    code: 0,
-    data: new URL(url).searchParams.has('page_token') ? {
-      items: [], has_more: false, notice: '没有更多结果',
-    } : {
-      items: [
-        { meta_data: { chat_id: 'oc_first', name: query, description: '项目一', chat_status: 'normal' } },
-        { meta_data: { chat_id: 'oc_second', name: query, external: true } },
-        { meta_data: { chat_id: 'invalid-id', name: query } },
-        { invalid: true },
-      ],
-      has_more: true,
-      next_page_token: 'next_cursor',
-    },
-  }));
+  const fetchImpl = fakeFetch((url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/open-apis/im/v1/chats') {
+      return {
+        code: 0,
+        data: {
+          items: [
+            { chat_id: 'oc_recent_1', name: '项目周会', chat_mode: 'group', description: '每周同步', external: false },
+            { chat_id: 'oc_recent_p2p', name: '李四', chat_mode: 'p2p', description: '', external: false },
+          ],
+          has_more: false,
+        },
+      };
+    }
+    return {
+      code: 0,
+      data: parsed.searchParams.has('page_token') ? {
+        items: [], has_more: false, notice: '没有更多结果',
+      } : {
+        items: [
+          { meta_data: { chat_id: 'oc_first', name: query, description: '项目一', chat_status: 'normal' } },
+          { meta_data: { chat_id: 'oc_second', name: query, external: true } },
+          { meta_data: { chat_id: 'invalid-id', name: query } },
+          { invalid: true },
+        ],
+        has_more: true,
+        next_page_token: 'next_cursor',
+      },
+    };
+  });
   const tool = createChatsTool({ auth, fetchImpl });
+  assert.equal(tool.isConcurrencySafe({}), true);
   await assert.rejects(() => tool.execute({ query: ' ' }), /1–64/);
   await assert.rejects(() => tool.execute({ query: '群'.repeat(65) }), /1–64/);
   await assert.rejects(() => tool.execute({ query, limit: 101 }), /1–100/);
   assert.equal(auth.calls, 0, 'invalid search input should not request credentials');
 
+  const recent = await tool.execute({});
+  assert.deepEqual(recent, {
+    items: [
+      { chatId: 'oc_recent_1', name: '项目周会', chatType: 'group', description: '每周同步', external: false, chatStatus: '' },
+      { chatId: 'oc_recent_p2p', name: '李四', chatType: 'p2p', description: '', external: false, chatStatus: '' },
+    ],
+    hasMore: false,
+    pageToken: '',
+  });
+
   const firstPage = await tool.execute({ query: ` ${query} ` });
   assert.deepEqual(firstPage, {
     items: [
-      { chatId: 'oc_first', name: query, description: '项目一', external: false, chatStatus: 'normal' },
-      { chatId: 'oc_second', name: query, description: '', external: true, chatStatus: '' },
+      { chatId: 'oc_first', name: query, chatType: 'group', description: '项目一', external: false, chatStatus: 'normal' },
+      { chatId: 'oc_second', name: query, chatType: 'group', description: '', external: true, chatStatus: '' },
     ],
     hasMore: true,
     pageToken: 'next_cursor',
   });
-  const { url, init } = fetchImpl.calls[0];
+  const { url, init } = fetchImpl.calls[1];
   assert.equal(new URL(url).pathname, '/open-apis/im/v2/chats/search');
   assert.equal(new URL(url).searchParams.get('page_size'), '20');
   assert.equal(init.headers.authorization, 'Bearer token-1');
@@ -106,8 +132,8 @@ function fakeFetch(handler) {
 
   const secondPage = await tool.execute({ query: JSON.stringify(query), pageToken: firstPage.pageToken });
   assert.deepEqual(secondPage, { items: [], hasMore: false, pageToken: '', notice: '没有更多结果' });
-  assert.equal(new URL(fetchImpl.calls[1].url).searchParams.get('page_token'), 'next_cursor');
-  assert.equal(JSON.parse(fetchImpl.calls[1].init.body).query, JSON.stringify(query), 'query is not double-quoted');
+  assert.equal(new URL(fetchImpl.calls[2].url).searchParams.get('page_token'), 'next_cursor');
+  assert.equal(JSON.parse(fetchImpl.calls[2].init.body).query, JSON.stringify(query), 'query is not double-quoted');
 }
 
 {
@@ -118,23 +144,38 @@ function fakeFetch(handler) {
   assert.equal(JSON.parse(fetchImpl.calls[0].init.body).query, '项目');
 }
 
+// feishu_avatar_messages：支持多页 scanLimit 筛选与统一输出字段
 {
   const auth = fakeAuth();
-  const fetchImpl = fakeFetch(() => ({
-    code: 0,
-    data: {
+  const pages = [
+    {
+      items: [
+        { message_id: 'om_0', msg_type: 'text', create_time: '1793849553000', sender: { id: 'ou_1', name: '张三' }, body: { content: JSON.stringify({ text: '无关消息' }) } },
+      ],
+      has_more: true,
+      page_token: 'p2',
+    },
+    {
       items: [
         { message_id: 'om_1', msg_type: 'text', create_time: '1793849554000', sender: { id: 'ou_2', name: '李四' }, body: { content: JSON.stringify({ text: '发布 0.4.1' }) } },
       ],
       has_more: false,
     },
-  }));
+  ];
+  let idx = 0;
+  const fetchImpl = fakeFetch(() => ({ code: 0, data: pages[idx++] }));
   const tool = createMessagesTool({ auth, fetchImpl });
-  const value = await tool.execute({ chatId: 'oc_chat', query: '0.4.1' }, {});
-  assert.equal(value.total, 1);
+  assert.equal(tool.isConcurrencySafe({}), true);
+  const value = await tool.execute({ chatId: 'oc_chat', query: '0.4.1', scanLimit: 10 }, {});
+  assert.equal(value.matched, 1);
+  assert.equal(value.scanned, 2);
   assert.equal(value.items[0].senderName, '李四');
+  assert.equal(value.items[0].senderId, 'ou_2');
+  assert.equal(value.items[0].msgType, 'text');
+  assert.match(value.items[0].time, /Z$/);
   const url = new URL(fetchImpl.calls[0].url);
   assert.equal(url.searchParams.get('container_id'), 'oc_chat');
+  assert.equal(fetchImpl.calls.length, 2, 'multi-page keyword scan advances automatically');
 }
 
 {
@@ -146,6 +187,7 @@ function fakeFetch(handler) {
   const tool = createSendTool({ auth, fetchImpl });
   const value = await tool.execute({ chatId: 'oc_chat', text: '你好' }, {});
   assert.equal(value.messageId, 'om_sent');
+  assert.equal(value.kind, 'card');
   const body = JSON.parse(fetchImpl.calls[0].init.body);
   const url = new URL(fetchImpl.calls[0].url);
   assert.equal(url.searchParams.get('receive_id_type'), 'chat_id');
@@ -204,25 +246,25 @@ function fakeFetch(handler) {
 }
 
 {
-  // token 过期：刷新后重试一次
+  // token 过期：刷新后重试一次（以 chats 工具验证 withAccessToken）
   const auth = fakeAuth({ failFirst: true });
   let calls = 0;
-  const fetchImpl = async (url, init) => {
+  const fetchImpl = async (_url, init) => {
     calls += 1;
     if (init.headers.authorization === 'Bearer token-stale') {
       return { ok: true, status: 200, json: async () => ({ code: 99991668, msg: 'expired' }) };
     }
-    return { ok: true, status: 200, json: async () => ({ code: 0, data: { name: '陈志文', open_id: 'ou_1', union_id: 'on_1' } }) };
+    return { ok: true, status: 200, json: async () => ({ code: 0, data: { items: [], has_more: false } }) };
   };
-  const tool = createMeTool({ auth, fetchImpl });
-  assert.equal((await tool.execute({}, {})).name, '陈志文');
+  const tool = createChatsTool({ auth, fetchImpl });
+  assert.deepEqual((await tool.execute({}, {})).items, []);
   assert.equal(calls, 2);
   assert.equal(auth.calls, 2);
 }
 
 {
   const auth = { async requireAccessToken() { throw new NotAuthorizedError(); } };
-  const tool = createMeTool({ auth, fetchImpl: async () => ({}) });
+  const tool = createChatsTool({ auth, fetchImpl: async () => ({}) });
   await assert.rejects(() => tool.execute({}, {}), (error) => error instanceof NotAuthorizedError);
 }
 
@@ -241,10 +283,9 @@ function fakeFetch(handler) {
   await assert.rejects(() => send.execute({ chatId: 'oc_chat', text: 'x'.repeat(8_001) }, {}), /过长/);
 }
 
-console.log('im-feishu user identity tools: 41 assertions passed');
+console.log('im-feishu user identity tools: passed');
 
 // 卡片消息读取原始卡片 JSON 后应展平为可读文本。
-import { extractMessageText } from '../src/user-identity/api.js';
 const cardText = extractMessageText({
   msg_type: 'interactive',
   body: { content: JSON.stringify({ title: { content: '报告' }, elements: [{ tag: 'markdown', content: '**发布完成**' }] }) },
@@ -259,25 +300,15 @@ assert.equal(extractMessageText({
 }), longCardText, 'avatar card extraction preserves text beyond the old 2000-character limit');
 console.log('im-feishu user identity card text: 3 assertions passed');
 
-// 分身工具必须在描述里写明“本人身份”，并说明不是机器人。
+// 分身工具统一 feishu_avatar_ 前缀并标明“本人身份”。
 const identityTools = createUserIdentityTools({ auth: {} });
 for (const tool of identityTools) {
   assert.ok(tool.name.startsWith('feishu_avatar_'), `${tool.name} keeps the avatar prefix`);
-}
-const sendTool = identityTools.find((tool) => tool.name === 'feishu_avatar_send');
-const messagesTool = identityTools.find((tool) => tool.name === 'feishu_avatar_messages');
-assert.match(sendTool.description, /本人身份/);
-assert.match(sendTool.description, /不是机器人/);
-assert.match(messagesTool.description, /本人身份/);
-assert.match(messagesTool.description, /群聊或私聊/);
-console.log('im-feishu user identity tool identity: 7 assertions passed');
-
-// 每个分身工具都必须声明 output { schema, render }，否则工具注册会被 Host 拒绝。
-for (const tool of createUserIdentityTools({ auth: {} })) {
+  assert.match(tool.description, /本人身份/);
   assert.ok(tool.output?.schema, `${tool.name} declares an output schema`);
   assert.equal(typeof tool.output?.render, 'function', `${tool.name} declares a renderer`);
 }
-console.log('im-feishu user identity tool output: 6 assertions passed');
+console.log('im-feishu user identity tool identity & output: passed');
 
 // 发送工具支持「回复某条消息」：走 reply 接口而不是新发一条。
 {
@@ -304,7 +335,7 @@ console.log('im-feishu user identity tool output: 6 assertions passed');
 }
 console.log('im-feishu user identity reply mode: 5 assertions passed');
 
-// 标题规则只写一次：机制留在参数上，风格留在分身 policy 里。
+// 标题规则只写一次：机制留在参数上，风格留在 policy 里。
 {
   const tool = createSendTool({ auth: {}, fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ code: 0, data: {} }) }) });
   const paramText = tool.parameters.properties.title.description;

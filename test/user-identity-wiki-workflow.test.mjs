@@ -3,7 +3,7 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { createWikiTool } from '../src/user-identity/wiki-tool.js';
+import { createDocFileTool, createDocReadTool, createDocWriteTool } from '../src/user-identity/doc-tools.js';
 
 const auth = { async requireAccessToken() { return 'user-token'; } };
 const response = (data) => Response.json({ code: 0, data });
@@ -18,7 +18,7 @@ function wikiNode(nodeId, docId, fields) {
   };
 }
 
-test('Wiki tool inspects, creates with initial text, and moves using the distinct node and document IDs', async () => {
+test('doc_read & doc_write inspect, create with parent, and move Wiki pages using distinct node/doc IDs', async () => {
   const parent = wikiNode('wik_parent', 'docx_parent', {
     title: '设计资料', parent_node_token: 'wik_root', has_child: true,
     url: 'https://example.feishu.cn/wiki/wik_parent',
@@ -26,7 +26,7 @@ test('Wiki tool inspects, creates with initial text, and moves using the distinc
   const page = wikiNode('wik_new', 'docx_new', { parent_node_token: parent.node_token, title: '发布说明' });
   const destination = wikiNode('wik_archive', 'docx_archive', { space_id: destinationSpace });
   const nodes = new Map([parent, page, destination].map((node) => [node.node_token, node]));
-  const tool = createWikiTool({ auth, fetchImpl: async (url, request) => {
+  const fetchImpl = async (url, request) => {
     assert.equal(request.headers.authorization, 'Bearer user-token');
     if (url.pathname === `${spaces}/node_by_token`) {
       assert.equal(request.method, 'GET');
@@ -50,9 +50,11 @@ test('Wiki tool inspects, creates with initial text, and moves using the distinc
     assert.equal(url.pathname, `${spaces}/${sourceSpace}/nodes/${page.node_token}/move`);
     assert.deepEqual(body, { target_space_id: destinationSpace, target_parent_token: destination.node_token });
     return response({ node: { ...page, space_id: destinationSpace, parent_node_token: destination.node_token } });
-  } });
+  };
+  const readTool = createDocReadTool({ auth, fetchImpl });
+  const writeTool = createDocWriteTool({ auth, fetchImpl });
 
-  const inspected = await tool.execute({ action: 'inspect', target: parent.url });
+  const inspected = await readTool.execute({ action: 'inspect', target: parent.url });
   assert.equal(inspected.id, parent.node_token);
   assert.equal(inspected.objectId, parent.obj_token);
   assert.equal(inspected.objectType, 'docx');
@@ -60,7 +62,7 @@ test('Wiki tool inspects, creates with initial text, and moves using the distinc
   assert.equal(inspected.parentNodeId, 'wik_root');
   assert.equal(inspected.name, parent.title);
 
-  const created = await tool.execute({ action: 'create', target: inspected.target, name: page.title, text: '上线步骤' });
+  const created = await writeTool.execute({ action: 'create', parent: inspected.target, name: page.title, text: '上线步骤' });
   assert.equal(created.id, page.node_token);
   assert.equal(created.objectId, page.obj_token);
   assert.equal(created.parentNodeId, parent.node_token);
@@ -68,14 +70,14 @@ test('Wiki tool inspects, creates with initial text, and moves using the distinc
   assert.equal(created.revisionId, 2);
   assert.equal(created.status, 'completed');
 
-  const moved = await tool.execute({ action: 'move', target: created.target, destination: `wiki:${destination.node_token}` });
+  const moved = await writeTool.execute({ action: 'move', target: created.target, parent: `wiki:${destination.node_token}` });
   assert.equal(moved.id, page.node_token);
   assert.equal(moved.spaceId, destinationSpace);
   assert.equal(moved.parentNodeId, destination.node_token);
   assert.equal(moved.status, 'completed');
 });
 
-test('Wiki attachments use the parent node for upload and the backing file for download and replacement', async (t) => {
+test('doc_file uses parent node for Wiki upload and backing file for download and replacement', async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), 'feishu-wiki-workflow-'));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const content = '<h1>新版设计资料</h1>';
@@ -85,7 +87,7 @@ test('Wiki attachments use the parent node for upload and the backing file for d
   const file = wikiNode('wik_file', 'box_original', { obj_type: 'file', parent_node_token: 'wik_parent', title: '资料.html' });
   const shortcut = { ...file, node_token: 'wik_shortcut', node_type: 'shortcut' };
   const uploads = [];
-  const tool = createWikiTool({ auth, fetchImpl: async (url, request) => {
+  const fileTool = createDocFileTool({ auth, fetchImpl: async (url, request) => {
     assert.equal(request.headers.authorization, 'Bearer user-token');
     if (url.pathname === `${spaces}/node_by_token`) {
       const id = url.searchParams.get('token');
@@ -107,20 +109,20 @@ test('Wiki attachments use the parent node for upload and the backing file for d
     return response({ file_token: fileToken ?? 'box_uploaded' });
   } });
 
-  const uploaded = await tool.execute({ action: 'upload', target: 'wiki:wik_parent', path, name: '新附件.html' }, context);
+  const uploaded = await fileTool.execute({ action: 'upload', parent: 'wiki:wik_parent', path, name: '新附件.html' }, context);
   assert.equal(uploaded.id, 'box_uploaded');
   assert.equal(uploaded.type, 'file');
 
   const target = `wiki:${file.node_token}`;
-  const replaced = await tool.execute({ action: 'replace', target, path }, context);
+  const replaced = await fileTool.execute({ action: 'replace', target, path }, context);
   assert.equal(replaced.id, file.node_token);
   assert.equal(replaced.objectId, file.obj_token);
   assert.equal(replaced.target, target);
   assert.equal(replaced.name, file.title);
-  await assert.rejects(tool.execute({ action: 'replace', target: 'wiki:wik_shortcut', path }, context), /原始 Wiki 节点/);
+  await assert.rejects(fileTool.execute({ action: 'replace', target: 'wiki:wik_shortcut', path }, context), /原始 Wiki 节点/);
   assert.deepEqual(uploads, [[null, '新附件.html'], [file.obj_token, file.title]]);
 
-  const downloaded = await tool.execute({ action: 'download', target, path: 'downloaded.html' }, context);
+  const downloaded = await fileTool.execute({ action: 'download', target, path: 'downloaded.html' }, context);
   assert.equal(downloaded.id, file.node_token);
   assert.equal(downloaded.objectId, file.obj_token);
   assert.equal(downloaded.path, join(await realpath(cwd), 'downloaded.html'));

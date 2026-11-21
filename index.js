@@ -12,8 +12,10 @@ import { HarnessAdapter } from './src/harness.js';
 import { RuntimeManager } from './src/runtime.js';
 import { createRpcHandler, installRpc } from './src/rpc.js';
 import { createChatsTool, createMessagesTool, createPeopleTool, createRecallTool, createSendTool } from './src/tool.js';
+import { createMessageAttachmentTool } from './src/message-image-tool.js';
 import { FEISHU_POLICY } from './src/policy.js';
 import { UserIdentityAuth } from './src/user-identity/auth.js';
+import { createAvatarFileDownloader, createAvatarImageDownloader } from './src/user-identity/tools.js';
 import { UserIdentityConfigStore, USER_IDENTITY_FILE, USER_TOKEN_FILE } from './src/user-identity/config.js';
 import { UserIdentityConnect } from './src/user-identity/connect.js';
 import { UserIdentityManager } from './src/user-identity/manager.js';
@@ -184,23 +186,32 @@ export async function apply(ctx, config = {}) {
   }), 'feishu-bot: questions');
 
   ctx.inject(['tools'], (toolCtx) => {
+    const hasConfiguredBot = () => configStore.bots.length > 0;
+    const canReadImage = () => hasConfiguredBot() || userIdentityAuth.availability().authorized;
+
     toolCtx.tools.register(createSendTool({
       send: (input) => manager.send(input),
-    }));
+      harness,
+    }), { when: hasConfiguredBot });
     toolCtx.tools.register(createMessagesTool({
       list: (input) => manager.listMessages(input),
-      downloadImage: (input) => manager.downloadMessageImage(input),
-      harness,
-    }));
+    }), { when: hasConfiguredBot });
     toolCtx.tools.register(createChatsTool({
       list: (input) => manager.listChats(input),
-    }));
+    }), { when: hasConfiguredBot });
     toolCtx.tools.register(createPeopleTool({
       find: (input) => manager.findPeople(input),
-    }));
+    }), { when: hasConfiguredBot });
     toolCtx.tools.register(createRecallTool({
       recall: (input) => manager.recall(input),
-    }));
+    }), { when: hasConfiguredBot });
+    toolCtx.tools.register(createMessageAttachmentTool({
+      downloadBotImage: (input) => manager.downloadMessageImage(input),
+      downloadAvatarImage: createAvatarImageDownloader({ auth: userIdentityAuth }),
+      downloadBotFile: (input) => manager.downloadMessageFile(input),
+      downloadAvatarFile: createAvatarFileDownloader({ auth: userIdentityAuth }),
+      harness,
+    }), { when: canReadImage });
   });
 
   ctx.effect(() => () => manager.dispose(), 'feishu-bot: runtimes');

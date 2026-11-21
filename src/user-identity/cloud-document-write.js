@@ -29,15 +29,124 @@ export async function createCloudDocument({ request, name, folderId }) {
   return { ...documentResult(document.document_id, document.revision_id), name: document.title ?? name };
 }
 
-export function validateCloudDocumentText(text) {
+export function validateCloudDocumentText(text, { markdown = false } = {}) {
   if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT_LENGTH || text.includes('\0')) {
-    throw invalidInput(`text 必须是非空纯文本，最多 ${MAX_TEXT_LENGTH} 字符`);
+    throw invalidInput(`text 必须是非空${markdown ? ' Markdown ' : '纯'}文本，最多 ${MAX_TEXT_LENGTH} 字符`);
   }
+  if (markdown) return text;
   const lines = text.split(/\r\n|[\r\n]/);
   if (lines.length > MAX_APPEND_BLOCKS) {
     throw invalidInput(`一次最多追加 ${MAX_APPEND_BLOCKS} 行正文，请分次调用`);
   }
   return lines;
+}
+
+const MAX_DESCENDANT_TOP_LEVEL = 50;
+const MAX_DESCENDANT_BLOCKS = 1000;
+
+function sanitizeConvertedBlocks(blocks) {
+  return blocks.map((block) => {
+    if (!block || typeof block !== 'object') return block;
+    if (block.table?.property && Object.hasOwn(block.table.property, 'merge_info')) {
+      const { merge_info: _ignored, ...restProp } = block.table.property;
+      return { ...block, table: { ...block.table, property: restProp } };
+    }
+    return block;
+  });
+}
+
+/** 将 convert 返回的块树按一级块分批，确保每批满足一级块 <= 50 且子树总块数 <= 1000。 */
+function batchConvertedSubtrees(firstLevelIds, blocks) {
+  const byId = new Map();
+  for (const block of blocks) {
+    if (typeof block?.block_id === 'string' && block.block_id) byId.set(block.block_id, block);
+  }
+  const collectSubtree = (rootId) => {
+    const collected = [];
+    const visited = new Set();
+    const stack = [rootId];
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current || visited.has(current)) continue;
+      visited.add(current);
+      const block = byId.get(current);
+      if (!block) continue;
+      collected.push(block);
+      if (Array.isArray(block.children)) {
+        for (let i = block.children.length - 1; i >= 0; i -= 1) stack.push(block.children[i]);
+      }
+    }
+    return collected;
+  };
+
+  const batches = [];
+  let batchIds = [];
+  let batchBlocks = [];
+  for (const rootId of firstLevelIds) {
+    const subtree = collectSubtree(rootId);
+    if (!subtree.length) continue;
+    if (subtree.length > MAX_DESCENDANT_BLOCKS) {
+      throw invalidInput(`单个顶层 Markdown 块（如超大表格）包含 ${subtree.length} 个子块，超过飞书单次 ${MAX_DESCENDANT_BLOCKS} 块上限，请拆分后写入`);
+    }
+    if (batchIds.length > 0 && (batchIds.length >= MAX_DESCENDANT_TOP_LEVEL || batchBlocks.length + subtree.length > MAX_DESCENDANT_BLOCKS)) {
+      batches.push({ childrenIds: batchIds, descendants: batchBlocks });
+      batchIds = [];
+      batchBlocks = [];
+    }
+    batchIds.push(rootId);
+    batchBlocks.push(...subtree);
+  }
+  if (batchIds.length > 0) batches.push({ childrenIds: batchIds, descendants: batchBlocks });
+  return batches;
+}
+
+/** 通过飞书 Docx convert + descendant 接口分批写入 Markdown 结构化内容（标题/列表/代码块/表格）。 */
+export async function appendCloudDocumentMarkdown({ request, id, text }) {
+  validateCloudDocumentText(text, { markdown: true });
+  let converted;
+  try {
+    converted = await request({
+      path: `${DOCUMENTS}/blocks/convert`,
+      method: 'POST',
+      body: { content_type: 'markdown', content: text },
+    });
+  } catch (error) {
+    if ([99991672, 99991679].includes(error?.feishuCode)) {
+      throw new FeishuApiError(
+        `Markdown 结构化写入需要 docx:document.block:convert 权限。请在飞书应用开通后到「状态 → 分身状态 → 重新授权」扫码，或先改用 format: "plain"（code ${error.feishuCode}）`,
+        error.details,
+      );
+    }
+    throw error;
+  }
+  const firstLevelIds = Array.isArray(converted?.first_level_block_ids) ? converted.first_level_block_ids : [];
+  const blocks = Array.isArray(converted?.blocks) ? sanitizeConvertedBlocks(converted.blocks) : [];
+  if (!firstLevelIds.length || !blocks.length) {
+    throw new FeishuApiError('飞书 Markdown 转换未返回有效文档块，请检查内容格式');
+  }
+  const batches = batchConvertedSubtrees(firstLevelIds, blocks);
+  if (!batches.length) {
+    throw new FeishuApiError('飞书 Markdown 转换结果缺少匹配的块定义');
+  }
+
+  const token = encodeURIComponent(id);
+  let latestRevision;
+  let totalAdded = 0;
+  for (const batch of batches) {
+    const result = await request({
+      path: `${DOCUMENTS}/${token}/blocks/${token}/descendant`,
+      method: 'POST',
+      query: { document_revision_id: -1, client_token: randomUUID() },
+      body: {
+        index: -1,
+        children_id: batch.childrenIds,
+        descendants: batch.descendants,
+      },
+    });
+    if (Number.isSafeInteger(result?.document_revision_id)) latestRevision = result.document_revision_id;
+    totalAdded += Array.isArray(result?.children) ? result.children.length : batch.childrenIds.length;
+  }
+  return { ...documentResult(id, latestRevision), blocksAdded: totalAdded };
 }
 
 export async function appendCloudDocument({ request, id, text }) {

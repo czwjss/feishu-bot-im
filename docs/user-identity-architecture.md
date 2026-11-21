@@ -71,7 +71,8 @@ flowchart TB
 
 | 内容 | 注册入口 | 范围 |
 |---|---|---|
-| `feishu_avatar_me` / `chats` / `messages` / `send` / `cloud` / `wiki` | `tools.register()` | Host 全局 |
+| `feishu_avatar_*`（chats / people / messages / send / recall / doc_read / doc_write / doc_file） | `tools.register()` | Host 全局，按授权与权限用 `when` 按需激活 |
+| 已授权用户的姓名 / openId / 邮箱 | `systemPrompt.context()` | 全局，未授权时为空 |
 | 飞书通用约定与本人身份能力 | `systemPrompt.section()` | 全局 |
 | 会话信息 | `systemPrompt.context()` | 按持久化 Worker sessionId 匹配 |
 | 自定义回复规则 | `systemPrompt.context()` | 同上；每次模型请求读取最新配置 |

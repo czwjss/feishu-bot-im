@@ -1,82 +1,74 @@
 import { normalizeCardColor } from './cards.js';
-import { defineFeishuTool, HISTORY_PARAMETERS, historyOptions, renderToolOutput, validateCardText } from './tool-contract.js';
-import { MESSAGE_IMAGE_OUTPUT, MESSAGE_IMAGE_PARAMETERS, messageImageTarget, readMessageImage, renderMessageImage } from './message-image-tool.js';
+import {
+  boundedInteger,
+  defineFeishuTool,
+  HISTORY_PARAMETERS,
+  historyOptions,
+  MAX_SEND_TEXT_LENGTH,
+  messageListOutputSchema,
+  renderToolOutput,
+  resolveSandboxMode,
+  resolveSessionCwd,
+  SEND_OUTPUT_SCHEMA,
+  validateCardText,
+} from './tool-contract.js';
 
 /**
- * Model-facing Feishu tools.
- *
- * `feishu_bot_send` sends a standalone message/file. Feishu-origin replies are
- * streamed by the bridge itself, so there is deliberately no agent-facing
- * "reply with a card" tool.
+ * 机器人身份的模型工具定义。
+ * 飞书来源的正常回复由桥接流式发送；feishu_bot_send 仅用于发送独立卡片或文件。
  */
 export const SEND_TOOL_NAME = 'feishu_bot_send';
+export const MESSAGES_TOOL_NAME = 'feishu_bot_messages';
+export const CHATS_TOOL_NAME = 'feishu_bot_chats';
+export const PEOPLE_TOOL_NAME = 'feishu_bot_people';
+export const RECALL_TOOL_NAME = 'feishu_bot_recall';
 
-export function createSendTool({ send }) {
+const LIST_ONLY_FIELDS = ['threadId', 'startTime', 'endTime', 'limit', 'order', 'query', 'scanLimit', 'pageToken'];
+
+export function createSendTool({ send, harness = null }) {
   return defineFeishuTool({
     name: SEND_TOOL_NAME,
-    description: '以机器人身份立即发送一条独立卡片或文件到飞书会话（群里显示机器人名称，不是你自己）。'
-      + '省略 chatId 时发到当前会话绑定的飞书会话。返回 messageId，可供撤回使用。',
+    description: '以机器人身份发送一条独立卡片、图片或文件到飞书会话，支持引用回复。',
+    timeoutMs: 30_000,
+    presentCall: (args) => ({
+      card: 'generic',
+      kind: 'other',
+      title: args?.path ? `机器人发送文件：${args.name || args.path}` : `机器人发送飞书卡片${args?.title ? `：${args.title}` : ''}`,
+    }),
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        bot: {
-          type: 'string',
-          description: '机器人别名、名称或 id；多机器人且当前会话未绑定时需要。',
-        },
-        chatId: {
-          type: 'string',
-          description: '私聊或群聊的 chat_id（oc_…）；省略时使用当前会话绑定的聊天。',
-        },
-        title: {
-          type: 'string',
-          description: '卡片标题；仅文本卡片使用，可选，最多 100 字。',
-        },
-        color: {
-          type: 'string',
-          description: '标题颜色；仅文本卡片使用，可选。常用 blue、green、orange、red、grey；其他飞书合法值按传入使用，未知值回退 grey。',
-        },
-        text: {
-          type: 'string',
-          description: '卡片正文，Markdown；与 path 二选一，最多 4000 字。',
-        },
-        path: {
-          type: 'string',
-          description: '本地文件/图片路径；与 text 二选一。相对路径优先按当前 Session 工作区解析，否则使用机器人默认工作区。图片上限 10MB，文件上限 30MB。',
-        },
-        name: {
-          type: 'string',
-          description: '文件显示名称；仅 path 模式使用，可选。',
-        },
+        bot: { type: 'string', description: '机器人别名、名称或 id；多机器人且当前会话未绑定时需要。' },
+        chatId: { type: 'string', description: '会话 chat_id（oc_…）；省略时使用当前会话绑定的聊天。' },
+        title: { type: 'string', description: '卡片标题，仅文本卡片可用，最多 100 字符。' },
+        color: { type: 'string', description: '卡片标题颜色，仅文本卡片可用，须配合 title，如 blue / green / orange / red / grey。' },
+        text: { type: 'string', description: 'Markdown 正文，最多 8000 字符；与 path 二选一。' },
+        path: { type: 'string', description: '本地文件/图片路径；与 text 二选一。图片上限 10MB，文件上限 30MB。' },
+        name: { type: 'string', description: '文件显示名称；仅 path 模式可选。' },
+        replyToMessageId: { type: 'string', description: '引用回复的消息 id（om_…）；仅支持文本卡片，不可与 path 同用。' },
       },
     },
     output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          kind: { type: 'string', enum: ['card', 'image', 'file'] },
-          messageId: { type: 'string' },
-          chatId: { type: 'string' },
-          sentAt: { type: 'string' },
-          fileName: { type: 'string' },
-          bytes: { type: 'number' },
-        },
-        required: ['kind', 'chatId', 'messageId'],
-      },
+      schema: SEND_OUTPUT_SCHEMA,
       render: (_args, value) => renderToolOutput(value, value.kind !== 'card'
-          ? `已把「${value.fileName}」（${value.bytes} 字节）发送到 ${value.chatId}。`
-          : `已发送卡片到 ${value.chatId}（${value.sentAt}）。`),
+        ? `已把「${value.fileName}」（${value.bytes} 字节）发送到 ${value.chatId}。`
+        : `已发送卡片到 ${value.chatId}${value.sentAt ? `（${value.sentAt}）` : ''}。`),
     },
     async execute(args, context) {
       const text = typeof args?.text === 'string' ? args.text.trim() : '';
       const path = typeof args?.path === 'string' ? args.path.trim() : '';
       const title = typeof args?.title === 'string' ? args.title.trim() : '';
+      const replyToMessageId = typeof args?.replyToMessageId === 'string' ? args.replyToMessageId.trim() : '';
       const color = normalizeCardColor(args?.color);
       if ((text && path) || (!text && !path)) throw new Error('text 和 path 必须且只能提供一个');
       if (path && (title || color)) throw new Error('title/color 仅用于文本卡片');
-      if (text) validateCardText(text, title, 4000);
+      if (color && !title) throw new Error('color 需要同时提供 title');
+      if (path && replyToMessageId) throw new Error('replyToMessageId 仅支持文本卡片，不能与 path 同用');
+      if (text) validateCardText(text, title, MAX_SEND_TEXT_LENGTH);
       context?.signal?.throwIfAborted();
+      const cwd = path ? await resolveSessionCwd(context, harness) : undefined;
+      const sandboxMode = path ? resolveSandboxMode(context, harness) : null;
       return send({
         sessionId: context?.agent?.session?.id,
         bot: args?.bot,
@@ -86,125 +78,114 @@ export function createSendTool({ send }) {
         color,
         path: path || undefined,
         name: typeof args?.name === 'string' ? args.name : undefined,
+        replyToMessageId: replyToMessageId || undefined,
         signal: context?.signal,
-        cwd: context?.agent?.session?.cwd,
+        cwd,
+        sandboxMode,
       });
     },
   });
 }
 
-
-export const MESSAGES_TOOL_NAME = 'feishu_bot_messages';
-
-export function createMessagesTool({ list, downloadImage, harness }) {
+export function createMessagesTool({ list }) {
   return defineFeishuTool({
     name: MESSAGES_TOOL_NAME,
-    description: '以机器人身份读取它所在会话的历史消息（群聊或私聊），支持时间范围、分页、thread，'
-      + '以及本次拉取范围内的本地关键词筛选；不是飞书全文搜索。需要看原图时用 read_image 并指定 chatId 和 messageId。',
+    description: '以机器人身份读取会话历史或单条消息。',
+    timeoutMs: 30_000,
+    isConcurrencySafe: () => true,
+    presentCall: (args) => ({
+      card: 'generic',
+      kind: 'read',
+      title: args?.messageId
+        ? `读取机器人单条消息：${args.messageId}`
+        : `读取机器人消息历史${args?.query ? `（筛选：${args.query}）` : ''}`,
+    }),
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        ...MESSAGE_IMAGE_PARAMETERS,
-        bot: {
-          type: 'string',
-          description: '机器人别名、名称或 id；多机器人且当前会话未绑定时需要。',
-        },
-        chatId: {
-          type: 'string',
-          description: '私聊或群聊的 chat_id（oc_…）；省略时使用当前会话绑定的聊天。',
-        },
-        threadId: {
-          type: 'string',
-          description: 'thread_id；指定后读取该 thread 的回复，仍需要 chatId 做会话校验。不可同时使用 startTime/endTime。',
-        },
+        bot: { type: 'string', description: '机器人别名、名称或 id；多机器人且当前会话未绑定时需要。' },
+        chatId: { type: 'string', description: '会话 chat_id（oc_…）；省略时使用当前会话绑定的聊天。' },
+        messageId: { type: 'string', description: '按消息 ID（om_…）精确查单条消息；不可与列表查询参数同用。' },
+        threadId: { type: 'string', description: 'thread_id；读取该 thread 回复，需配合 chatId，不可与 startTime/endTime 同用。' },
         ...HISTORY_PARAMETERS,
-        scanLimit: {
-          type: 'integer',
-          default: 200,
-          description: '最多扫描的消息数，1–500，默认 200；单次最多请求 10 页。匹配不足时也可能有下一页，以 hasMore/pageToken 为准。',
-        },
       },
     },
     output: {
-      schema: { oneOf: [{
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          chatId: { type: 'string' },
-          threadId: { type: 'string' },
-          query: { type: 'string' },
-          scanned: { type: 'number' },
-          matched: { type: 'number' },
-          hasMore: { type: 'boolean' },
-          pageToken: { type: 'string' },
-          messages: {
-            type: 'array',
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              properties: {
-                messageId: { type: 'string' },
-                at: { type: 'number' },
-                time: { type: 'string' },
-                senderId: { type: 'string' },
-                senderName: { type: 'string' },
-                type: { type: 'string' },
-                text: { type: 'string' },
-                threadId: { type: 'string' },
-                imageCount: { type: 'integer' },
-              },
-              required: ['messageId', 'at', 'time', 'senderId', 'senderName', 'type', 'text', 'threadId'],
-            },
-          },
-        },
-        required: ['chatId', 'threadId', 'query', 'scanned', 'matched', 'hasMore', 'pageToken', 'messages'],
-      }, MESSAGE_IMAGE_OUTPUT] },
-      render: (_args, value) => value.image ? renderMessageImage(value) : renderToolOutput(value,
-        `匹配 ${value.matched} 条，扫描 ${value.scanned} 条${value.hasMore ? '，还有更多，请使用 pageToken 继续读取' : ''}。`),
+      schema: messageListOutputSchema({ includeThreadId: true }),
+      render: (_args, value) => renderToolOutput(
+        value,
+        `匹配 ${value.matched} 条，扫描 ${value.scanned} 条${value.hasMore ? '，还有更多，请使用 pageToken 继续读取' : ''}。`,
+      ),
     },
     async execute(args, context) {
-      const target = messageImageTarget(args, { requireChatId: false });
-      if (target) return readMessageImage(target, context, harness, (input) => downloadImage({
-        ...input, sessionId: context?.agent?.session?.id, bot: args.bot,
-      }));
-      return list({
+      const messageId = typeof args?.messageId === 'string' ? args.messageId.trim() : '';
+      if (args?.messageId !== undefined) {
+        if (!/^om_[\w-]+$/.test(messageId)) throw new Error('messageId 需要是 om_ 开头的消息 ID');
+        const extra = LIST_ONLY_FIELDS.find((field) => args[field] !== undefined);
+        if (extra) throw new Error(`按 messageId 查询单条消息时不能同时传入 ${extra}`);
+      }
+      const opts = messageId ? null : historyOptions(args);
+      const raw = await list({
         sessionId: context?.agent?.session?.id,
         bot: args?.bot,
         chatId: args?.chatId,
-        threadId: args?.threadId,
-        startTime: args?.startTime,
-        endTime: args?.endTime,
-        ...historyOptions(args),
-        scanLimit: args?.scanLimit,
-        pageToken: args?.pageToken,
+        ...(messageId ? { messageId } : {
+          threadId: args?.threadId,
+          startTime: args?.startTime,
+          endTime: args?.endTime,
+          limit: opts.limit,
+          order: opts.order,
+          query: opts.query,
+          scanLimit: opts.scanLimit,
+          pageToken: args?.pageToken,
+        }),
         signal: context?.signal,
       });
+      const rows = Array.isArray(raw?.items) ? raw.items : (Array.isArray(raw?.messages) ? raw.messages : []);
+      const items = rows.map((row) => ({
+        messageId: String(row.messageId ?? ''),
+        time: String(row.time ?? ''),
+        senderId: String(row.senderId ?? ''),
+        senderName: String(row.senderName ?? ''),
+        msgType: String(row.msgType ?? row.type ?? ''),
+        text: String(row.text ?? ''),
+        ...(row.threadId ? { threadId: String(row.threadId) } : {}),
+        ...(Number.isInteger(row.imageCount) && row.imageCount > 0 ? { imageCount: row.imageCount } : {}),
+      }));
+      return {
+        chatId: String(raw?.chatId ?? ''),
+        threadId: String(raw?.threadId ?? ''),
+        query: String(raw?.query ?? ''),
+        scanned: Number(raw?.scanned ?? 0),
+        matched: Number(raw?.matched ?? items.length),
+        hasMore: Boolean(raw?.hasMore),
+        pageToken: String(raw?.pageToken ?? ''),
+        items,
+      };
     },
   });
 }
 
-
-export const CHATS_TOOL_NAME = 'feishu_bot_chats';
-
-/** Discover the chats the bot belongs to, with bound Session markers. */
 export function createChatsTool({ list }) {
   return defineFeishuTool({
     name: CHATS_TOOL_NAME,
-    description: '列出机器人可见的飞书群和已知绑定的私聊/会话，并标记 Session 与 chatType（group/p2p/unknown）。'
-      + '不是用户全部私聊的目录；返回的 chatId 可用于发送或查历史，botId 可精确选择机器人。',
+    description: '列出机器人可见的飞书群和已知绑定会话。',
+    timeoutMs: 20_000,
+    isConcurrencySafe: () => true,
+    presentCall: (args) => ({
+      card: 'generic',
+      kind: 'search',
+      title: `查询机器人可见会话${args?.query ? `：${args.query}` : ''}`,
+    }),
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        bot: {
-          type: 'string',
-          description: '按机器人别名、名称或 id 过滤；省略则列出全部机器人。',
-        },
-        refresh: {
-          type: 'boolean',
-          description: '绕过 6 小时群列表缓存，重新从飞书拉取。',
-        },
+        bot: { type: 'string', description: '按机器人别名、名称或 id 过滤；省略则列出全部机器人。' },
+        query: { type: 'string', description: '按群名、chatId 或机器人名模糊过滤，可选。' },
+        limit: { type: 'integer', default: 30, description: '最多返回条数，1–100，默认 30。' },
+        refresh: { type: 'boolean', description: '强制从飞书刷新最新列表。' },
       },
     },
     output: {
@@ -212,7 +193,7 @@ export function createChatsTool({ list }) {
         type: 'object',
         additionalProperties: false,
         properties: {
-          chats: {
+          items: {
             type: 'array',
             items: {
               type: 'object',
@@ -222,65 +203,71 @@ export function createChatsTool({ list }) {
                 botId: { type: 'string' },
                 chatType: { type: 'string', enum: ['group', 'p2p', 'unknown'] },
                 chatId: { type: 'string' },
-                title: { type: 'string' },
+                name: { type: 'string' },
                 sessionId: { type: 'string' },
                 kind: { type: 'string' },
               },
-              required: ['bot', 'botId', 'chatType', 'chatId', 'title', 'sessionId', 'kind'],
+              required: ['bot', 'botId', 'chatType', 'chatId', 'name', 'sessionId', 'kind'],
             },
           },
+          total: { type: 'integer' },
+          hasMore: { type: 'boolean' },
         },
-        required: ['chats'],
+        required: ['items', 'total', 'hasMore'],
       },
-      render: (_args, value) => renderToolOutput(value, value.chats.length ? `共 ${value.chats.length} 个会话。` : '当前没有可用的飞书会话。'),
+      render: (_args, value) => renderToolOutput(
+        value,
+        value.items.length
+          ? `共匹配 ${value.total} 个会话${value.hasMore ? `，已显示前 ${value.items.length} 个，请用 query 或 bot 缩小范围` : ''}。`
+          : '当前没有匹配的飞书会话。',
+      ),
     },
     async execute(args, context) {
+      const limit = boundedInteger(args?.limit, 30, 100, 'limit');
+      const needle = typeof args?.query === 'string' ? args.query.normalize('NFKC').trim().toLowerCase() : '';
       const rows = await list({ bot: args?.bot, refresh: args?.refresh === true, signal: context?.signal });
+      const normalized = (Array.isArray(rows) ? rows : []).map((row) => ({
+        bot: String(row.bot ?? ''),
+        botId: String(row.botId ?? ''),
+        chatType: ['group', 'p2p'].includes(row.chatType) ? row.chatType : 'unknown',
+        chatId: String(row.chatId ?? ''),
+        name: String(row.name ?? row.title ?? ''),
+        sessionId: String(row.sessionId ?? ''),
+        kind: String(row.kind ?? 'chat'),
+      }));
+      const filtered = needle
+        ? normalized.filter((item) => [item.name, item.chatId, item.bot, item.botId]
+          .some((field) => field.normalize('NFKC').toLowerCase().includes(needle)))
+        : normalized;
+      const items = filtered.slice(0, limit);
       return {
-        chats: (Array.isArray(rows) ? rows : []).map((row) => ({
-          bot: String(row.bot ?? ''),
-          botId: String(row.botId ?? ''),
-          chatType: ['group', 'p2p'].includes(row.chatType) ? row.chatType : 'unknown',
-          chatId: String(row.chatId ?? ''),
-          title: String(row.title ?? ''),
-          sessionId: String(row.sessionId ?? ''),
-          kind: String(row.kind ?? 'chat'),
-        })),
+        items,
+        total: filtered.length,
+        hasMore: filtered.length > items.length,
       };
     },
   });
 }
 
-
-export const PEOPLE_TOOL_NAME = 'feishu_bot_people';
-export const RECALL_TOOL_NAME = 'feishu_bot_recall';
-
-/** Resolve a group member's exact open_id without dumping the roster. */
 export function createPeopleTool({ find }) {
   return defineFeishuTool({
     name: PEOPLE_TOOL_NAME,
-    description: '按姓名模糊查询机器人所在群的成员，返回完整 open_id；写 <at> 标签前先调用。'
-      + '成员缓存 6 小时；最多返回 10 个候选，hasMore 为 true 时请缩小 query，避免遗漏同名成员。',
+    description: '按姓名模糊查询机器人所在群的成员，返回完整 open_id。',
+    timeoutMs: 20_000,
+    isConcurrencySafe: () => true,
+    presentCall: (args) => ({
+      card: 'generic',
+      kind: 'search',
+      title: `查询群成员：${args?.query ?? ''}`,
+    }),
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        bot: {
-          type: 'string',
-          description: '机器人别名、名称或 id；多机器人且当前会话未绑定时需要。',
-        },
-        chatId: {
-          type: 'string',
-          description: '群 chat_id（oc_…）；省略时使用当前会话绑定的群。',
-        },
-        query: {
-          type: 'string',
-          description: '姓名片段或完整 open_id，例如“志文”；忽略大小写和空格。',
-        },
-        refresh: {
-          type: 'boolean',
-          description: '绕过 6 小时缓存，重新拉取群成员。',
-        },
+        bot: { type: 'string', description: '机器人别名、名称或 id；多机器人且当前会话未绑定时需要。' },
+        chatId: { type: 'string', description: '群 chat_id（oc_…）；省略时使用当前会话绑定的群。' },
+        query: { type: 'string', description: '姓名片段或完整 open_id。' },
+        refresh: { type: 'boolean', description: '强制从飞书刷新群成员列表。' },
       },
       required: ['query'],
     },
@@ -307,9 +294,12 @@ export function createPeopleTool({ find }) {
         },
         required: ['chatId', 'people', 'matched', 'hasMore'],
       },
-      render: (_args, value) => renderToolOutput(value, value.people.length === 0
+      render: (_args, value) => renderToolOutput(
+        value,
+        value.people.length === 0
           ? `没有找到匹配的群成员（${value.chatId}）。`
-          : `找到 ${value.matched} 个候选${value.hasMore ? '，仅显示前 10 个，请缩小 query' : ''}。`),
+          : `找到 ${value.matched} 个候选${value.hasMore ? '，仅显示前 10 个，请缩小 query' : ''}。`,
+      ),
     },
     async execute(args, context) {
       return find({
@@ -324,25 +314,22 @@ export function createPeopleTool({ find }) {
   });
 }
 
-
-/** Recall one message the bot sent itself. */
 export function createRecallTool({ recall }) {
   return defineFeishuTool({
     name: RECALL_TOOL_NAME,
-    description: '撤回机器人自己发出的一条飞书消息（误发到群里时用）。'
-      + '只能撤回机器人自己发的消息；撤销时限由企业管理员配置；批量发送的消息不支持。',
+    description: '撤回机器人自己发出的一条飞书消息（不支持批量发送的消息，受企业撤销时限约束）。',
+    timeoutMs: 15_000,
+    presentCall: (args) => ({
+      card: 'generic',
+      kind: 'delete',
+      title: `撤回机器人消息：${args?.messageId ?? ''}`,
+    }),
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        bot: {
-          type: 'string',
-          description: '机器人别名、名称或 id；多机器人且当前会话未绑定时需要。',
-        },
-        messageId: {
-          type: 'string',
-          description: '要撤回的消息 id（om_…）。',
-        },
+        bot: { type: 'string', description: '机器人别名、名称或 id；多机器人且当前会话未绑定时需要。' },
+        messageId: { type: 'string', description: '要撤回的消息 id（om_…）。' },
       },
       required: ['messageId'],
     },
@@ -356,9 +343,12 @@ export function createRecallTool({ recall }) {
         },
         required: ['recalled', 'messageId'],
       },
-      render: (_args, value) => renderToolOutput(value, value.recalled
+      render: (_args, value) => renderToolOutput(
+        value,
+        value.recalled
           ? `已撤回消息 ${value.messageId}。`
-          : `撤回失败：${value.messageId}（只能撤回机器人自己发的消息，或已超过允许的时限）。`),
+          : `撤回失败：${value.messageId}（只能撤回机器人自己发的消息，或已超过允许的时限）。`,
+      ),
     },
     async execute(args, context) {
       const messageId = typeof args?.messageId === 'string' ? args.messageId.trim() : '';

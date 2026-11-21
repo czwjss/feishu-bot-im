@@ -23,7 +23,7 @@ async function callWiki(request, options, scope) {
     return await request(options);
   } catch (error) {
     if (![99991672, 99991679].includes(error?.feishuCode)) throw error;
-    throw new FeishuApiError(`此知识库操作需要 ${scope}。请在飞书应用开通权限后，到「状态 → 飞书分身 → 重新授权」扫码（code ${error.feishuCode}）`, error.details);
+    throw new FeishuApiError(`此知识库操作需要 ${scope}。请在飞书应用开通权限后，到「状态 → 分身状态 → 重新授权」扫码（code ${error.feishuCode}）`, error.details);
   }
 }
 

@@ -1,3 +1,48 @@
+/** 机器人与分身发送工具共用的正文字符上限，避免同一模型在两种身份下遇到不同边界。 */
+export const MAX_SEND_TEXT_LENGTH = 8_000;
+
+/**
+ * 解析本次工具调用应使用的会话工作目录。
+ *
+ * DSH 把原始项目目录记录在 `session.header.cwd`（Session 实例本身没有 `cwd`
+ * 属性），`workingDirectory.ensure()` 还能在工作区被移动或删除后恢复原项目。
+ * 因此优先走 harness，其次读 header，绝不用 Host 进程目录兜底。
+ * @param {object} context 工具执行上下文。
+ * @param {object} [harness] 提供 `workingDirectoryOf` 的适配器。
+ * @returns {Promise<string>} 绝对目录；无法确定时为空字符串。
+ */
+export async function resolveSessionCwd(context, harness) {
+  const agent = context?.agent;
+  if (!agent) return '';
+  if (typeof harness?.workingDirectoryOf === 'function') {
+    const resolved = await harness.workingDirectoryOf(agent, context?.signal);
+    if (typeof resolved === 'string' && resolved.trim()) return resolved;
+  }
+  const fromHeader = agent.session?.header?.cwd;
+  if (typeof fromHeader === 'string' && fromHeader.trim()) return fromHeader;
+  // 兼容更早的 DSH 版本：Session 实例上曾直接暴露 cwd。
+  const legacy = agent.session?.cwd;
+  return typeof legacy === 'string' && legacy.trim() ? legacy : '';
+}
+
+/**
+ * 读取本次调用所处的 DSH 沙箱档位。
+ *
+ * 只有 `danger-full-access` 会放宽插件自己的工作区校验；未知档位（含适配器
+ * 不可用）一律返回 null，由路径校验按最严格规则处理。
+ * @param {object} context 工具执行上下文。
+ * @param {object} [harness] 提供 `sandboxModeOf` 的适配器。
+ * @returns {string | null} 档位名，或无法确定时的 null。
+ */
+export function resolveSandboxMode(context, harness) {
+  try {
+    const mode = harness?.sandboxModeOf?.(context?.agent?.session);
+    return typeof mode === 'string' && mode ? mode : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Native output is model input, not just a UI preview. Keep the whole value. */
 export function renderToolOutput(value, summary = '') {
   return [{ type: 'text', text: [summary, JSON.stringify(value)].filter(Boolean).join('\n') }];
@@ -33,10 +78,65 @@ export function defineFeishuTool(definition) {
 export const HISTORY_PARAMETERS = Object.freeze({
   startTime: { type: 'string', description: '开始时间：带时区的 ISO 8601 或秒级时间戳字符串。' },
   endTime: { type: 'string', description: '结束时间，同 startTime 格式；须晚于开始时间。' },
-  limit: { type: 'integer', default: 20, description: '单次条数上限，1–50，默认 20。' },
-  pageToken: { type: 'string', description: '上次返回的翻页游标；其他查询条件保持一致。' },
+  limit: { type: 'integer', default: 20, description: '返回条数上限，1–50，默认 20。' },
+  pageToken: { type: 'string', description: '翻页游标；继续查询时保持其他条件不变。' },
   order: { type: 'string', enum: ['newest', 'oldest'], default: 'newest', description: 'newest 倒序 / oldest 正序，默认 newest。' },
-  query: { type: 'string', description: '在本次读取的正文或发送者名称中匹配关键词；不是全文搜索。' },
+  query: { type: 'string', description: '在本次扫描结果的正文或发送者名称中匹配关键词；不是飞书全文搜索。' },
+  scanLimit: { type: 'integer', default: 200, description: '最多扫描的消息数，1–500，默认 200（单次最多 10 页）；未找齐时以 hasMore/pageToken 继续。' },
+});
+
+/** 机器人与分身消息历史共享的统一消息项输出结构。 */
+export const MESSAGE_ITEM_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    messageId: { type: 'string' },
+    time: { type: 'string' },
+    senderId: { type: 'string' },
+    senderName: { type: 'string' },
+    msgType: { type: 'string' },
+    text: { type: 'string' },
+    threadId: { type: 'string' },
+    imageCount: { type: 'integer' },
+  },
+  required: ['messageId', 'time', 'senderId', 'senderName', 'msgType', 'text'],
+});
+
+export function messageListOutputSchema({ includeThreadId = false } = {}) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      chatId: { type: 'string' },
+      ...(includeThreadId ? { threadId: { type: 'string' } } : {}),
+      query: { type: 'string' },
+      scanned: { type: 'number' },
+      matched: { type: 'number' },
+      hasMore: { type: 'boolean' },
+      pageToken: { type: 'string' },
+      items: { type: 'array', items: MESSAGE_ITEM_SCHEMA },
+    },
+    required: [
+      'chatId',
+      ...(includeThreadId ? ['threadId'] : []),
+      'query', 'scanned', 'matched', 'hasMore', 'pageToken', 'items',
+    ],
+  };
+}
+
+/** 机器人与分身发送工具共享的统一回执结构。 */
+export const SEND_OUTPUT_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    kind: { type: 'string', enum: ['card', 'image', 'file'] },
+    messageId: { type: 'string' },
+    chatId: { type: 'string' },
+    sentAt: { type: 'string' },
+    fileName: { type: 'string' },
+    bytes: { type: 'number' },
+  },
+  required: ['kind', 'chatId', 'messageId'],
 });
 
 export function boundedInteger(value, fallback, maximum, name) {
@@ -52,7 +152,9 @@ export function historyOptions(args = {}) {
   if (typeof query !== 'string') throw new Error('query 必须是字符串');
   return {
     limit: boundedInteger(args.limit, 20, 50, 'limit'),
-    order, query: query.normalize('NFKC').trim().toLowerCase(),
+    scanLimit: boundedInteger(args.scanLimit, 200, 500, 'scanLimit'),
+    order,
+    query: query.normalize('NFKC').trim().toLowerCase(),
   };
 }
 

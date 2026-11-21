@@ -270,26 +270,42 @@ export class FeishuBot {
     };
   }
 
-  /** Read one message (reply recognition and quoted-message context). */
+  /** 仅查本地内存缓存中的群成员姓名（不触发网络请求），供单条消息回填。 */
+  cachedMemberName(chatId, openId) {
+    if (!chatId || !openId) return '';
+    const cached = this.#memberCache.get(chatId);
+    if (!cached || Date.now() - cached.at >= CACHE_TTL_MS) return '';
+    return cached.members.find((item) => item.openId === openId)?.name ?? '';
+  }
+
+  /** Read one message (reply recognition, quoted-message context, and merge_forward expansion). */
   async getMessage(messageId, { strict = false, signal } = {}) {
     if (!messageId) return null;
+    const project = (item, fallbackId = '') => ({
+      senderId: item.sender?.open_bot_id || item.sender?.id || item.sender?.sender_id?.open_id || null,
+      senderName: String(item.sender?.sender_name ?? item.sender?.name ?? '').trim(),
+      senderType: item.sender?.sender_type ?? null,
+      messageId: item.message_id ?? fallbackId,
+      chatId: item.chat_id ?? '',
+      threadId: String(item.thread_id ?? ''),
+      createTime: Number(item.create_time) || 0,
+      msgType: item.msg_type ?? item.message_type ?? null,
+      deleted: Boolean(item.deleted),
+      bodyContent: item.body?.content ?? '',
+      mentions: Array.isArray(item.mentions) ? item.mentions : [],
+    });
     try {
       const response = assertApiSuccess('Feishu message lookup', await this.#transport.run(signal, () => this.#client.im.v1.message.get({
         path: { message_id: messageId },
-        params: { card_msg_content_type: 'user_card_content' },
+        params: { card_msg_content_type: 'user_card_content', user_id_type: 'open_id' },
       })));
-      const item = (response?.data?.items ?? [])[0];
-      if (!item) return null;
-      return {
-        senderId: item.sender?.open_bot_id || item.sender?.id || item.sender?.sender_id?.open_id || null,
-        senderType: item.sender?.sender_type ?? null,
-        messageId: item.message_id ?? messageId,
-        chatId: item.chat_id ?? '',
-        msgType: item.msg_type ?? item.message_type ?? null,
-        deleted: Boolean(item.deleted),
-        bodyContent: item.body?.content ?? '',
-        mentions: Array.isArray(item.mentions) ? item.mentions : [],
-      };
+      const items = Array.isArray(response?.data?.items) ? response.data.items : [];
+      if (items.length === 0) return null;
+      const primary = project(items[0], messageId);
+      if (items.length > 1) {
+        primary.subMessages = items.slice(1).map((child) => project(child));
+      }
+      return primary;
     } catch (error) {
       signal?.throwIfAborted();
       if (strict) throw error;
@@ -577,12 +593,12 @@ export class FeishuBot {
   }
 
   /** Post a full card as a reply to one message. */
-  async replyCard(messageId, card, chatId = null) {
-    void chatId;
-    const response = assertApiSuccess('Feishu reply card', await this.#client.im.v1.message.reply({
+  async replyCard(messageId, card, options = null) {
+    const signal = options && typeof options === 'object' ? options.signal : undefined;
+    const response = assertApiSuccess('Feishu reply card', await this.#transport.run(signal, () => this.#client.im.v1.message.reply({
       path: { message_id: messageId },
       data: { msg_type: 'interactive', content: JSON.stringify(card) },
-    }));
+    })));
     return response?.data?.message_id ?? null;
   }
 

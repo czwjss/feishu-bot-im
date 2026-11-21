@@ -178,6 +178,35 @@ export class HarnessAdapter {
       return null;
     }
   }
+
+  /**
+   * 解析工具应使用的会话工作目录。
+   *
+   * DSH 的 `Session` 只在 `session.header.cwd` 上记录原始项目目录（实例本身没有
+   * `cwd` 属性），`workingDirectory.ensure()` 还会在工作区被移动或删除时恢复原
+   * 项目。按 from-strongest 顺序取第一个可用值，绝不回退到 Host 进程目录。
+   * @param {object} agent 工具执行的 agent。
+   * @param {AbortSignal} [signal] 工作区校验的取消信号。
+   * @returns {Promise<string>} 绝对目录，全部来源都不可用时为空字符串。
+   */
+  async workingDirectoryOf(agent, signal) {
+    if (!agent) return '';
+    try {
+      const service = this.#ctx.get?.('workingDirectory');
+      if (service && typeof service.ensure === 'function') {
+        const ensured = await service.ensure(agent, signal);
+        if (typeof ensured === 'string' && ensured.trim()) return ensured;
+      }
+    } catch {
+      // 工作区不可用或已失联时继续尝试静态来源。
+    }
+    const session = agent.session;
+    const fromHeader = session?.header?.cwd;
+    if (typeof fromHeader === 'string' && fromHeader.trim()) return fromHeader;
+    // 兼容更早的 DSH 版本：Session 实例上曾直接暴露 cwd。
+    const legacy = session?.cwd;
+    return typeof legacy === 'string' && legacy.trim() ? legacy : '';
+  }
   /** Run the host's `/compact` command for this Session. */
   async compact(sessionId) {
     return this.invoke('commands', 'execute', {

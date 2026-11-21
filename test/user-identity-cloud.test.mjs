@@ -4,12 +4,12 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installUserIdentityContributions } from '../src/user-identity/contributions.js';
-import { createCloudTool } from '../src/user-identity/cloud-tool.js';
+import { createDocFileTool, createDocReadTool, createDocWriteTool } from '../src/user-identity/doc-tools.js';
 
 const auth = { async requireAccessToken() { return 'user-token'; } };
 const response = (data, code = 0) => ({ ok: true, status: 200, json: async () => ({ code, data }) });
 
-test('Host-registered cloud search keeps DOCX results and returns Wiki targets for the Wiki tool', async (t) => {
+test('Host-registered doc_read search returns unified targets for both DOCX and Wiki results', async (t) => {
   t.mock.method(globalThis, 'fetch', async (url, request) => {
     assert.equal(url.href, 'https://open.feishu.cn/open-apis/search/v2/doc_wiki/search');
     assert.equal(request.method, 'POST');
@@ -28,23 +28,24 @@ test('Host-registered cloud search keeps DOCX results and returns Wiki targets f
     });
   });
   const tools = new Map();
-  installUserIdentityContributions({ inject(_services, apply) {
-    apply({ tools: { register(tool) { tools.set(tool.name, tool); } } });
+  installUserIdentityContributions({ inject(services, apply) {
+    if (services.includes('tools')) apply({ tools: { register(tool) { tools.set(tool.name, tool); } } });
   } }, auth);
-  const tool = tools.get('feishu_avatar_cloud');
+  const tool = tools.get('feishu_avatar_doc_read');
+  assert.equal(tool.isConcurrencySafe({ action: 'search' }), true);
   const input = { action: 'search', query: '发布计划' };
   const first = await tool.execute(input);
   assert.deepEqual(first, { action: 'search', items: [
-    { id: 'doc_1', type: 'docx', name: '发布计划', url: 'https://example.feishu.cn/docx/doc_1' },
+    { id: 'doc_1', type: 'docx', name: '发布计划', url: 'https://example.feishu.cn/docx/doc_1', target: 'docx:doc_1' },
     { id: 'wik_plan', type: 'wiki', name: 'Wiki 发布计划', url: 'https://example.feishu.cn/wiki/wik_plan', target: 'wiki:wik_plan' },
   ], hasMore: true, pageToken: 'second' });
   assert.deepEqual(await tool.execute({ ...input, pageToken: first.pageToken }), { action: 'search', items: [], hasMore: false, pageToken: '' });
   assert.deepEqual(JSON.parse(tool.output.render(input, first)[0].text), first);
 });
 
-test('cloud list handles root and nested folders and reports missing directory scope', async () => {
+test('doc_read list handles root and nested Drive folders and reports missing directory scope', async () => {
   const calls = [];
-  const tool = createCloudTool({ auth, fetchImpl: async (url) => {
+  const tool = createDocReadTool({ auth, fetchImpl: async (url) => {
     assert.equal(url.pathname, '/open-apis/drive/v1/files');
     const query = Object.fromEntries(url.searchParams);
     calls.push(query);
@@ -54,7 +55,7 @@ test('cloud list handles root and nested folders and reports missing directory s
     return response({ files: [], has_more: true, next_page_token: 'next' });
   } });
   const root = await tool.execute({ action: 'list' });
-  assert.deepEqual(root.items, [{ id: 'folder_1', type: 'folder', name: '项目', url: 'https://example.feishu.cn/drive/folder/folder_1' }]);
+  assert.deepEqual(root.items, [{ id: 'folder_1', type: 'folder', name: '项目', url: 'https://example.feishu.cn/drive/folder/folder_1', target: 'folder:folder_1' }]);
   const child = { action: 'list', target: root.items[0].url, limit: 5 };
   const first = await tool.execute(child);
   assert.equal(first.pageToken, 'next');
@@ -67,10 +68,10 @@ test('cloud list handles root and nested folders and reports missing directory s
   await assert.rejects(tool.execute({ action: 'list', target: 'denied' }), { feishuCode: 99991679, message: /space:document:retrieve|drive:drive:readonly/ });
 });
 
-test('cloud read preserves long text across pages, detects edits, and reads legacy links', async () => {
+test('doc_read preserves long text across pages, detects edits, and reads legacy links', async () => {
   const original = `${'甲'.repeat(7999)}📄\n下一段`;
   let content = original;
-  const tool = createCloudTool({ auth, fetchImpl: async (url, request) => {
+  const tool = createDocReadTool({ auth, fetchImpl: async (url, request) => {
     assert.equal(request.method, 'GET');
     assert.equal(request.headers.authorization, 'Bearer user-token');
     if (url.pathname === '/open-apis/doc/v2/doc_old/raw_content') return response({ content: '旧版正文' });
@@ -89,33 +90,34 @@ test('cloud read preserves long text across pages, detects edits, and reads lega
   assert.equal((await tool.execute({ action: 'read', target: 'https://example.feishu.cn/docs/doc_old' })).text, '旧版正文');
 });
 
-test('cloud tool rejects Wiki targets, incompatible fields and arbitrary URLs before obtaining credentials', async () => {
-  const tool = createCloudTool({ auth: { requireAccessToken() { assert.fail('invalid input reached auth'); } } });
-  for (const [args, detail] of [
-    [{ action: 'search', query: ' ' }, /query/],
-    [{ action: 'search', query: '项目', target: 'folder_1' }, /不接受 target/],
-    [{ action: 'list', target: 'https://example.feishu.cn/docx/not_a_folder' }, /target/],
-    [{ action: 'list', target: 'wiki' }, /target|Wiki|知识库/],
-    [{ action: 'list', target: 'wiki_space:7160145948494381236' }, /target|Wiki|知识库/],
-    [{ action: 'read', target: 'wiki:wik_plan' }, /target|Wiki|知识库/],
-    [{ action: 'read', target: 'https://example.feishu.cn/wiki/wik_plan' }, /target|Wiki|知识库/],
-    [{ action: 'read', target: 'https://feishu.cn.example.com/docx/doc_1' }, /target/],
-    [{ action: 'read', target: 'doc_1', pageToken: 'wrong' }, /pageToken/],
-    [{ action: 'read', target: 'doc_1', limit: 1 }, /不接受 limit/],
-    [{ action: 'create', name: '周报', text: '   ' }, /非空纯文本/],
-    [{ action: 'edit', target: 'doc_1', find: '原文' }, /text/],
-    [{ action: 'delete', target: 'doc_1' }, /target/],
-    [{ action: 'delete', target: 'docx:doc_1', pageToken: 'ignored' }, /不接受 pageToken/],
-    [{ action: 'move', target: 'file:abc' }, /folder/],
-    [{ action: 'upload', path: 'report.txt' }, /folder/],
+test('doc tools reject incompatible fields, missing confirm and arbitrary URLs before obtaining credentials', async () => {
+  const deniedAuth = { requireAccessToken() { assert.fail('invalid input reached auth'); } };
+  const readTool = createDocReadTool({ auth: deniedAuth });
+  const writeTool = createDocWriteTool({ auth: deniedAuth });
+  const fileTool = createDocFileTool({ auth: deniedAuth });
+
+  for (const [tool, args, detail] of [
+    [readTool, { action: 'search', query: ' ' }, /query/],
+    [readTool, { action: 'search', query: '项目', target: 'folder_1' }, /不接受 target/],
+    [readTool, { action: 'list', target: 'https://example.feishu.cn/docx/not_a_folder' }, /target/],
+    [readTool, { action: 'read', target: 'https://feishu.cn.example.com/docx/doc_1' }, /target/],
+    [readTool, { action: 'read', target: 'doc_1', pageToken: 'wrong' }, /pageToken/],
+    [readTool, { action: 'read', target: 'doc_1', limit: 1 }, /不接受 limit/],
+    [writeTool, { action: 'create', name: '周报', text: '   ' }, /非空纯文本/],
+    [writeTool, { action: 'edit', target: 'doc_1', find: '原文' }, /text/],
+    [writeTool, { action: 'delete', target: 'docx:doc_1' }, /confirm/],
+    [writeTool, { action: 'delete', target: 'doc_1', confirm: true }, /target/],
+    [writeTool, { action: 'delete', target: 'docx:doc_1', confirm: true, includeChildren: true }, /仅用于 Wiki/],
+    [writeTool, { action: 'move', target: 'file:abc' }, /target|folder/],
+    [fileTool, { action: 'upload', path: 'report.txt' }, /target|folder|wiki/],
   ]) await assert.rejects(tool.execute(args), detail);
 });
 
-test('cloud create and append retry only the rejected request and keep the document ID when writing fails', async () => {
+test('doc_write create and append retry only the rejected request and keep the document ID when writing fails', async () => {
   const paths = [];
   const clientTokens = [];
   let accessToken = 'stale';
-  const tool = createCloudTool({
+  const tool = createDocWriteTool({
     auth: { async requireAccessToken({ force } = {}) { if (force) accessToken = 'fresh'; return accessToken; } },
     fetchImpl: async (url, request) => {
       paths.push(url.pathname);
@@ -130,7 +132,7 @@ test('cloud create and append retry only the rejected request and keep the docum
       throw new Error('connection closed');
     },
   });
-  const result = await tool.execute({ action: 'create', name: '周报', folder: 'folder_reports', text: '正文' });
+  const result = await tool.execute({ action: 'create', name: '周报', parent: 'folder_reports', text: '正文' });
   assert.equal(result.status, 'partial');
   assert.equal(result.id, 'doc_created');
   assert.match(result.message, /正文写入未确认/);
@@ -140,11 +142,32 @@ test('cloud create and append retry only the rejected request and keep the docum
   assert.equal(clientTokens[0], clientTokens[1], 'token refresh retries the same append request');
 });
 
-test('cloud upload sends the file as multipart with the current user token', async (t) => {
+test('doc_write settles short async Drive move/delete tasks automatically and supports task fallback', async () => {
+  let checks = 0;
+  const tool = createDocWriteTool({
+    auth,
+    taskPollAttempts: 2,
+    taskPollDelayMs: 0,
+    fetchImpl: async (url, request) => {
+      if (request.method === 'DELETE') return response({ task_id: 'drv_task_1' });
+      if (url.pathname === '/open-apis/drive/v1/files/task_check') {
+        checks += 1;
+        return response({ status: checks >= 2 ? 'success' : 'processing' });
+      }
+      assert.fail(`unexpected ${url}`);
+    },
+  });
+  const result = await tool.execute({ action: 'delete', target: 'file:box_1', confirm: true });
+  assert.equal(result.status, 'completed');
+  assert.equal(result.taskId, 'drive:drv_task_1');
+  assert.equal(checks, 2);
+});
+
+test('doc_file upload sends the file as multipart with the current user token', async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), 'im-feishu-drive-tool-'));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   await writeFile(join(cwd, 'report.txt'), '报告正文');
-  const tool = createCloudTool({ auth, fetchImpl: async (url, request) => {
+  const tool = createDocFileTool({ auth, fetchImpl: async (url, request) => {
     assert.equal(url.pathname, '/open-apis/drive/v1/files/upload_all');
     assert.equal(request.method, 'POST');
     assert.equal(request.headers.authorization, 'Bearer user-token');
@@ -153,7 +176,7 @@ test('cloud upload sends the file as multipart with the current user token', asy
     assert.equal(await request.body.get('file').text(), '报告正文');
     return response({ file_token: 'file_report' });
   } });
-  const result = await tool.execute({ action: 'upload', path: 'report.txt', folder: 'folder_reports' }, { agent: { session: { cwd } } });
+  const result = await tool.execute({ action: 'upload', path: 'report.txt', parent: 'folder_reports' }, { agent: { session: { cwd } } });
   assert.equal(result.id, 'file_report');
   assert.equal(result.status, 'completed');
 });

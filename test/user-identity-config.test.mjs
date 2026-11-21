@@ -14,7 +14,8 @@ import { UserTokenStore, EXPIRY_MARGIN_MS } from '../src/user-identity/token-sto
 const dir = await mkdtemp(join(tmpdir(), 'im-feishu-user-config-'));
 try {
   assert.equal(normalizeUserScope(undefined), DEFAULT_USER_SCOPE);
-  assert.equal(DEFAULT_USER_SCOPE.split(' ').length, 27);
+  assert.equal(DEFAULT_USER_SCOPE.split(' ').length, 28);
+  assert.match(DEFAULT_USER_SCOPE, /docx:document\.block:convert/);
   assert.match(DEFAULT_USER_SCOPE, /im:resource/);
   assert.doesNotMatch(DEFAULT_USER_SCOPE, /im:resource:upload/);
   assert.match(DEFAULT_USER_SCOPE, /docx:document:readonly/);

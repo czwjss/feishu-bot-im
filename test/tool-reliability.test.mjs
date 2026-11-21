@@ -9,6 +9,7 @@ import { RuntimeManager } from '../src/runtime.js';
 import { FeishuBot } from '../src/feishu.js';
 import { historyOptions, historyTimeRange } from '../src/tool-contract.js';
 import * as botTools from '../src/tool.js';
+import { createMessageAttachmentTool } from '../src/message-image-tool.js';
 import * as avatarTools from '../src/user-identity/tools.js';
 
 const auth = { async requireAccessToken() { return 'test-token'; } };
@@ -84,9 +85,9 @@ test('keyword pagination consumes all 60 messages without skipping and preserves
   for (let page = 0; page < 35; page += 1) {
     const result = await tool.execute({ query: '命中', limit: 2, pageToken }, context);
     assert.deepEqual(nativeValue(tool, result), result, 'native output includes every field, message ID, timestamp and actual cursor');
-    ids.push(...result.messages.map((row) => row.messageId));
-    if (result.messages.some((row) => row.messageId === 'om_25')) assert.equal(result.messages.find((row) => row.messageId === 'om_25').text, longText);
-    assert.ok(result.messages.length <= 2);
+    ids.push(...result.items.map((row) => row.messageId));
+    if (result.items.some((row) => row.messageId === 'om_25')) assert.equal(result.items.find((row) => row.messageId === 'om_25').text, longText);
+    assert.ok(result.items.length <= 2);
     pageToken = result.pageToken;
     if (!result.hasMore) break;
   }
@@ -120,7 +121,7 @@ test('history rejects contradictory bounds, unsupported fields and stalled curso
   await assert.rejects(tool.execute({ startTime: '20', endTime: '10' }, context), /早于/);
   await assert.rejects(tool.execute({ limit: 0 }, context), /1–50/);
   await assert.rejects(tool.execute({ limit: 2, pageSize: 3 }, context), /不支持参数 pageSize/);
-  assert.deepEqual(historyOptions({ limit: 3, order: 'oldest', query: 'Ａbc' }), { limit: 3, order: 'oldest', query: 'abc' });
+  assert.deepEqual(historyOptions({ limit: 3, order: 'oldest', query: 'Ａbc' }), { limit: 3, scanLimit: 200, order: 'oldest', query: 'abc' });
   assert.deepEqual(historyTimeRange('1970-01-01T08:00:00+08:00', '10'), { start: 0, end: 10 });
   assert.throws(() => historyTimeRange('-1'), /ISO 8601/);
   assert.throws(() => historyTimeRange('not-a-date'), /ISO 8601/);
@@ -149,7 +150,7 @@ test('bot send returns receipts, resolves relative files from the active Session
   const image = await tool.execute({ path: 'picture.png' }, context);
   assert.equal(image.kind, 'image');
   assert.equal(image.messageId, 'om_image');
-  await assert.rejects(tool.execute({ text: '字'.repeat(4001) }, context), /过长/);
+  await assert.rejects(tool.execute({ text: '字'.repeat(8001) }, context), /过长/);
   await assert.rejects(tool.execute({ text: '正常', title: '字'.repeat(101) }, context), /最多 100/);
 });
 
@@ -255,13 +256,13 @@ test('avatar history accepts only current parameters and matches actual sender_n
   const queries = [];
   const tool = avatarTools.createMessagesTool({ auth, fetchImpl: async (url) => {
     queries.push(new URL(url).searchParams);
-    return response({ items: [message(1, '无关键词正文', '张三')], has_more: true, page_token: 'avatar_next' });
+    return response({ items: [message(1, '无关键词正文', '张三')], has_more: false });
   } });
-  const value = await tool.execute({ chatId: 'oc_chat', limit: 5, order: 'oldest', query: '张三' });
-  assert.equal(value.total, 1);
+  const value = await tool.execute({ chatId: 'oc_chat', limit: 5, order: 'oldest', query: '张三', scanLimit: 5 });
+  assert.equal(value.matched, 1);
   assert.equal(value.scanned, 1);
   assert.equal(value.items[0].senderName, '张三');
-  assert.match(value.items[0].createTime, /Z$/);
+  assert.match(value.items[0].time, /Z$/);
   assert.deepEqual(nativeValue(tool, value), value);
   assert.equal(queries.at(-1).get('page_size'), '5');
   assert.equal(queries.at(-1).get('sort_type'), 'ByCreateTimeAsc');
@@ -325,14 +326,14 @@ function assertSchema(schema, value) {
   }
 }
 
-test('all eight tools return schema-compliant values and complete native projections, including >20 chats', async (t) => {
+test('all core IM tools return schema-compliant values and complete native projections, including >20 chats', async (t) => {
   const { manager, first, context } = await setup(t, {
     async getChats() { return Array.from({ length: 25 }, (_, i) => ({ chatId: `oc_${i}`, name: `群 ${i}`, chatType: 'group' })); },
     async getChatInfo() { return { name: '当前私聊', chatType: 'p2p' }; },
     async getChatMembers() { return Array.from({ length: 12 }, (_, i) => ({ name: `同事 ${i}`, openId: `ou_${i}` })); },
   });
   const fetchImpl = async (url, init) => {
-    if (String(url).includes('/user_info')) return response({ name: '本人', open_id: 'ou_self', union_id: 'on_self', email: 'a@example.com', avatar_url: 'https://example.com/avatar.png' });
+    if (String(url).includes('/im/v1/chats')) return response({ items: [{ chat_id: 'oc_chat', name: '项目群', chat_mode: 'group' }], has_more: false });
     if (init.method === 'POST') return response({ message_id: 'om_sent', chat_id: 'oc_chat' });
     return response({ items: [message(1)], has_more: false });
   };
@@ -342,7 +343,7 @@ test('all eight tools return schema-compliant values and complete native project
     [botTools.createChatsTool({ list: manager.listChats.bind(manager) }), {}],
     [botTools.createPeopleTool({ find: manager.findPeople.bind(manager) }), { query: '同事' }],
     [botTools.createRecallTool({ recall: manager.recall.bind(manager) }), { messageId: 'om_own' }],
-    [avatarTools.createMeTool({ auth, fetchImpl }), {}],
+    [avatarTools.createChatsTool({ auth, fetchImpl }), {}],
     [avatarTools.createMessagesTool({ auth, fetchImpl }), { chatId: 'oc_chat' }],
     [avatarTools.createSendTool({ auth, fetchImpl }), { chatId: 'oc_chat', text: 'hello' }],
   ];
@@ -351,9 +352,11 @@ test('all eight tools return schema-compliant values and complete native project
     assertSchema(tool.output.schema, value);
     assert.deepEqual(nativeValue(tool, value), value, `${tool.name}: Native and PTC must see the same facts`);
     if (tool.name === 'feishu_bot_chats') {
-      assert.equal(value.chats.length, 26);
-      assert.ok(value.chats.every((chat) => chat.botId === first.id));
-      assert.equal(value.chats.find((chat) => chat.chatId === 'oc_chat').chatType, 'p2p');
+      assert.equal(value.items.length, 26);
+      assert.equal(value.total, 26);
+      assert.equal(value.hasMore, false);
+      assert.ok(value.items.every((chat) => chat.botId === first.id));
+      assert.equal(value.items.find((chat) => chat.chatId === 'oc_chat').chatType, 'p2p');
     }
     if (tool.name === 'feishu_bot_people') {
       assert.equal(value.matched, 12);
@@ -363,11 +366,10 @@ test('all eight tools return schema-compliant values and complete native project
   }
 });
 
-test('both history tools open only the selected image from the specified chat', async (t) => {
+test('feishu_message_attachment opens only the selected image from the specified chat for both identities', async (t) => {
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
   const body = JSON.stringify({ content: [[{ tag: 'img', image_key: 'img_first' }, { tag: 'img', image_key: 'img_second' }]] });
   const item = { ...message(2), msg_type: 'post', body: { content: body } };
-  const target = { action: 'read_image', chatId: 'oc_chat', messageId: 'om_2', imageIndex: 2 };
   const botDownloads = [];
   const { manager, context } = await setup(t, {
     async listMessages() { return { items: [item], hasMore: false }; },
@@ -395,21 +397,26 @@ test('both history tools open only the selected image from the specified chat', 
     }
     return response({ items: [item], has_more: false });
   };
-  const bot = botTools.createMessagesTool({
-    list: manager.listMessages.bind(manager), downloadImage: manager.downloadMessageImage.bind(manager), harness,
+  const bot = botTools.createMessagesTool({ list: manager.listMessages.bind(manager) });
+  const avatar = avatarTools.createMessagesTool({ auth, fetchImpl });
+  const attachment = createMessageAttachmentTool({
+    downloadBotImage: manager.downloadMessageImage.bind(manager),
+    downloadAvatarImage: avatarTools.createAvatarImageDownloader({ auth, fetchImpl }),
+    harness,
   });
-  const avatar = avatarTools.createMessagesTool({ auth, fetchImpl, harness });
-  assert.equal((await bot.execute({}, context)).messages[0].imageCount, 2);
+  assert.equal((await bot.execute({}, context)).items[0].imageCount, 2);
   assert.equal((await avatar.execute({ chatId: 'oc_chat' }, context)).items[0].imageCount, 2);
   assert.deepEqual(botDownloads, []);
   assert.deepEqual(avatarDownloads, []);
-  for (const tool of [bot, avatar]) {
-    await assert.rejects(tool.execute({ ...target, chatId: 'oc_other' }, context), /不属于指定会话/);
-    await assert.rejects(tool.execute({ ...target, imageIndex: 3 }, context), /imageIndex 超出范围/);
-    const value = await tool.execute(target, context);
-    assertSchema(tool.output.schema, value);
-    assert.deepEqual(tool.output.render(target, value)[1], { type: 'image', attachment: value.image });
+  for (const identity of ['bot', 'avatar']) {
+    const target = { action: 'read_image', identity, chatId: 'oc_chat', messageId: 'om_2', imageIndex: 2 };
+    await assert.rejects(attachment.execute({ ...target, chatId: 'oc_other' }, context), /不属于指定会话/);
+    await assert.rejects(attachment.execute({ ...target, imageIndex: 3 }, context), /imageIndex 超出范围/);
+    const value = await attachment.execute(target, context);
+    assertSchema(attachment.output.schema, value);
+    assert.deepEqual(attachment.output.render(target, value)[1], { type: 'image', attachment: value.image });
   }
+  await assert.rejects(attachment.execute({ action: 'read_image', identity: 'avatar', chatId: 'oc_chat', messageId: 'om_2', bot: 'b1' }, context), /不支持 bot/);
   assert.deepEqual(botDownloads, [['om_2', 'img_second', 'image', 256]]);
   assert.deepEqual(avatarDownloads, [['/open-apis/im/v1/messages/om_2/resources/img_second', 'image']]);
   assert.deepEqual(stored, ['feishu-om_2-2', 'feishu-om_2-2']);
